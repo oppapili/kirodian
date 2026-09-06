@@ -497,6 +497,25 @@ RewindableExecutionSession {
         if (policy === 'passive' || policy === 'read-only') {
           return Promise.resolve({ outcome: { outcome: 'cancelled' } });
         }
+        // YOLO / unrestricted: auto-approve every tool request without prompting.
+        // Kiro has no persistent trust mode over ACP, so we approve client-side
+        // (equivalent to `kiro-cli acp --trust-all-tools`) rather than restarting
+        // the native process. This lets the YOLO toggle take effect immediately,
+        // mid-session, without a reconnect.
+        const autoApprove = policy === 'unrestricted'
+          || this.active?.request.configuration.permissionMode === 'yolo';
+        if (autoApprove) {
+          const allowOption = request.options.find(
+            option => option.optionId === 'allow_once',
+          ) ?? request.options.find(
+            option => option.kind === 'allow_once' || option.kind === 'allow_always',
+          ) ?? request.options[0];
+          if (allowOption) {
+            return Promise.resolve({
+              outcome: { optionId: allowOption.optionId, outcome: 'selected' },
+            });
+          }
+        }
         return this.interactionController.requestPermission(
           request,
           signal ?? this.active?.abortController.signal,
