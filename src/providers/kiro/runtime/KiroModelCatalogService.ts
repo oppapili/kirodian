@@ -106,41 +106,49 @@ export function parseKiroModelsOutput(output: string): {
   defaultModelId: string | null;
   models: KiroDiscoveredModel[];
 } {
-  const lines = stripAnsi(output).split(/\r?\n/);
-  let defaultModelId: string | null = null;
-  let inAvailableModels = false;
-  const rawModels: Array<{ displayName: string; rawId: string }> = [];
-
-  for (const line of lines) {
-    const defaultMatch = line.match(/^\s*Default model:\s*(\S+)/i);
-    if (defaultMatch) {
-      defaultModelId = normalizeModelToken(defaultMatch[1]);
-      continue;
-    }
-
-    if (/^\s*Available models:\s*$/i.test(line)) {
-      inAvailableModels = true;
-      continue;
-    }
-    if (!inAvailableModels || !line.trim()) {
-      continue;
-    }
-    if (!/^\s/u.test(line)) {
-      inAvailableModels = false;
-      continue;
-    }
-
-    const modelLine = line.trim().replace(/^[-*]\s+/, '');
-    const rawId = normalizeModelToken(modelLine.split(/\s+/)[0] ?? '');
-    if (rawId) {
-      rawModels.push({ displayName: rawId, rawId });
-    }
+  // `kiro-cli chat --list-models --format json` emits a single JSON object:
+  //   { "models": [{ "model_id", "model_name", "description",
+  //                  "context_window_tokens", ... }], "default_model": "auto" }
+  // Map the snake_case CLI keys onto the fields normalizeKiroDiscoveredModel reads.
+  let payload: unknown;
+  try {
+    payload = JSON.parse(stripAnsi(output).trim());
+  } catch {
+    return { defaultModelId: null, models: [] };
   }
+  if (!isRecord(payload)) {
+    return { defaultModelId: null, models: [] };
+  }
+
+  const defaultModelId = typeof payload.default_model === 'string'
+    ? normalizeModelToken(payload.default_model)
+    : null;
+
+  const rawEntries = Array.isArray(payload.models) ? payload.models : [];
+  const mapped = rawEntries.flatMap((entry) => {
+    if (!isRecord(entry)) {
+      return [];
+    }
+    const rawId = typeof entry.model_id === 'string' ? entry.model_id : undefined;
+    if (!rawId) {
+      return [];
+    }
+    return [{
+      contextWindow: entry.context_window_tokens,
+      description: typeof entry.description === 'string' ? entry.description : undefined,
+      displayName: typeof entry.model_name === 'string' ? entry.model_name : rawId,
+      rawId,
+    }];
+  });
 
   return {
     defaultModelId,
-    models: normalizeKiroDiscoveredModels(rawModels),
+    models: normalizeKiroDiscoveredModels(mapped),
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export class KiroModelCatalogService implements KiroModelCatalogServiceLike {
@@ -173,7 +181,7 @@ export class KiroModelCatalogService implements KiroModelCatalogServiceLike {
       const context = await this.resolveCommandContext(ownerContext);
       const fingerprint = await this.resolveFingerprint(context, signal);
       const commandResult = await this.runner.run({
-        args: ['models'],
+        args: ['chat', '--list-models', '--format', 'json'],
         command: context.command,
         cwd: context.cwd,
         env: context.env,
@@ -222,7 +230,7 @@ export class KiroModelCatalogService implements KiroModelCatalogServiceLike {
     const command = await this.plugin.getResolvedProviderCliPath(
       'kiro',
       ownerContext,
-    ) ?? 'kiro';
+    ) ?? 'kiro-cli';
     const configuredEnvironment = getRuntimeEnvironmentVariables(this.plugin.settings, 'kiro');
     return {
       command,
