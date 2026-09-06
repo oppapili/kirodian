@@ -1,38 +1,30 @@
-import type { AcpSessionNotification } from '../../acp';
+import type { AcpAvailableCommand } from '../../acp';
 
-export const KIRO_SESSION_UPDATE_NOTIFICATION_METHODS = [
-  'x.ai/session/update',
-  '_x.ai/session/update',
+// Kiro streams its session updates over standard ACP `session/update`, so unlike
+// Grok there is no `x.ai/*` wrapped-notification envelope to unwrap here. The only
+// Kiro-specific notification this provider consumes is the slash-command catalog,
+// pushed as `_kiro.dev/commands/available` after a session is created.
+
+export const KIRO_COMMANDS_AVAILABLE_NOTIFICATION_METHODS = [
+  '_kiro.dev/commands/available',
+  'kiro.dev/commands/available',
 ] as const;
 
-export const KIRO_WRAPPED_SESSION_NOTIFICATION_METHOD = '_x.ai/session_notification';
-
-const KIRO_WRAPPED_SESSION_NOTIFICATION_NAME = 'x.ai/session_notification';
-
-export function parseKiroSessionNotification(
-  method: string,
+/**
+ * Extract the `commands` array from a `_kiro.dev/commands/available` notification.
+ * Returns null when the payload is malformed so callers keep the previous catalog.
+ */
+export function parseKiroAvailableCommandsNotification(
   params: unknown,
-): AcpSessionNotification | null {
-  if (KIRO_SESSION_UPDATE_NOTIFICATION_METHODS.some(candidate => candidate === method)) {
-    return parseSessionNotification(params);
-  }
-  if (method !== KIRO_WRAPPED_SESSION_NOTIFICATION_METHOD || !isRecord(params)) {
+): AcpAvailableCommand[] | null {
+  if (!isRecord(params) || !Array.isArray(params.commands)) {
     return null;
   }
-  if (params.method !== KIRO_WRAPPED_SESSION_NOTIFICATION_NAME) {
-    return null;
-  }
-  return parseSessionNotification(params.params);
+  return params.commands.filter(isAcpAvailableCommand);
 }
 
-function parseSessionNotification(value: unknown): AcpSessionNotification | null {
-  if (!isRecord(value) || !isRecord(value.update)) {
-    return null;
-  }
-  if (typeof value.sessionId !== 'string' || !value.sessionId.trim()) {
-    return null;
-  }
-  return value as unknown as AcpSessionNotification;
+function isAcpAvailableCommand(value: unknown): value is AcpAvailableCommand {
+  return isRecord(value) && typeof value.name === 'string';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

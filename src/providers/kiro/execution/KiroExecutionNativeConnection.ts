@@ -1,3 +1,4 @@
+import type { SlashCommand } from '../../../core/types';
 import {
   AcpClientConnection,
   AcpJsonRpcTransport,
@@ -5,53 +6,31 @@ import {
   normalizeAcpAvailableCommands,
 } from '../../acp';
 import {
-  requestKiroInterjection,
-  requestKiroRewind,
-  requestKiroSessionFork,
-} from '../runtime/KiroExtensionRequests';
-import {
-  KIRO_SESSION_UPDATE_NOTIFICATION_METHODS,
-  KIRO_WRAPPED_SESSION_NOTIFICATION_METHOD,
-  parseKiroSessionNotification,
+  KIRO_COMMANDS_AVAILABLE_NOTIFICATION_METHODS,
+  parseKiroAvailableCommandsNotification,
 } from '../runtime/KiroSessionNotifications';
 import type {
   KiroExecutionNativeConnection,
   KiroExecutionNativeCreateOptions,
 } from './KiroExecutionBackend';
-import { parseKiroModelUpdateState } from './KiroSessionModelMetadata';
 
-const KIRO_EXTENSION_REQUEST_METHODS = [
-  'x.ai/ask_user_question',
-  '_x.ai/ask_user_question',
-  'x.ai/exit_plan_mode',
-  '_x.ai/exit_plan_mode',
-] as const;
-
-const KIRO_EXTENSION_NOTIFICATION_METHODS = [
-  'x.ai/yolo_mode_changed',
-  '_x.ai/yolo_mode_changed',
-] as const;
-
-const KIRO_MODEL_UPDATE_NOTIFICATION_METHODS = [
-  'x.ai/models/update',
-  '_x.ai/models/update',
-] as const;
-
+// Kiro exposes its slash-command catalog by pushing `_kiro.dev/commands/available`
+// notifications after a session is created, rather than answering a synchronous
+// list request the way Grok's `_x.ai/commands/list` does. We capture the most
+// recent catalog per cwd so `listCommands` can resolve against it without a
+// round-trip the agent does not support.
 export class KiroExecutionNativeConnectionImpl
 implements KiroExecutionNativeConnection {
   private readonly connection: AcpClientConnection;
+  private latestCommands: SlashCommand[] = [];
   private readonly listeners = new Set<Parameters<KiroExecutionNativeConnection['onNotification']>[0]>();
-  private readonly modeListeners = new Set<(mode: 'normal' | 'yolo') => void>();
-  private readonly modelListeners = new Set<
-    Parameters<NonNullable<KiroExecutionNativeConnection['onModelsChanged']>>[0]
-  >();
   private readonly process: AcpSubprocess;
   private readonly transport: AcpJsonRpcTransport;
   private readonly unsubscribers: Array<() => void> = [];
 
   constructor(options: KiroExecutionNativeCreateOptions) {
     this.process = new AcpSubprocess({
-      args: ['agent', '--no-leader', 'stdio'],
+      args: ['acp'],
       command: options.command,
       cwd: options.cwd,
       env: options.env,
@@ -71,33 +50,10 @@ implements KiroExecutionNativeConnection {
       methodOverrides: { cancel: 'session/cancel' },
       transport: this.transport,
     });
-    for (const method of [
-      ...KIRO_SESSION_UPDATE_NOTIFICATION_METHODS,
-      KIRO_WRAPPED_SESSION_NOTIFICATION_METHOD,
-    ]) {
+    for (const method of KIRO_COMMANDS_AVAILABLE_NOTIFICATION_METHODS) {
       this.unsubscribers.push(this.transport.onNotification(method, params => {
-        const notification = parseKiroSessionNotification(method, params);
-        if (notification) this.notify(notification, 'extension');
-      }));
-    }
-    for (const method of KIRO_EXTENSION_REQUEST_METHODS) {
-      this.unsubscribers.push(this.transport.onRequest(
-        method,
-        params => options.requestExtension(method, params),
-      ));
-    }
-    for (const method of KIRO_EXTENSION_NOTIFICATION_METHODS) {
-      this.unsubscribers.push(this.transport.onNotification(method, params => {
-        if (!isRecord(params) || typeof params.yolo_mode !== 'boolean') return;
-        const mode = params.yolo_mode ? 'yolo' : 'normal';
-        for (const listener of this.modeListeners) listener(mode);
-      }));
-    }
-    for (const method of KIRO_MODEL_UPDATE_NOTIFICATION_METHODS) {
-      this.unsubscribers.push(this.transport.onNotification(method, params => {
-        const models = parseKiroModelUpdateState(params);
-        if (!models) return;
-        for (const listener of this.modelListeners) listener(models);
+        const commands = parseKiroAvailableCommandsNotification(params);
+        if (commands) this.latestCommands = normalizeAcpAvailableCommands(commands);
       }));
     }
   }
@@ -110,10 +66,6 @@ implements KiroExecutionNativeConnection {
     return this.transport.flush();
   }
 
-  fork: NonNullable<KiroExecutionNativeConnection['fork']> = request => (
-    requestKiroSessionFork(this.transport, request)
-  );
-
   async initialize(): Promise<void> {
     await this.connection.initialize();
   }
@@ -122,30 +74,14 @@ implements KiroExecutionNativeConnection {
     return this.process.isAlive();
   }
 
-  interject(
-    request: Parameters<typeof requestKiroInterjection>[1],
-    signal?: AbortSignal,
-  ): Promise<void> {
-    return requestKiroInterjection(this.transport, request, signal);
-  }
-
   loadSession: KiroExecutionNativeConnection['loadSession'] = request => (
     this.connection.loadSession(request)
   );
 
-  async listCommands(
-    cwd: string,
-    signal?: AbortSignal,
-  ): Promise<Awaited<ReturnType<KiroExecutionNativeConnection['listCommands']>>> {
-    const response = await this.transport.request<{ commands?: unknown }>(
-      '_x.ai/commands/list',
-      { cwd },
-      { signal, timeoutMs: 5_000 },
-    );
-    if (!Array.isArray(response.commands)) {
-      throw new Error('Kiro returned malformed command metadata.');
-    }
-    return normalizeAcpAvailableCommands(response.commands);
+  // Kiro pushes its command catalog via `_kiro.dev/commands/available`; return the
+  // latest catalog captured for this connection instead of issuing a list request.
+  async listCommands(): Promise<SlashCommand[]> {
+    return this.latestCommands;
   }
 
   newSession: KiroExecutionNativeConnection['newSession'] = request => (
@@ -159,24 +95,8 @@ implements KiroExecutionNativeConnection {
     return () => this.listeners.delete(listener);
   }
 
-  onModeChanged(listener: (mode: 'normal' | 'yolo') => void): () => void {
-    this.modeListeners.add(listener);
-    return () => this.modeListeners.delete(listener);
-  }
-
-  onModelsChanged(
-    listener: Parameters<NonNullable<KiroExecutionNativeConnection['onModelsChanged']>>[0],
-  ): () => void {
-    this.modelListeners.add(listener);
-    return () => this.modelListeners.delete(listener);
-  }
-
   prompt: KiroExecutionNativeConnection['prompt'] = request => (
     this.connection.prompt(request)
-  );
-
-  rewind: NonNullable<KiroExecutionNativeConnection['rewind']> = request => (
-    requestKiroRewind(this.transport, request)
   );
 
   setMode: KiroExecutionNativeConnection['setMode'] = request => (
@@ -190,8 +110,6 @@ implements KiroExecutionNativeConnection {
   async shutdown(): Promise<void> {
     while (this.unsubscribers.length > 0) this.unsubscribers.pop()?.();
     this.listeners.clear();
-    this.modeListeners.clear();
-    this.modelListeners.clear();
     this.connection.dispose();
     this.transport.dispose();
     await this.process.shutdown();
@@ -203,8 +121,4 @@ implements KiroExecutionNativeConnection {
   ): void {
     for (const listener of this.listeners) listener(notification, source);
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
