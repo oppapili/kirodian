@@ -351,7 +351,8 @@ RewindableExecutionSession {
       const native = await this.ensureNative();
       const sessionId = await this.ensureSession(native, undefined);
       const normalized = mode === 'plan' ? 'plan' : 'default';
-      await native.setMode({ modeId: normalized, sessionId });
+      const kiroModeId = mode === 'plan' ? 'kiro_planner' : 'kiro_default';
+      await native.setMode({ modeId: kiroModeId, sessionId });
       this.updateSnapshot(this.active ? 'executing' : 'idle');
       this.emitSessionMode(normalized);
       return true;
@@ -1373,18 +1374,22 @@ function buildKiroSystemPromptOverride(
     .join('\n\n');
 }
 
+// Kiro's ACP session exposes concrete mode ids (kiro_default, kiro_planner,
+// kiro_guide, plus custom agents). Map Claudian's abstract default/plan modes onto
+// the real Kiro mode ids; sending an unknown id like 'default' makes Kiro reply
+// with a JSON-RPC Internal error, so return null when there is no mapping.
 function resolveKiroNativeMode(
   request: ProviderExecutionRequest,
-): 'default' | 'plan' | null {
+): 'kiro_default' | 'kiro_planner' | null {
   const explicitMode = request.configuration.mode;
   if (explicitMode !== undefined) {
-    if (explicitMode === 'plan') return 'plan';
-    if (explicitMode === 'default' || explicitMode === 'normal') return 'default';
+    if (explicitMode === 'plan') return 'kiro_planner';
+    if (explicitMode === 'default' || explicitMode === 'normal') return 'kiro_default';
     return null;
   }
   const permissionMode = request.configuration.permissionMode;
-  if (permissionMode === 'plan') return 'plan';
-  if (permissionMode === 'normal' || permissionMode === 'yolo') return 'default';
+  if (permissionMode === 'plan') return 'kiro_planner';
+  if (permissionMode === 'normal' || permissionMode === 'yolo') return 'kiro_default';
   return null;
 }
 
