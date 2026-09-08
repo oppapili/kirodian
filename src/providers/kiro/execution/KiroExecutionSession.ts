@@ -1378,7 +1378,7 @@ function buildKiroSystemPromptOverride(
 // kiro_guide, plus custom agents). Map Claudian's abstract default/plan modes onto
 // the real Kiro mode ids; sending an unknown id like 'default' makes Kiro reply
 // with a JSON-RPC Internal error, so return null when there is no mapping.
-function resolveKiroNativeMode(
+export function resolveKiroNativeMode(
   request: ProviderExecutionRequest,
 ): 'kiro_default' | 'kiro_planner' | null {
   const explicitMode = request.configuration.mode;
