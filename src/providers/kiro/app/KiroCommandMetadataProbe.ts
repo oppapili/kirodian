@@ -49,7 +49,7 @@ export class KiroCommandMetadataProbe {
 
     return await this.probes.run({
       create: async (ownedSignal) => {
-        const command = await this.plugin.getResolvedProviderCliPath('kiro') ?? 'kiro';
+        const command = await this.plugin.getResolvedProviderCliPath('kiro') ?? 'kiro-cli';
         ownedSignal.throwIfAborted();
         const cwd = getVaultPath(this.plugin.app) ?? process.cwd();
         return {

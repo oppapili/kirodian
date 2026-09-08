@@ -483,7 +483,7 @@ RewindableExecutionSession {
     const host = this.plugin as ProviderHost & {
       getResolvedProviderCliPath?: ProviderHost['getResolvedProviderCliPath'];
     };
-    const command = await host.getResolvedProviderCliPath?.('kiro') ?? 'kiro';
+    const command = await host.getResolvedProviderCliPath?.('kiro') ?? 'kiro-cli';
     if (quarantineGeneration !== this.quarantineGeneration || this.disposed) {
       throw new Error('Kiro native startup was cancelled.');
     }
