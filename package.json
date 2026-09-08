@@ -1,7 +1,7 @@
 {
-  "name": "claudian",
-  "version": "2.2.6",
-  "description": "Claudian - Claude Code embedded in Obsidian sidebar",
+  "name": "kirodian",
+  "version": "0.1.0",
+  "description": "Kirodian - Kiro CLI and other coding agents embedded in Obsidian (fork of Claudian)",
   "main": "main.js",
   "engines": {
     "node": ">=24 <25"
