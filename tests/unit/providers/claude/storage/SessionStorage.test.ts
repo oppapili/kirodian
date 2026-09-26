@@ -2,15 +2,15 @@ import '@/providers';
 
 import { ConversationRepository } from '@/app/conversations/ConversationRepository';
 import {
-  LEGACY_SESSIONS_PATH,
-  SESSIONS_PATH,
-  SessionStorage,
+LEGACY_SESSIONS_PATH,
+SESSIONS_PATH,
+SessionStorage,
 } from '@/core/bootstrap/SessionStorage';
 import { getDeviceSessionsPath } from '@/core/bootstrap/storagePaths';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ProviderId } from '@/core/providers/types';
 import type { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
-import type { Conversation, SessionMetadata, UsageInfo } from '@/core/types';
+import type { Conversation,SessionMetadata,UsageInfo } from '@/core/types';
 
 const DEVICE_KEY = `device-${'a'.repeat(64)}`;
 
@@ -44,12 +44,6 @@ describe('SessionStorage', () => {
     storage = new SessionStorage(mockAdapter, DEVICE_KEY);
   });
 
-  describe('SESSIONS_PATH', () => {
-    it('should be .claudian/sessions', () => {
-      expect(SESSIONS_PATH).toBe('.claudian/sessions');
-    });
-  });
-
   describe('getMetadataPath', () => {
     it('returns correct file path for session id', () => {
       const path = storage.getMetadataPath('session-abc');
@@ -65,6 +59,32 @@ describe('SessionStorage', () => {
   });
 
   describe('loadMetadata', () => {
+    it('migrates saved directory selections while preserving conversation identity and provider state', async () => {
+      mockAdapter.exists.mockImplementation(async (path: string) => (
+        path === `${SESSIONS_PATH}/session-directories.meta.json`
+      ));
+      mockAdapter.read.mockResolvedValue(JSON.stringify({
+        id: 'session-directories',
+        title: 'Saved conversation',
+        createdAt: 100,
+        lastActivityAt: 200,
+        externalContextPaths: ['/old/project'],
+        providerState: { providerSessionId: 'native-session' },
+      }));
+
+      expect(await storage.load('session-directories')).toEqual({
+        metadata: {
+          id: 'session-directories',
+          title: 'Saved conversation',
+          createdAt: 100,
+          lastActivityAt: 200,
+          providerState: { providerSessionId: 'native-session' },
+        },
+        needsMigration: true,
+        source: 'unscoped',
+      });
+    });
+
     it('normalizes legacy timestamps to a single activity timestamp', async () => {
       mockAdapter.exists.mockImplementation(async (path: string) => (
         path === `${SESSIONS_PATH}/session-legacy-time.meta.json`
@@ -210,24 +230,6 @@ describe('SessionStorage', () => {
       expect(mockAdapter.delete).not.toHaveBeenCalled();
     });
 
-    it('keeps valid legacy metadata visible when migration fails', async () => {
-      const metadata = {
-        id: 'session-legacy',
-        title: 'Legacy Session',
-        createdAt: 1700000000,
-        lastActivityAt: 1700001000,
-      };
-
-      mockAdapter.exists.mockImplementation(async (path: string) => (
-        path === `${LEGACY_SESSIONS_PATH}/session-legacy.meta.json`
-      ));
-      mockAdapter.read.mockResolvedValue(JSON.stringify(metadata));
-      mockAdapter.write.mockRejectedValue(new Error('EEXIST: .claudian/sessions'));
-
-      await expect(storage.loadMetadata('session-legacy')).resolves.toEqual(metadata);
-      expect(mockAdapter.delete).not.toHaveBeenCalled();
-    });
-
     it('skips mismatched legacy metadata without migrating or modifying it', async () => {
       mockAdapter.exists.mockImplementation(async (path: string) => (
         path === `${LEGACY_SESSIONS_PATH}/session-requested.meta.json`
@@ -302,63 +304,6 @@ describe('SessionStorage', () => {
       const result = await storage.loadMetadata('session-error');
 
       expect(result).toBeNull();
-    });
-  });
-
-  describe('listAllConversations - provider routing', () => {
-    it('preserves providerId from metadata', async () => {
-      mockAdapter.listFiles.mockResolvedValue([
-        '.claudian/sessions/claude-session.meta.json',
-        '.claudian/sessions/codex-session.meta.json',
-      ]);
-
-      mockAdapter.read.mockImplementation((path: string) => {
-        if (path.includes('claude-session')) {
-          return Promise.resolve(JSON.stringify({
-            id: 'claude-session',
-            providerId: 'claude',
-            title: 'Claude Session',
-            createdAt: 1700000000,
-            lastActivityAt: 1700001000,
-          }));
-        }
-        if (path.includes('codex-session')) {
-          return Promise.resolve(JSON.stringify({
-            id: 'codex-session',
-            providerId: 'codex',
-            title: 'Codex Session',
-            createdAt: 1700000000,
-            lastActivityAt: 1700002000,
-          }));
-        }
-        return Promise.resolve('{}');
-      });
-
-      const metas = await storage.listAllConversations();
-
-      expect(metas).toHaveLength(2);
-      const claudeMeta = metas.find(m => m.id === 'claude-session');
-      const codexMeta = metas.find(m => m.id === 'codex-session');
-      expect(claudeMeta!.providerId).toBe('claude');
-      expect(codexMeta!.providerId).toBe('codex');
-    });
-
-    it('defaults providerId to claude for legacy conversations', async () => {
-      mockAdapter.listFiles.mockResolvedValue([
-        '.claudian/sessions/old.meta.json',
-      ]);
-
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        id: 'old',
-        title: 'Old Session',
-        createdAt: 1700000000,
-        lastActivityAt: 1700001000,
-      }));
-
-      const metas = await storage.listAllConversations();
-
-      expect(metas).toHaveLength(1);
-      expect(metas[0].providerId).toBe('claude');
     });
   });
 
@@ -590,86 +535,6 @@ describe('SessionStorage', () => {
     });
   });
 
-  describe('listAllConversations', () => {
-    it('returns metadata from listMetadata as ConversationMeta[]', async () => {
-      mockAdapter.listFiles.mockResolvedValue([
-        '.claudian/sessions/session-1.meta.json',
-        '.claudian/sessions/session-2.meta.json',
-      ]);
-
-      mockAdapter.read.mockImplementation((path: string) => {
-        if (path.includes('session-1')) {
-          return Promise.resolve(JSON.stringify({
-            id: 'session-1',
-            title: 'Session One',
-            createdAt: 1700000000,
-            updatedAt: 1700001000,
-            lastResponseAt: 1700000900,
-            linkedContentPath: 'Notes/One.md',
-            selectedModel: 'claude-sonnet-4-5',
-            isPinned: true,
-            isArchived: true,
-          }));
-        }
-        if (path.includes('session-2')) {
-          return Promise.resolve(JSON.stringify({
-            id: 'session-2',
-            title: 'Session Two',
-            createdAt: 1700000000,
-            updatedAt: 1700002000,
-            lastResponseAt: 1700001500,
-          }));
-        }
-        return Promise.resolve('{}');
-      });
-
-      const metas = await storage.listAllConversations();
-
-      expect(metas).toHaveLength(2);
-
-      // Should be sorted by lastActivityAt descending
-      expect(metas[0].id).toBe('session-2');
-      expect(metas[1].id).toBe('session-1');
-
-      // Each entry should have SDK session defaults
-      expect(metas[0].preview).toBe('SDK session');
-      expect(metas[0].messageCount).toBe(0);
-      expect(metas[1].preview).toBe('SDK session');
-      expect(metas[1].messageCount).toBe(0);
-      expect(metas[1].linkedContentPath).toBe('Notes/One.md');
-      expect(metas[1].selectedModel).toBe('claude-sonnet-4-5');
-      expect(metas[1].isPinned).toBe(true);
-      expect(metas[1].isArchived).toBe(true);
-    });
-
-    it('returns empty array when no metadata exists', async () => {
-      mockAdapter.listFiles.mockResolvedValue([]);
-
-      const metas = await storage.listAllConversations();
-
-      expect(metas).toEqual([]);
-    });
-
-    it('preserves titleGenerationStatus', async () => {
-      mockAdapter.listFiles.mockResolvedValue([
-        '.claudian/sessions/session-status.meta.json',
-      ]);
-
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        id: 'session-status',
-        title: 'Status Test',
-        createdAt: 1700000000,
-        lastActivityAt: 1700001000,
-        titleGenerationStatus: 'failed',
-      }));
-
-      const metas = await storage.listAllConversations();
-
-      expect(metas).toHaveLength(1);
-      expect(metas[0].titleGenerationStatus).toBe('failed');
-    });
-  });
-
   describe('toSessionMetadata - extractSubagentData', () => {
     it('extracts subagent data from Task toolCalls', () => {
       const conversation: Conversation = {
@@ -846,7 +711,6 @@ describe('SessionStorage', () => {
           { id: 'msg-1', role: 'user', content: 'Hello', timestamp: 1700000100 },
         ],
         linkedContentPath: 'notes/test.md',
-        externalContextPaths: ['/external/path'],
         usage,
         titleGenerationStatus: 'success',
       };
@@ -860,7 +724,6 @@ describe('SessionStorage', () => {
       expect(metadata.sessionId).toBe('sdk-session');
       expect((metadata.providerState as any)?.providerSessionId).toBe('current-sdk-session');
       expect(metadata.linkedContentPath).toBe('notes/test.md');
-      expect(metadata.externalContextPaths).toEqual(['/external/path']);
       expect(metadata.usage).toEqual(usage);
       expect(metadata.titleGenerationStatus).toBe('success');
 

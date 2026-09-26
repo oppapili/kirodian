@@ -1,10 +1,19 @@
+import type * as childProcessType from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
+import type * as environmentModule from '@/utils/env';
+
 import type { Conversation } from '../../../../src/core/types';
 import { OpencodeConversationHistoryService } from '../../../../src/providers/opencode/history/OpencodeConversationHistoryService';
+
+// Exercise real SQLite subprocesses without discovering the runner's other Node installations.
+jest.mock('@/utils/env', () => ({
+  ...jest.requireActual<typeof environmentModule>('@/utils/env'),
+  findNodeExecutables: () => [process.execPath],
+}));
 
 describe('OpencodeConversationHistoryService', () => {
   const originalPlatform = process.platform;
@@ -18,6 +27,41 @@ describe('OpencodeConversationHistoryService', () => {
     Object.defineProperty(process, 'platform', { value: originalPlatform });
     rmSync(tmpRoot, { force: true, recursive: true });
   });
+
+  // This case loads an isolated provider graph and runs a native child with a 10-second deadline.
+  it('passes the configured environment to the external history reader', async () => {
+    const dbPath = path.join(tmpRoot, 'opencode.db');
+    seedDatabase(dbPath, 'session-env', 'Configured history');
+    const conversation = createConversation('session-env', dbPath);
+    const childProcess = jest.requireActual<typeof childProcessType>('node:child_process');
+    const realSpawn = childProcess.spawn;
+    const environmentMarkers: Array<string | undefined> = [];
+    jest.spyOn(childProcess, 'spawn').mockImplementation((command, args, options) => {
+      environmentMarkers.push(options?.env?.CLAUDIAN_HISTORY_TEST);
+      return realSpawn(command, args, options!);
+    });
+    jest.doMock('node:sqlite', () => ({}));
+    try {
+      await jest.isolateModulesAsync(async () => {
+        const { OpencodeConversationHistoryService: HistoryService } = await import(
+          '../../../../src/providers/opencode/history/OpencodeConversationHistoryService'
+        );
+        await new HistoryService().hydrateConversationHistory(conversation, null, {
+          environment: {
+            ...process.env,
+            OPENCODE_DB: dbPath,
+            CLAUDIAN_HISTORY_TEST: 'configured',
+            PATH: path.dirname(process.execPath),
+          },
+        });
+      });
+      expect(conversation.messages.map(message => message.content)).toEqual(['Configured history']);
+      expect(environmentMarkers).toContain('configured');
+    } finally {
+      jest.dontMock('node:sqlite');
+      jest.restoreAllMocks();
+    }
+  }, 20_000);
 
   it('retries after a session-level hydration diagnostic', async () => {
     const dbPath = path.join(tmpRoot, 'opencode.db');

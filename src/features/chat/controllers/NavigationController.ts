@@ -1,3 +1,5 @@
+import type { ComposerInputElement } from '@/shared/composer-dropdown/types';
+
 import type { KeyboardNavigationSettings } from '../../../core/types';
 import {
   cancelScheduledAnimationFrame,
@@ -10,7 +12,7 @@ const SCROLL_SPEED = 8;
 
 export interface NavigationControllerDeps {
   getMessagesEl: () => HTMLElement;
-  getInputEl: () => HTMLTextAreaElement;
+  getInputEl: () => ComposerInputElement;
   getSettings: () => KeyboardNavigationSettings;
   isStreaming: () => boolean;
   /** Returns true if a UI component (dropdown, modal, mode) should handle Escape instead. */
@@ -195,18 +197,4 @@ export class NavigationController {
       messagesEl.ownerDocument.defaultView ?? null,
     );
   };
-
-  // ============================================
-  // Public API
-  // ============================================
-
-  /** Focuses the messages panel. */
-  focusMessages(): void {
-    this.deps.getMessagesEl().focus();
-  }
-
-  /** Focuses the input. */
-  focusInput(): void {
-    this.deps.getInputEl().focus();
-  }
 }

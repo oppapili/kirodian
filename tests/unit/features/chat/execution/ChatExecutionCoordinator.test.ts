@@ -1,9 +1,4 @@
-import { ConversationRepository } from '@/app/conversations/ConversationRepository';
-import type { ConversationInputLedgerReadResult } from '@/core/bootstrap/ConversationInputLedgerStorage';
-import type { ConversationPersistence } from '@/core/bootstrap/ConversationPersistenceStore';
-import type { SessionMetadataReader } from '@/core/bootstrap/SessionStorage';
 import {
-  type ModeConfigurableExecutionSession,
   type ProviderExecutionBackend,
   type ProviderExecutionEvent,
   ProviderExecutionLifecycleRegistry,
@@ -18,7 +13,7 @@ import {
   type RewindableExecutionSession,
   type SteerableExecutionSession,
 } from '@/core/execution';
-import type { ChatMessage, Conversation, ProviderId } from '@/core/types';
+import type { ChatMessage, ProviderId, SlashCommand } from '@/core/types';
 import {
   ChatExecutionCoordinator,
   type ChatExecutionCoordinatorDeps,
@@ -91,18 +86,18 @@ class FakeRun implements ProviderExecutionRun {
 
 class FakeSession implements ProviderExecutionSession,
   SteerableExecutionSession,
-  ModeConfigurableExecutionSession,
   RewindableExecutionSession {
   readonly requests: ProviderExecutionRequest[] = [];
   readonly runs: FakeRun[] = [];
   readonly steerRequests: ProviderExecutionRequest[] = [];
   readonly listeners = new Set<(event: ProviderSessionEvent) => void>();
+  commands: SlashCommand[] | undefined;
+  getCommandSnapshot() { return this.commands; }
   cancelCalls = 0;
   disposeCalls = 0;
   status: ProviderSessionStatus = 'idle';
   snapshot: ProviderSessionSnapshot;
   steerResult = true;
-  readonly modes: string[] = [];
   rewindResult = {
     canRewind: true,
     sessionStrategy: 'preserve-provider-session' as const,
@@ -132,11 +127,6 @@ class FakeSession implements ProviderExecutionSession,
   async steer(request: ProviderExecutionRequest): Promise<boolean> {
     this.steerRequests.push(request);
     return this.steerResult;
-  }
-
-  async setMode(mode: string): Promise<boolean> {
-    this.modes.push(mode);
-    return true;
   }
 
   async previewRewind(): Promise<{ canRewind: boolean }> {
@@ -207,16 +197,13 @@ function requestedScope(
 
 function createSubmission(overrides: Partial<ChatTurnSubmission> = {}): ChatTurnSubmission {
   return {
-    inputRecordId: 'input-1',
-    localMessageId: 'user-1',
-    userTurnOrdinal: 1,
+    submissionId: 'input-1',
     timestamp: 123,
     rawDisplayText: 'raw input',
     canonicalText: 'canonical input',
     images: [],
     context: {
       linkedContent: { path: 'note.md', content: 'note' },
-      externalContextPaths: ['/external'],
     },
     conversationHistory: [],
     configuration: {
@@ -249,12 +236,8 @@ function createHarness(options: {
     registerExecutionBinding: jest.fn(),
     persistExecutionSnapshot: jest.fn(async () => true),
     releaseExecutionBinding: jest.fn(),
-    stageConversationInput: jest.fn(async () => undefined),
+    recordConversationActivity: jest.fn(async () => undefined),
     assertConversationExecutionAuthority: jest.fn(async () => undefined),
-    acceptConversationInput: jest.fn(async () => undefined),
-    discardStagedConversationInput: jest.fn(async () => undefined),
-    copyConversationInputsForFork: jest.fn(async () => undefined),
-    truncateConversationInputsFrom: jest.fn(async () => undefined),
   } as unknown as jest.Mocked<ChatExecutionPersistence>;
   const interactionPort = {
     requestApproval: jest.fn(async ({ interactionId }) => ({
@@ -264,10 +247,6 @@ function createHarness(options: {
     askUserQuestion: jest.fn(async ({ interactionId }) => ({
       interactionId,
       answers: null,
-    })),
-    requestPlanDecision: jest.fn(async ({ interactionId }) => ({
-      interactionId,
-      decision: null,
     })),
     dismissInteraction: jest.fn(),
   } as unknown as jest.Mocked<ProviderInteractionPort>;
@@ -371,6 +350,20 @@ async function reserveProtectedWarmSlots(
 }
 
 describe('ChatExecutionCoordinator', () => {
+  it('exposes commands only for the current conversation and provider binding', async () => {
+    const harness = createHarness();
+    await harness.coordinator.bindConversation({ conversationId: 'one', providerId: 'claude' });
+    await harness.coordinator.prepare();
+    const session = harness.backends.get('claude')!.sessions[0];
+    session.commands = [{ id: 'review', name: 'review', description: '', content: '' }];
+    expect(harness.coordinator.getCommandSnapshot('one', 'claude')).toEqual(session.commands);
+    expect(harness.coordinator.getCommandSnapshot('two', 'claude')).toBeUndefined();
+    expect(harness.coordinator.getCommandSnapshot('one', 'codex')).toBeUndefined();
+    await harness.coordinator.bindConversation({ conversationId: 'two', providerId: 'claude' });
+    expect(harness.coordinator.getCommandSnapshot('two', 'claude')).toBeUndefined();
+    await harness.coordinator.dispose();
+  });
+
   it('binds cold and acquires a persistent execution session only on prepare or execute', async () => {
     const harness = createHarness();
 
@@ -631,61 +624,6 @@ describe('ChatExecutionCoordinator', () => {
     await second.registry.dispose();
   });
 
-  it('protects a provider mode operation until its RPC settles', async () => {
-    const pool = new WarmExecutionPool(() => 5);
-    await reserveProtectedWarmSlots(pool);
-    const first = createHarness({
-      warmExecution: {
-        ownerId: 'first-tab',
-        pool,
-        canCool: () => true,
-      },
-    });
-    const second = createHarness({
-      warmExecution: {
-        ownerId: 'second-tab',
-        pool,
-        canCool: () => true,
-      },
-    });
-    await first.coordinator.bindConversation({
-      conversationId: 'conversation-1',
-      providerId: 'claude',
-    });
-    await first.coordinator.prepare();
-    const firstSession = first.backends.get('claude')!.sessions[0];
-    const modeResult = deferred<boolean>();
-    const setMode = jest.spyOn(firstSession, 'setMode')
-      .mockImplementation(async () => modeResult.promise);
-
-    const pendingModeChange = first.coordinator.setMode('plan');
-    for (let attempt = 0; attempt < 20 && setMode.mock.calls.length === 0; attempt += 1) {
-      await Promise.resolve();
-    }
-    expect(setMode).toHaveBeenCalledTimes(1);
-    await second.coordinator.bindConversation({
-      conversationId: 'conversation-2',
-      providerId: 'claude',
-    });
-    let capacityError: unknown;
-    try {
-      await second.coordinator.prepare();
-    } catch (error) {
-      capacityError = error;
-    }
-
-    modeResult.resolve(true);
-    const applied = await pendingModeChange;
-    expect(capacityError).toEqual(new WarmExecutionCapacityError(5));
-    expect(applied).toBe(true);
-    expect(firstSession.disposeCalls).toBe(0);
-
-    await first.coordinator.dispose();
-    await second.coordinator.dispose();
-    await first.registry.dispose();
-    await second.registry.dispose();
-  });
-
   it('protects pending background event persistence before cooling', async () => {
     const pool = new WarmExecutionPool(() => 5);
     await reserveProtectedWarmSlots(pool);
@@ -790,7 +728,7 @@ describe('ChatExecutionCoordinator', () => {
     await harness.registry.dispose();
   });
 
-  it('stages canonical input before execute, builds a neutral request, and accepts native IDs', async () => {
+  it('builds a neutral request and attaches native message IDs', async () => {
     const harness = createHarness();
     const image = {
       id: 'image-1',
@@ -815,7 +753,7 @@ describe('ChatExecutionCoordinator', () => {
     const submission = createSubmission({
       configuration: {
         systemInstructions: {
-          dynamicSections: ['## Collab Mode\nRuntime guidance.'],
+          dynamicSections: ['## Additional context\nRuntime guidance.'],
           kind: 'provider-default',
         },
       },
@@ -823,20 +761,6 @@ describe('ChatExecutionCoordinator', () => {
       messages: { user: userMessage, assistant: assistantMessage },
     });
     const { session, run, resultPromise } = await beginExecution(harness, submission);
-
-    expect(harness.repository.stageConversationInput).toHaveBeenCalledTimes(1);
-    expect(harness.repository.stageConversationInput.mock.calls[0][0]).toBe('conversation-1');
-    expect(harness.repository.stageConversationInput.mock.calls[0][1]).toMatchObject({
-      id: 'input-1',
-      state: 'staged',
-      rawDisplayText: 'raw input',
-      canonicalText: 'canonical input',
-      localMessageId: 'user-1',
-      images: [image],
-      context: { linkedContent: { path: 'note.md', content: 'note' } },
-    });
-    expect(harness.repository.stageConversationInput.mock.calls[0][1])
-      .not.toHaveProperty('systemInstructions');
     expect(session.requests[0]).toMatchObject({
       input: [
         { type: 'text', text: 'canonical input' },
@@ -860,81 +784,44 @@ describe('ChatExecutionCoordinator', () => {
       scope: requestedScope(session, run, 2),
       reason: 'completed',
       nativeAssistantId: 'native-assistant',
-      planCompleted: true,
     });
     run.events.end();
 
     await expect(resultPromise).resolves.toMatchObject({
       status: 'completed',
       accepted: true,
-      planCompleted: true,
       nativeUserMessageId: 'native-user',
       nativeAssistantMessageId: 'native-assistant',
     });
-    expect(harness.repository.acceptConversationInput).toHaveBeenNthCalledWith(
-      1,
-      'conversation-1',
-      'input-1',
-      { providerUserMessageId: 'native-user' },
-    );
-    expect(harness.repository.acceptConversationInput).toHaveBeenLastCalledWith(
-      'conversation-1',
-      'input-1',
-      {
-        providerUserMessageId: 'native-user',
-        providerAssistantMessageId: 'native-assistant',
-      },
-    );
     expect(userMessage.userMessageId).toBe('native-user');
     expect(assistantMessage.assistantMessageId).toBe('native-assistant');
   });
 
-  it('does not send staged input if the conversation switches while the ledger write is pending', async () => {
+  it('uses the terminal assistant identity for fork projections', async () => {
     const harness = createHarness();
-    const stageBarrier = deferred<void>();
-    harness.repository.stageConversationInput.mockImplementationOnce(
-      async () => stageBarrier.promise,
+    const user: ChatMessage = { id: 'user', role: 'user', content: 'Hello', timestamp: 1 };
+    const assistant: ChatMessage = { id: 'assistant', role: 'assistant', content: '', timestamp: 2 };
+    const { session, run, resultPromise } = await beginExecution(
+      harness, createSubmission({ messages: { user, assistant } }),
     );
-    await harness.coordinator.bindConversation({
-      conversationId: 'conversation-1',
-      providerId: 'claude',
+    run.events.push({ type: 'turn_started', scope: requestedScope(session, run, 1), accepted: true });
+    run.events.push({
+      type: 'assistant_message_started', scope: requestedScope(session, run, 2),
+      nativeAssistantId: 'msg_item',
     });
-
-    const execution = harness.coordinator.execute(createSubmission());
-    await Promise.resolve();
-    await harness.coordinator.bindConversation({
-      conversationId: 'conversation-2',
-      providerId: 'codex',
+    run.events.push({
+      type: 'turn_completed', scope: requestedScope(session, run, 3), reason: 'completed',
+      nativeAssistantId: 'turn-checkpoint', nativeCheckpointId: 'turn-checkpoint',
     });
-    stageBarrier.resolve();
+    run.events.end();
 
-    await expect(execution).rejects.toThrow('Chat execution binding changed');
-    expect(harness.backends.get('claude')!.sessions).toHaveLength(0);
-    expect(harness.backends.get('codex')!.sessions).toHaveLength(0);
-    expect(harness.repository.discardStagedConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'input-1',
-    );
+    await expect(resultPromise).resolves.toMatchObject({
+      status: 'completed', nativeAssistantMessageId: 'turn-checkpoint',
+    });
+    expect(assistant.assistantMessageId).toBe('turn-checkpoint');
   });
 
-  it('reports a typed pre-handoff error when durable staging fails', async () => {
-    const harness = createHarness();
-    const cause = new Error('ledger unavailable');
-    harness.repository.stageConversationInput.mockRejectedValueOnce(cause);
-    await harness.coordinator.bindConversation({
-      conversationId: 'conversation-1',
-      providerId: 'claude',
-    });
-
-    await expect(harness.coordinator.execute(createSubmission())).rejects.toMatchObject({
-      name: 'ChatExecutionPreHandoffError',
-      cause,
-    });
-    expect(harness.backends.get('claude')!.sessions).toHaveLength(0);
-    expect(harness.repository.discardStagedConversationInput).not.toHaveBeenCalled();
-  });
-
-  it('revalidates durable ownership immediately before provider handoff', async () => {
+  it('revalidates conversation authority immediately before provider handoff', async () => {
     const harness = createHarness();
     const cause = new Error('conversation assigned to another device');
     const authorityCheck = (
@@ -961,13 +848,9 @@ describe('ChatExecutionCoordinator', () => {
     });
     expect(authorityCheck).toHaveBeenCalledWith('conversation-1');
     expect(execute).not.toHaveBeenCalled();
-    expect(harness.repository.discardStagedConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'input-1',
-    );
   });
 
-  it('discards staging on definite pre-send failure but retains it after execute handoff', async () => {
+  it('distinguishes definite pre-send failures from errors after provider handoff', async () => {
     const harness = createHarness();
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-1',
@@ -982,14 +865,10 @@ describe('ChatExecutionCoordinator', () => {
     await expect(harness.coordinator.execute(createSubmission())).rejects.toBeInstanceOf(
       ChatExecutionPreHandoffError,
     );
-    expect(harness.repository.discardStagedConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'input-1',
-    );
 
     session.execute = FakeSession.prototype.execute.bind(session);
     const resultPromise = harness.coordinator.execute(
-      createSubmission({ inputRecordId: 'input-2' }),
+      createSubmission({ submissionId: 'input-2' }),
     );
     let run: FakeRun | undefined;
     for (let attempt = 0; attempt < 20 && !run; attempt += 1) {
@@ -1010,14 +889,13 @@ describe('ChatExecutionCoordinator', () => {
       status: 'error',
       accepted: false,
     });
-    expect(harness.repository.discardStagedConversationInput).toHaveBeenCalledTimes(1);
   });
 
-  it('discards staging after a definite asynchronous pre-handoff rejection', async () => {
+  it('classifies a definite asynchronous rejection as pre-handoff', async () => {
     const harness = createHarness();
     const { session, run, resultPromise } = await beginExecution(
       harness,
-      createSubmission({ inputRecordId: 'rejected-input' }),
+      createSubmission({ submissionId: 'rejected-input' }),
     );
 
     run.events.push({
@@ -1039,14 +917,9 @@ describe('ChatExecutionCoordinator', () => {
       name: 'ChatExecutionPreHandoffError',
       cause: rejection,
     });
-    expect(harness.repository.discardStagedConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'rejected-input',
-    );
-    expect(harness.repository.acceptConversationInput).not.toHaveBeenCalled();
   });
 
-  it('discards a definite rejection before rethrowing its terminal event sink error', async () => {
+  it('classifies a definite rejection before rethrowing its terminal event sink error', async () => {
     const sinkError = new Error('terminal sink failed');
     const harness = createHarness({
       onRequestedEvent: async (event) => {
@@ -1055,7 +928,7 @@ describe('ChatExecutionCoordinator', () => {
     });
     const { session, run, resultPromise } = await beginExecution(
       harness,
-      createSubmission({ inputRecordId: 'sink-failure-input' }),
+      createSubmission({ submissionId: 'sink-failure-input' }),
     );
 
     run.events.push({
@@ -1076,18 +949,13 @@ describe('ChatExecutionCoordinator', () => {
       name: 'ChatExecutionPreHandoffError',
       cause: sinkError,
     });
-    expect(harness.repository.discardStagedConversationInput).toHaveBeenCalledTimes(1);
-    expect(harness.repository.discardStagedConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'sink-failure-input',
-    );
   });
 
-  it('retains accepted input when a later configuration error terminates the run', async () => {
+  it('reports acceptance when a later configuration error terminates the run', async () => {
     const harness = createHarness();
     const { session, run, resultPromise } = await beginExecution(
       harness,
-      createSubmission({ inputRecordId: 'accepted-input' }),
+      createSubmission({ submissionId: 'accepted-input' }),
     );
 
     run.events.push({
@@ -1108,12 +976,6 @@ describe('ChatExecutionCoordinator', () => {
       status: 'error',
       accepted: true,
     });
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'accepted-input',
-      { providerUserMessageId: undefined },
-    );
-    expect(harness.repository.discardStagedConversationInput).not.toHaveBeenCalled();
   });
 
   it('routes only current monotonically correlated requested events and persists snapshots', async () => {
@@ -1170,6 +1032,16 @@ describe('ChatExecutionCoordinator', () => {
     );
   });
 
+  it('honors queued native completion when cancellation arrives before it is consumed', async () => {
+    const harness = createHarness();
+    const { session, run, resultPromise } = await beginExecution(harness);
+    run.events.push({ type: 'turn_started', scope: requestedScope(session, run, 1), accepted: true });
+    run.events.push({ type: 'turn_completed', scope: requestedScope(session, run, 2), reason: 'completed' });
+    run.events.end();
+    harness.coordinator.cancel();
+    await expect(resultPromise).resolves.toMatchObject({ status: 'completed', accepted: true });
+  });
+
   it('cancels only the active run and reports cancellation', async () => {
     const harness = createHarness();
     const { session, run, resultPromise } = await beginExecution(harness);
@@ -1182,27 +1054,19 @@ describe('ChatExecutionCoordinator', () => {
     await expect(resultPromise).resolves.toMatchObject({ status: 'cancelled' });
   });
 
-  it('stages and accepts steer input only when the current session supports and accepts it', async () => {
+  it('accepts steer input only when the current session supports and accepts it', async () => {
     const harness = createHarness();
     const { session, run, resultPromise } = await beginExecution(harness);
 
     await expect(harness.coordinator.steer(
-      createSubmission({ inputRecordId: 'steer-1' }),
+      createSubmission({ submissionId: 'steer-1' }),
     )).resolves.toBe(true);
     expect(session.steerRequests).toHaveLength(1);
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'steer-1',
-    );
 
     session.steerResult = false;
     await expect(harness.coordinator.steer(
-      createSubmission({ inputRecordId: 'steer-2' }),
+      createSubmission({ submissionId: 'steer-2' }),
     )).resolves.toBe(false);
-    expect(harness.repository.discardStagedConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'steer-2',
-    );
 
     run.events.push({
       type: 'turn_completed',
@@ -1213,22 +1077,20 @@ describe('ChatExecutionCoordinator', () => {
     await resultPromise;
   });
 
-  it('classifies steer staging failure as definitely pre-handoff', async () => {
+  it('classifies steer authority failure as definitely pre-handoff', async () => {
     const harness = createHarness();
     const { session, run, resultPromise } = await beginExecution(harness);
-    const cause = new Error('steer ledger unavailable');
-    harness.repository.stageConversationInput.mockRejectedValueOnce(cause);
+    const cause = new Error('conversation deleted');
+    harness.repository.assertConversationExecutionAuthority.mockRejectedValueOnce(cause);
 
     await expect(harness.coordinator.steer(createSubmission({
-      inputRecordId: 'unstaged-steer',
+      submissionId: 'unstaged-steer',
     }))).rejects.toMatchObject({
       cause,
       name: 'ChatExecutionPreHandoffError',
     });
 
     expect(session.steerRequests).toHaveLength(0);
-    expect(harness.repository.acceptConversationInput).not.toHaveBeenCalled();
-    expect(harness.repository.discardStagedConversationInput).not.toHaveBeenCalled();
 
     run.events.push({
       type: 'turn_completed',
@@ -1239,7 +1101,7 @@ describe('ChatExecutionCoordinator', () => {
     await resultPromise;
   });
 
-  it('discards a rejected steer against its captured conversation after the UI binding changes', async () => {
+  it('reports a rejected steer after the UI binding changes', async () => {
     const harness = createHarness();
     const { session, resultPromise } = await beginExecution(harness);
     const nativeSteer = deferred<boolean>();
@@ -1248,7 +1110,7 @@ describe('ChatExecutionCoordinator', () => {
     );
 
     const steerResult = harness.coordinator.steer(createSubmission({
-      inputRecordId: 'stale-rejected-steer',
+      submissionId: 'stale-rejected-steer',
     }));
     for (let attempt = 0; attempt < 10 && steer.mock.calls.length === 0; attempt++) {
       await Promise.resolve();
@@ -1265,47 +1127,7 @@ describe('ChatExecutionCoordinator', () => {
     nativeSteer.resolve(false);
 
     await expect(steerResult).resolves.toBe(false);
-    expect(harness.repository.discardStagedConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'stale-rejected-steer',
-    );
-    expect(harness.repository.acceptConversationInput).not.toHaveBeenCalled();
-    expect(harness.repository.discardStagedConversationInput).not.toHaveBeenCalledWith(
-      'conversation-2',
-      expect.anything(),
-    );
     await expect(resultPromise).resolves.toMatchObject({ status: 'invalidated' });
-  });
-
-  it('keeps definite-unsent steer classification when staged-record discard fails', async () => {
-    const harness = createHarness();
-    const { session, run, resultPromise } = await beginExecution(harness);
-    const cleanupError = new Error('steer ledger cleanup failed');
-    session.steerResult = false;
-    harness.repository.discardStagedConversationInput.mockRejectedValueOnce(cleanupError);
-
-    await expect(harness.coordinator.steer(createSubmission({
-      inputRecordId: 'rejected-steer-cleanup-failed',
-    }))).rejects.toMatchObject({
-      cause: cleanupError,
-      name: 'ChatExecutionPreHandoffError',
-    });
-
-    expect(session.steerRequests).toHaveLength(1);
-    expect(harness.repository.discardStagedConversationInput).toHaveBeenCalledTimes(1);
-    expect(harness.repository.discardStagedConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'rejected-steer-cleanup-failed',
-    );
-    expect(harness.repository.acceptConversationInput).not.toHaveBeenCalled();
-
-    run.events.push({
-      type: 'turn_completed',
-      scope: requestedScope(session, run, 1),
-      reason: 'completed',
-    });
-    run.events.end();
-    await resultPromise;
   });
 
   it('accepts a handed-off steer against its captured conversation even when the UI binding is stale', async () => {
@@ -1317,7 +1139,7 @@ describe('ChatExecutionCoordinator', () => {
     );
 
     const steerResult = harness.coordinator.steer(createSubmission({
-      inputRecordId: 'stale-accepted-steer',
+      submissionId: 'stale-accepted-steer',
     }));
     for (let attempt = 0; attempt < 10 && steer.mock.calls.length === 0; attempt++) {
       await Promise.resolve();
@@ -1334,42 +1156,7 @@ describe('ChatExecutionCoordinator', () => {
     nativeSteer.resolve(true);
 
     await expect(steerResult).resolves.toBe(true);
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'stale-accepted-steer',
-    );
-    expect(harness.repository.discardStagedConversationInput).not.toHaveBeenCalled();
-    expect(harness.repository.acceptConversationInput).not.toHaveBeenCalledWith(
-      'conversation-2',
-      expect.anything(),
-    );
     await expect(resultPromise).resolves.toMatchObject({ status: 'invalidated' });
-  });
-
-  it('retains staged steer input when provider acceptance is ambiguous', async () => {
-    const harness = createHarness();
-    const { session, run, resultPromise } = await beginExecution(harness);
-    const steerError = new Error('steer transport closed');
-    jest.spyOn(session, 'steer').mockRejectedValueOnce(steerError);
-
-    await expect(harness.coordinator.steer(createSubmission({
-      inputRecordId: 'ambiguous-steer',
-    }))).rejects.toBe(steerError);
-
-    expect(harness.repository.stageConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      expect.objectContaining({ id: 'ambiguous-steer' }),
-    );
-    expect(harness.repository.acceptConversationInput).not.toHaveBeenCalled();
-    expect(harness.repository.discardStagedConversationInput).not.toHaveBeenCalled();
-
-    run.events.push({
-      type: 'turn_completed',
-      scope: requestedScope(session, run, 1),
-      reason: 'completed',
-    });
-    run.events.end();
-    await resultPromise;
   });
 
   it('lets an early live provider event authoritatively accept a steer before delayed false', async () => {
@@ -1379,7 +1166,7 @@ describe('ChatExecutionCoordinator', () => {
     const steer = jest.spyOn(session, 'steer').mockReturnValue(nativeSteer.promise);
 
     const steerResult = harness.coordinator.steer(createSubmission({
-      inputRecordId: 'event-before-false',
+      submissionId: 'event-before-false',
     }));
     for (let attempt = 0; attempt < 20 && steer.mock.calls.length === 0; attempt++) {
       await Promise.resolve();
@@ -1393,13 +1180,6 @@ describe('ChatExecutionCoordinator', () => {
     nativeSteer.resolve(false);
 
     await expect(steerResult).resolves.toBe(true);
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledTimes(1);
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'event-before-false',
-      { providerUserMessageId: 'native-steer-user' },
-    );
-    expect(harness.repository.discardStagedConversationInput).not.toHaveBeenCalled();
 
     await harness.coordinator.bindConversation(null);
     await expect(resultPromise).resolves.toMatchObject({ status: 'invalidated' });
@@ -1412,7 +1192,7 @@ describe('ChatExecutionCoordinator', () => {
     const steer = jest.spyOn(session, 'steer').mockReturnValue(nativeSteer.promise);
 
     const steerResult = harness.coordinator.steer(createSubmission({
-      inputRecordId: 'event-before-true',
+      submissionId: 'event-before-true',
     }));
     for (let attempt = 0; attempt < 20 && steer.mock.calls.length === 0; attempt++) {
       await Promise.resolve();
@@ -1425,12 +1205,6 @@ describe('ChatExecutionCoordinator', () => {
     nativeSteer.resolve(true);
 
     await expect(steerResult).resolves.toBe(true);
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledTimes(1);
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'event-before-true',
-      { providerUserMessageId: 'native-event-first' },
-    );
     await expect(harness.coordinator.acceptSteerFromProviderEvent(
       'event-before-true',
       'native-event-first',
@@ -1440,157 +1214,23 @@ describe('ChatExecutionCoordinator', () => {
     await expect(resultPromise).resolves.toMatchObject({ status: 'invalidated' });
   });
 
-  it('enriches an acknowledged steer with the later exact native user ID once', async () => {
+  it('retains acknowledged steer correlation until the first live event', async () => {
     const harness = createHarness();
     const { session, run, resultPromise } = await beginExecution(harness);
     jest.spyOn(session, 'steer').mockResolvedValueOnce(true);
 
     await expect(harness.coordinator.steer(createSubmission({
-      inputRecordId: 'ack-before-event',
+      submissionId: 'ack-before-event',
     }))).resolves.toBe(true);
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledTimes(1);
-    expect(harness.repository.acceptConversationInput).toHaveBeenLastCalledWith(
-      'conversation-1',
-      'ack-before-event',
-    );
 
     await expect(harness.coordinator.acceptSteerFromProviderEvent(
       'ack-before-event',
       'native-user-after-ack',
     )).resolves.toBe(true);
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledTimes(2);
-    expect(harness.repository.acceptConversationInput).toHaveBeenLastCalledWith(
-      'conversation-1',
-      'ack-before-event',
-      { providerUserMessageId: 'native-user-after-ack' },
-    );
     await expect(harness.coordinator.acceptSteerFromProviderEvent(
       'ack-before-event',
       'native-user-after-ack',
     )).resolves.toBe(false);
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledTimes(2);
-
-    run.events.push({
-      type: 'turn_completed',
-      scope: requestedScope(session, run, 1),
-      reason: 'completed',
-    });
-    run.events.end();
-    await resultPromise;
-  });
-
-  it('serializes native-ID enrichment behind a pending ID-less acceptance save', async () => {
-    const harness = createHarness();
-    const { session, run, resultPromise } = await beginExecution(harness);
-    const baseAcceptance = deferred<void>();
-    const enrichment = deferred<void>();
-    jest.spyOn(session, 'steer').mockResolvedValueOnce(true);
-    harness.repository.acceptConversationInput
-      .mockImplementationOnce(() => baseAcceptance.promise)
-      .mockImplementationOnce(() => enrichment.promise);
-
-    const steerResult = harness.coordinator.steer(createSubmission({
-      inputRecordId: 'pending-ack-before-event',
-    }));
-    for (
-      let attempt = 0;
-      attempt < 20 && harness.repository.acceptConversationInput.mock.calls.length === 0;
-      attempt++
-    ) {
-      await Promise.resolve();
-    }
-    const liveAcceptance = harness.coordinator.acceptSteerFromProviderEvent(
-      'pending-ack-before-event',
-      'native-during-save',
-    );
-
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledTimes(1);
-    baseAcceptance.resolve();
-    await expect(steerResult).resolves.toBe(true);
-    for (
-      let attempt = 0;
-      attempt < 20 && harness.repository.acceptConversationInput.mock.calls.length < 2;
-      attempt++
-    ) {
-      await Promise.resolve();
-    }
-    expect(harness.repository.acceptConversationInput).toHaveBeenLastCalledWith(
-      'conversation-1',
-      'pending-ack-before-event',
-      { providerUserMessageId: 'native-during-save' },
-    );
-    enrichment.resolve();
-    await expect(liveAcceptance).resolves.toBe(true);
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledTimes(2);
-
-    run.events.push({
-      type: 'turn_completed',
-      scope: requestedScope(session, run, 1),
-      reason: 'completed',
-    });
-    run.events.end();
-    await resultPromise;
-  });
-
-  it('retries exact native-ID acceptance after the ID-less save rejects', async () => {
-    const harness = createHarness();
-    const { session, run, resultPromise } = await beginExecution(harness);
-    const baseFailure = new Error('ID-less acceptance save failed');
-    jest.spyOn(session, 'steer').mockResolvedValueOnce(true);
-    harness.repository.acceptConversationInput
-      .mockRejectedValueOnce(baseFailure)
-      .mockResolvedValueOnce(undefined);
-
-    await expect(harness.coordinator.steer(createSubmission({
-      inputRecordId: 'ack-save-failed-before-event',
-    }))).rejects.toBe(baseFailure);
-    await expect(harness.coordinator.acceptSteerFromProviderEvent(
-      'ack-save-failed-before-event',
-      'native-after-save-failure',
-    )).resolves.toBe(true);
-
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledTimes(2);
-    expect(harness.repository.acceptConversationInput).toHaveBeenLastCalledWith(
-      'conversation-1',
-      'ack-save-failed-before-event',
-      { providerUserMessageId: 'native-after-save-failure' },
-    );
-    await expect(harness.coordinator.acceptSteerFromProviderEvent(
-      'ack-save-failed-before-event',
-      'native-after-save-failure',
-    )).resolves.toBe(false);
-
-    run.events.push({
-      type: 'turn_completed',
-      scope: requestedScope(session, run, 1),
-      reason: 'completed',
-    });
-    run.events.end();
-    await resultPromise;
-  });
-
-  it('surfaces native-ID enrichment failure after suppressing the earlier ID-less save error', async () => {
-    const harness = createHarness();
-    const { session, run, resultPromise } = await beginExecution(harness);
-    const baseFailure = new Error('ID-less acceptance save failed');
-    const enrichmentFailure = new Error('native-ID enrichment failed');
-    jest.spyOn(session, 'steer').mockResolvedValueOnce(true);
-    harness.repository.acceptConversationInput
-      .mockRejectedValueOnce(baseFailure)
-      .mockRejectedValueOnce(enrichmentFailure);
-
-    await expect(harness.coordinator.steer(createSubmission({
-      inputRecordId: 'both-acceptance-saves-failed',
-    }))).rejects.toBe(baseFailure);
-    await expect(harness.coordinator.acceptSteerFromProviderEvent(
-      'both-acceptance-saves-failed',
-      'native-after-both-failures',
-    )).rejects.toBe(enrichmentFailure);
-    await expect(harness.coordinator.acceptSteerFromProviderEvent(
-      'both-acceptance-saves-failed',
-      'native-after-both-failures',
-    )).resolves.toBe(false);
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledTimes(2);
 
     run.events.push({
       type: 'turn_completed',
@@ -1609,7 +1249,7 @@ describe('ChatExecutionCoordinator', () => {
       jest.spyOn(session, 'steer').mockResolvedValueOnce(true);
 
       await expect(harness.coordinator.steer(createSubmission({
-        inputRecordId: `accepted-before-${boundary}`,
+        submissionId: `accepted-before-${boundary}`,
       }))).resolves.toBe(true);
       if (boundary === 'bind') {
         await harness.coordinator.bindConversation({
@@ -1626,7 +1266,6 @@ describe('ChatExecutionCoordinator', () => {
         `accepted-before-${boundary}`,
         `native-after-${boundary}`,
       )).resolves.toBe(false);
-      expect(harness.repository.acceptConversationInput).toHaveBeenCalledTimes(1);
       await expect(resultPromise).resolves.toMatchObject({ status: 'invalidated' });
     },
   );
@@ -1637,7 +1276,7 @@ describe('ChatExecutionCoordinator', () => {
     jest.spyOn(session, 'steer').mockResolvedValueOnce(true);
 
     await expect(harness.coordinator.steer(createSubmission({
-      inputRecordId: 'accepted-without-event',
+      submissionId: 'accepted-without-event',
     }))).resolves.toBe(true);
     harness.coordinator.releaseSteerCorrelation('accepted-without-event');
 
@@ -1645,7 +1284,6 @@ describe('ChatExecutionCoordinator', () => {
       'accepted-without-event',
       'too-late-native-user',
     )).resolves.toBe(false);
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledTimes(1);
 
     run.events.push({
       type: 'turn_completed',
@@ -1663,7 +1301,7 @@ describe('ChatExecutionCoordinator', () => {
     const steer = jest.spyOn(session, 'steer').mockReturnValue(nativeSteer.promise);
 
     const steerResult = harness.coordinator.steer(createSubmission({
-      inputRecordId: 'event-before-error',
+      submissionId: 'event-before-error',
     }));
     for (let attempt = 0; attempt < 20 && steer.mock.calls.length === 0; attempt++) {
       await Promise.resolve();
@@ -1678,11 +1316,6 @@ describe('ChatExecutionCoordinator', () => {
     nativeSteer.reject(new Error('late transport failure'));
 
     await expect(steerResult).resolves.toBe(true);
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'event-before-error',
-    );
-    expect(harness.repository.discardStagedConversationInput).not.toHaveBeenCalled();
     await expect(resultPromise).resolves.toMatchObject({ status: 'invalidated' });
   });
 
@@ -1693,7 +1326,7 @@ describe('ChatExecutionCoordinator', () => {
     const steer = jest.spyOn(session, 'steer').mockReturnValue(nativeSteer.promise);
 
     void harness.coordinator.steer(createSubmission({
-      inputRecordId: 'event-before-never',
+      submissionId: 'event-before-never',
     }));
     for (let attempt = 0; attempt < 20 && steer.mock.calls.length === 0; attempt++) {
       await Promise.resolve();
@@ -1703,15 +1336,15 @@ describe('ChatExecutionCoordinator', () => {
       'event-before-never',
       'native-never-user',
     )).resolves.toBe(true);
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledWith(
+    expect(harness.repository.recordConversationActivity).toHaveBeenCalledTimes(1);
+    expect(harness.repository.recordConversationActivity).toHaveBeenCalledWith(
       'conversation-1',
-      'event-before-never',
-      { providerUserMessageId: 'native-never-user' },
+      123,
     );
-    expect(harness.repository.discardStagedConversationInput).not.toHaveBeenCalled();
     await expect(harness.coordinator.acceptSteerFromProviderEvent(
       'event-before-never',
     )).resolves.toBe(false);
+    expect(harness.repository.recordConversationActivity).toHaveBeenCalledTimes(1);
 
     run.events.push({
       type: 'turn_completed',
@@ -1725,22 +1358,17 @@ describe('ChatExecutionCoordinator', () => {
   it('upgrades an ambiguous native steer result when its exact live event arrives later', async () => {
     const harness = createHarness();
     const { session, run, resultPromise } = await beginExecution(harness);
-    jest.spyOn(session, 'steer').mockRejectedValueOnce(new Error('acknowledgement lost'));
+    const steerError = new Error('acknowledgement lost');
+    jest.spyOn(session, 'steer').mockRejectedValueOnce(steerError);
 
     await expect(harness.coordinator.steer(createSubmission({
-      inputRecordId: 'event-after-error',
-    }))).rejects.toThrow('acknowledgement lost');
+      submissionId: 'event-after-error',
+    }))).rejects.toBe(steerError);
 
     await expect(harness.coordinator.acceptSteerFromProviderEvent(
       'event-after-error',
       'native-late-user',
     )).resolves.toBe(true);
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'event-after-error',
-      { providerUserMessageId: 'native-late-user' },
-    );
-    expect(harness.repository.discardStagedConversationInput).not.toHaveBeenCalled();
     await expect(harness.coordinator.acceptSteerFromProviderEvent(
       'event-after-error',
     )).resolves.toBe(false);
@@ -1760,7 +1388,7 @@ describe('ChatExecutionCoordinator', () => {
     jest.spyOn(session, 'steer').mockRejectedValueOnce(new Error('acknowledgement lost'));
 
     await expect(harness.coordinator.steer(createSubmission({
-      inputRecordId: 'delegated-ambiguous',
+      submissionId: 'delegated-ambiguous',
     }))).rejects.toThrow('acknowledgement lost');
     harness.coordinator.releaseSteerCorrelation('delegated-ambiguous');
 
@@ -1768,7 +1396,6 @@ describe('ChatExecutionCoordinator', () => {
       'delegated-ambiguous',
       'too-late-user',
     )).resolves.toBe(false);
-    expect(harness.repository.acceptConversationInput).not.toHaveBeenCalled();
 
     run.events.push({
       type: 'turn_completed',
@@ -1784,12 +1411,12 @@ describe('ChatExecutionCoordinator', () => {
     const { session, run, resultPromise } = await beginExecution(harness);
     const nativeSteer = deferred<boolean>();
     const steer = jest.spyOn(session, 'steer').mockReturnValue(nativeSteer.promise);
-    harness.repository.acceptConversationInput.mockRejectedValueOnce(
+    harness.repository.recordConversationActivity.mockRejectedValueOnce(
       new Error('accept save failed'),
     );
 
     void harness.coordinator.steer(createSubmission({
-      inputRecordId: 'accept-save-failure',
+      submissionId: 'accept-save-failure',
     })).catch(() => {});
     for (let attempt = 0; attempt < 20 && steer.mock.calls.length === 0; attempt++) {
       await Promise.resolve();
@@ -1802,7 +1429,6 @@ describe('ChatExecutionCoordinator', () => {
     await expect(harness.coordinator.acceptSteerFromProviderEvent(
       'accept-save-failure',
     )).resolves.toBe(false);
-    expect(harness.repository.discardStagedConversationInput).not.toHaveBeenCalled();
 
     run.events.push({
       type: 'turn_completed',
@@ -2028,139 +1654,8 @@ describe('ChatExecutionCoordinator', () => {
       'No conversation is bound for chat execution',
     );
     expect(reacquire).not.toHaveBeenCalled();
-    expect(harness.repository.stageConversationInput).not.toHaveBeenCalled();
     expect(session.disposeCalls).toBe(1);
     expect(session.requests).toHaveLength(0);
-  });
-
-  it('does not hand off a durably deleted turn when held ledger loading meets rejected disposal', async () => {
-    const ledgerLoad = deferred<ConversationInputLedgerReadResult>();
-    let tombstoned = false;
-    let currentMetadataExists = true;
-    let inputLedgerExists = true;
-    const storage = {
-      metadataReader: {
-        load: jest.fn(),
-        scan: jest.fn(),
-        loadMetadata: jest.fn(),
-        scanMetadata: jest.fn(),
-        listMetadata: jest.fn(),
-      } as unknown as SessionMetadataReader,
-      loadInputLedger: jest.fn(() => ledgerLoad.promise),
-      saveInputLedger: jest.fn(async () => undefined),
-      saveMetadata: jest.fn(async () => undefined),
-      deleteCurrentMetadata: jest.fn(async () => {
-        currentMetadataExists = false;
-      }),
-      deleteLegacyMetadata: jest.fn(async () => undefined),
-      deleteInputLedger: jest.fn(async () => {
-        inputLedgerExists = false;
-      }),
-      isDeleted: jest.fn(async () => tombstoned),
-      markDeleted: jest.fn(async () => {
-        tombstoned = true;
-      }),
-    } as unknown as ConversationPersistence;
-    const conversation: Conversation = {
-      id: 'conversation-1',
-      providerId: 'claude',
-      title: 'Conversation',
-      createdAt: 1,
-      lastActivityAt: 1,
-      sessionId: null,
-      messages: [],
-    };
-    const registry = new ProviderExecutionLifecycleRegistry();
-    const backend = new FakeBackend('claude');
-    const coordinatorOwner: { current: ChatExecutionCoordinator | null } = {
-      current: null,
-    };
-    const repository = new ConversationRepository({
-      getSettings: () => ({}),
-      getVaultPath: () => '/vault',
-      persistence: storage,
-      onConversationDeleted: async () => {
-        if (!coordinatorOwner.current) {
-          throw new Error('Coordinator is not initialized');
-        }
-        await coordinatorOwner.current.bindConversation(null);
-      },
-    });
-    repository.replaceAll([conversation]);
-    const coordinatorPersistence: ChatExecutionPersistence = {
-      registerExecutionBinding: (...args) => {
-        repository.registerExecutionBinding(...args);
-      },
-      persistExecutionSnapshot: async () => true,
-      releaseExecutionBinding: (...args) => {
-        repository.releaseExecutionBinding(...args);
-      },
-      stageConversationInput: (...args) => repository.stageConversationInput(...args),
-      assertConversationExecutionAuthority: (...args) => (
-        repository.assertConversationExecutionAuthority(...args)
-      ),
-      acceptConversationInput: (...args) => repository.acceptConversationInput(...args),
-      discardStagedConversationInput: (...args) => (
-        repository.discardStagedConversationInput(...args)
-      ),
-      copyConversationInputsForFork: (...args) => (
-        repository.copyConversationInputsForFork(...args)
-      ),
-      truncateConversationInputsFrom: (...args) => (
-        repository.truncateConversationInputsFrom(...args)
-      ),
-    };
-    const interactionPort = {
-      requestApproval: jest.fn(),
-      askUserQuestion: jest.fn(),
-      requestPlanDecision: jest.fn(),
-      dismissInteraction: jest.fn(),
-    } as unknown as ProviderInteractionPort;
-    const coordinator = new ChatExecutionCoordinator({
-      lifecycleRegistry: registry,
-      resolveBackend: () => backend,
-      persistence: coordinatorPersistence,
-      interactionPort,
-      vaultWorkingDirectory: '/vault',
-      createId: (() => {
-        let nextId = 0;
-        return () => `integrated-${++nextId}`;
-      })(),
-      resolveMissingProviderSession: async () => 'reset',
-    });
-    coordinatorOwner.current = coordinator;
-    await coordinator.bindConversation({
-      conversationId: conversation.id,
-      providerId: conversation.providerId,
-    });
-    await coordinator.prepare();
-    const session = backend.sessions[0];
-    const disposeError = new Error('provider cleanup failed');
-    jest.spyOn(session, 'dispose').mockRejectedValueOnce(disposeError);
-
-    const send = coordinator.execute(createSubmission());
-    for (
-      let attempt = 0;
-      attempt < 20 && (storage.loadInputLedger as jest.Mock).mock.calls.length === 0;
-      attempt += 1
-    ) {
-      await Promise.resolve();
-    }
-    expect(storage.loadInputLedger).toHaveBeenCalledTimes(1);
-
-    await expect(repository.delete(conversation.id)).rejects.toBe(disposeError);
-    ledgerLoad.resolve({ status: 'missing' });
-
-    await expect(send).rejects.toBeInstanceOf(ChatExecutionPreHandoffError);
-    expect(backend.sessions).toHaveLength(1);
-    expect(session.requests).toHaveLength(0);
-    expect(storage.saveInputLedger).not.toHaveBeenCalled();
-    expect(storage.deleteCurrentMetadata).toHaveBeenCalledWith(conversation.id);
-    expect(storage.deleteInputLedger).toHaveBeenCalledWith(conversation.id);
-    expect(tombstoned).toBe(true);
-    expect(currentMetadataExists).toBe(false);
-    expect(inputLedgerExists).toBe(false);
-    expect(repository.getCachedConversation(conversation.id)).toBeNull();
   });
 
   it('handles missing provider sessions through the injected history boundary and releases the lease', async () => {
@@ -2183,10 +1678,6 @@ describe('ChatExecutionCoordinator', () => {
     expect(harness.missingSession).toHaveBeenCalledWith(
       'conversation-1',
       'missing-native',
-    );
-    expect(harness.repository.discardStagedConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'input-1',
     );
     expect(session.disposeCalls).toBe(1);
 
@@ -2215,10 +1706,6 @@ describe('ChatExecutionCoordinator', () => {
       accepted: false,
       missingSessionResolution: 'deleted',
     });
-    expect(harness.repository.discardStagedConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'input-1',
-    );
     expect(session.disposeCalls).toBe(1);
     await expect(harness.coordinator.prepare()).rejects.toThrow(
       'No conversation is bound for chat execution',
@@ -2266,11 +1753,11 @@ describe('ChatExecutionCoordinator', () => {
     expect(session.disposeCalls).toBe(1);
   });
 
-  it('retains accepted input when the provider reports its session missing', async () => {
+  it('reports acceptance when the provider reports its session missing', async () => {
     const harness = createHarness();
     const { session, run, resultPromise } = await beginExecution(
       harness,
-      createSubmission({ inputRecordId: 'accepted-missing-input' }),
+      createSubmission({ submissionId: 'accepted-missing-input' }),
     );
     run.events.push({
       type: 'turn_started',
@@ -2291,12 +1778,6 @@ describe('ChatExecutionCoordinator', () => {
       status: 'missing-session',
       accepted: true,
     });
-    expect(harness.repository.acceptConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'accepted-missing-input',
-      { providerUserMessageId: undefined },
-    );
-    expect(harness.repository.discardStagedConversationInput).not.toHaveBeenCalled();
   });
 
   it('recovers an unaccepted missing session before surfacing a retryable terminal sink failure', async () => {
@@ -2308,7 +1789,7 @@ describe('ChatExecutionCoordinator', () => {
     });
     const { session, run, resultPromise } = await beginExecution(
       harness,
-      createSubmission({ inputRecordId: 'missing-sink-input' }),
+      createSubmission({ submissionId: 'missing-sink-input' }),
     );
     run.events.push({
       type: 'execution_error',
@@ -2324,10 +1805,6 @@ describe('ChatExecutionCoordinator', () => {
       name: 'ChatExecutionPreHandoffError',
       cause: sinkError,
     });
-    expect(harness.repository.discardStagedConversationInput).toHaveBeenCalledWith(
-      'conversation-1',
-      'missing-sink-input',
-    );
     expect(harness.missingSession).toHaveBeenCalledWith(
       'conversation-1',
       'missing-native',
@@ -2360,10 +1837,6 @@ describe('ChatExecutionCoordinator', () => {
       'assistant-1',
       'conversation',
     )).resolves.toMatchObject({ canRewind: true });
-    expect(harness.repository.truncateConversationInputsFrom).toHaveBeenCalledWith(
-      'conversation-1',
-      'user-1',
-    );
 
     await expect(harness.coordinator.resolveForkSource(
       'assistant-1',
@@ -2372,19 +1845,9 @@ describe('ChatExecutionCoordinator', () => {
       sessionId: 'native-current',
       resumeAt: 'assistant-1',
     });
-    await harness.coordinator.copyInputsForFork(
-      'conversation-1',
-      'conversation-2',
-      'assistant-1',
-    );
-    expect(harness.repository.copyConversationInputsForFork).toHaveBeenCalledWith(
-      'conversation-1',
-      'conversation-2',
-      'assistant-1',
-    );
   });
 
-  it('truncates the captured conversation ledger after native rewind succeeds on a stale binding', async () => {
+  it('preserves the replacement binding when an old native rewind completes', async () => {
     const harness = createHarness();
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-1',
@@ -2422,40 +1885,9 @@ describe('ChatExecutionCoordinator', () => {
       canRewind: true,
       sessionStrategy: 'preserve-provider-session',
     });
-
-    expect(harness.repository.truncateConversationInputsFrom).toHaveBeenCalledWith(
-      'conversation-1',
-      'user-before-transition',
-    );
     expect(harness.repository.persistExecutionSnapshot).not.toHaveBeenCalled();
     expect(harness.repository.releaseExecutionBinding).not.toHaveBeenCalled();
     expect(harness.coordinator.snapshot?.providerId).toBe('codex');
-  });
-
-  it('applies supported mode changes to the current session and persists its resulting snapshot', async () => {
-    const harness = createHarness();
-    await harness.coordinator.bindConversation({
-      conversationId: 'conversation-1',
-      providerId: 'claude',
-    });
-    await harness.coordinator.prepare();
-    const session = harness.backends.get('claude')!.sessions[0];
-    session.snapshot = {
-      providerId: 'claude',
-      revision: 5,
-      status: 'idle',
-      providerSessionId: 'native-mode',
-    };
-
-    await expect(harness.coordinator.setMode('plan')).resolves.toBe(true);
-
-    expect(session.modes).toEqual(['plan']);
-    expect(harness.repository.persistExecutionSnapshot).toHaveBeenCalledWith(
-      'conversation-1',
-      'local-1',
-      0,
-      session.snapshot,
-    );
   });
 
   it('drops the session on lifecycle invalidation and recreates it at the new generation', async () => {

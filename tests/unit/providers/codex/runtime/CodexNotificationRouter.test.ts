@@ -4,34 +4,22 @@ import { CodexNotificationRouter } from '@/providers/codex/runtime/CodexNotifica
 describe('CodexNotificationRouter', () => {
   let router: CodexNotificationRouter;
   let chunks: StreamChunk[];
-  let turnMetadata: Array<Record<string, unknown>>;
 
   beforeEach(() => {
     chunks = [];
-    turnMetadata = [];
     router = new CodexNotificationRouter(
       (chunk) => chunks.push(chunk),
-      (update) => turnMetadata.push(update),
       '/workspace',
     );
   });
 
   describe('text streaming', () => {
-    it('maps item/agentMessage/delta to a text chunk', () => {
-      router.handleNotification('item/agentMessage/delta', {
-        threadId: 't1',
-        turnId: 'turn1',
-        itemId: 'msg1',
-        delta: 'Hello',
-      });
-
-      expect(chunks).toEqual([{ type: 'text', content: 'Hello' }]);
-    });
-
     it('accumulates multiple deltas', () => {
       router.handleNotification('item/agentMessage/delta', {
         threadId: 't1', turnId: 'turn1', itemId: 'msg1', delta: 'Hello',
       });
+      expect(chunks).toEqual([{ type: 'text', content: 'Hello' }]);
+
       router.handleNotification('item/agentMessage/delta', {
         threadId: 't1', turnId: 'turn1', itemId: 'msg1', delta: ' world',
       });
@@ -532,7 +520,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('ignores a late same-ID raw Bash call after canonical command completion', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       router.handleNotification('item/completed', {
         item: {
           type: 'commandExecution',
@@ -601,7 +589,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('maps raw response function calls to tool chunks without JSONL tailing', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -643,7 +631,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('unwraps exec envelopes and completes them when the raw output arrives', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -693,7 +681,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('keeps yielded exec envelopes running until their wait call completes', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -841,7 +829,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('binds a wait call and output that arrive before the yielded exec output', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -904,7 +892,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('unwraps a raw-only apply_patch exec envelope when its output arrives', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const patch = '*** Begin Patch\n*** Update File: note.md\n*** End Patch';
 
       router.handleNotification('rawResponseItem/completed', {
@@ -954,7 +942,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('does not normalize raw command output a second time when item/completed arrives', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -1007,7 +995,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('preserves non-empty raw write_stdin calls as visible tool chunks', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -1048,7 +1036,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('does not duplicate item/started when raw response already emitted the tool_use', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -1082,7 +1070,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('coalesces raw exec envelopes with canonical commands that use a different id', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -1160,7 +1148,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('ignores repeated terminal output for a raw-owned Bash call', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -1192,7 +1180,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('defers raw non-command exec envelopes to the canonical semantic item', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const patch = '*** Begin Patch\n*** Add File: note.md\n+hello\n*** End Patch';
 
       router.handleNotification('rawResponseItem/completed', {
@@ -1248,14 +1236,20 @@ describe('CodexNotificationRouter', () => {
         },
       });
 
+      router.handleNotification('turn/completed', {
+        threadId: 't1',
+        turn: { id: 'turn1', items: [], status: 'completed', error: null },
+      });
+
       expect(chunks.filter(chunk => (
         chunk.type === 'tool_use' || chunk.type === 'tool_result'
       )).every(chunk => chunk.id === 'exec_patch')).toBe(true);
       expect(chunks.filter(chunk => chunk.type === 'tool_result')).toHaveLength(1);
+      expect(chunks[chunks.length - 1]).toEqual({ type: 'done' });
     });
 
     it('does not recreate a claimed exec envelope from a repeated raw call', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const rawCall = {
         threadId: 't1',
         turnId: 'turn1',
@@ -1301,7 +1295,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('replays Bash output that arrives before its raw call', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -1340,7 +1334,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('replays deferred non-Bash output that arrives before its raw call', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -1374,7 +1368,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('does not correlate raw and canonical patches that affect different paths', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const patch = '*** Begin Patch\n*** Add File: raw-only.md\n+raw\n*** End Patch';
 
       router.handleNotification('rawResponseItem/completed', {
@@ -1428,7 +1422,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('does not correlate different patch content for the same path', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const patch = '*** Begin Patch\n*** Add File: same.md\n+raw\n*** End Patch';
 
       router.handleNotification('rawResponseItem/completed', {
@@ -1478,7 +1472,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('does not correlate identical edits in different patch contexts', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const patch = [
         '*** Begin Patch',
         '*** Update File: same.md',
@@ -1536,7 +1530,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('correlates matching patch hunks with named anchors', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const patch = [
         '*** Begin Patch',
         '*** Update File: note.md',
@@ -1592,15 +1586,23 @@ describe('CodexNotificationRouter', () => {
         },
       });
 
-      const lifecycleIds = chunks
+      router.handleNotification('turn/completed', {
+        threadId: 't1',
+        turn: { id: 'turn1', items: [], status: 'completed', error: null },
+      });
+
+      expect(chunks.map(chunk => chunk.type)).toEqual([
+        'tool_use', 'tool_use', 'tool_result', 'done',
+      ]);
+      expect(chunks
         .filter(chunk => chunk.type === 'tool_use' || chunk.type === 'tool_result')
-        .map(chunk => chunk.id);
-      expect(lifecycleIds.every(id => id === 'canonical_patch')).toBe(true);
-      expect(chunks.filter(chunk => chunk.type === 'tool_result')).toHaveLength(1);
+        .map(chunk => chunk.id)).toEqual([
+        'canonical_patch', 'canonical_patch', 'canonical_patch',
+      ]);
     });
 
     it('correlates matching move patches across raw and canonical kind shapes', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const patch = [
         '*** Begin Patch',
         '*** Update File: old.md',
@@ -1657,13 +1659,23 @@ describe('CodexNotificationRouter', () => {
         },
       });
 
-      expect(chunks.filter(chunk => (
-        chunk.type === 'tool_use' || chunk.type === 'tool_result'
-      )).every(chunk => chunk.id === 'canonical_move')).toBe(true);
+      router.handleNotification('turn/completed', {
+        threadId: 't1',
+        turn: { id: 'turn1', items: [], status: 'completed', error: null },
+      });
+
+      expect(chunks.map(chunk => chunk.type)).toEqual([
+        'tool_use', 'tool_use', 'tool_result', 'done',
+      ]);
+      expect(chunks
+        .filter(chunk => chunk.type === 'tool_use' || chunk.type === 'tool_result')
+        .map(chunk => chunk.id)).toEqual([
+        'canonical_move', 'canonical_move', 'canonical_move',
+      ]);
     });
 
     it('falls back to a raw non-command exec when no canonical item arrives', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const imagePath = '/workspace/image.png';
 
       router.handleNotification('rawResponseItem/completed', {
@@ -1715,7 +1727,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('waits for a canonical item when raw non-command output arrives first', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const imagePath = '/workspace/image.png';
 
       router.handleNotification('rawResponseItem/completed', {
@@ -1767,7 +1779,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('projects every call in a multi-tool exec through its canonical lifecycle', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const imagePath = '/workspace/image.png';
 
       router.handleNotification('rawResponseItem/completed', {
@@ -1817,7 +1829,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('projects mixed Bash and non-Bash exec calls through canonical lifecycles', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -1900,7 +1912,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('does not correlate mixed-envelope Bash calls across working directories', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -1983,7 +1995,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('assigns a canonical Bash item to only one raw correlation path', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -2079,7 +2091,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('falls back only the unclaimed operation from a partial multi-tool exec', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const imagePath = '/workspace/image.png';
 
       router.handleNotification('rawResponseItem/completed', {
@@ -2140,7 +2152,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('keeps identical operations in one exec envelope visible when correlation is ambiguous', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const imagePath = '/workspace/image.png';
 
       router.handleNotification('rawResponseItem/completed', {
@@ -2191,7 +2203,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('coalesces a canonical-first non-command item with its later raw exec envelope', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const imagePath = '/workspace/image.png';
 
       router.handleNotification('item/started', {
@@ -2241,7 +2253,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('emits an ordered lifecycle when canonical completion precedes its start', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const item = { type: 'imageView', id: 'image_canonical', path: '/workspace/image.png' };
 
       router.handleNotification('rawResponseItem/completed', {
@@ -2291,7 +2303,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('ignores a repeated canonical tool completion', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const item = { type: 'imageView', id: 'image_canonical', path: '/workspace/image.png' };
 
       router.handleNotification('item/started', {
@@ -2315,7 +2327,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('keeps a later identical raw-only call visible after a canonical item completed', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const imagePath = '/workspace/image.png';
 
       router.handleNotification('item/started', {
@@ -2474,7 +2486,7 @@ describe('CodexNotificationRouter', () => {
       startedItem,
       completedItem,
     }) => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -2506,15 +2518,21 @@ describe('CodexNotificationRouter', () => {
         },
       });
 
+      router.handleNotification('turn/completed', {
+        threadId: 't1',
+        turn: { id: 'turn1', items: [], status: 'completed', error: null },
+      });
+
       expect(chunks.filter(chunk => chunk.type === 'tool_use')).toHaveLength(1);
       expect(chunks.filter(chunk => chunk.type === 'tool_result')).toHaveLength(1);
       expect(chunks.filter(chunk => (
         chunk.type === 'tool_use' || chunk.type === 'tool_result'
       )).every(chunk => chunk.id === canonicalId)).toBe(true);
+      expect(chunks[chunks.length - 1]).toEqual({ type: 'done' });
     });
 
     it('does not correlate MCP calls when canonical arguments are a strict superset', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -2577,7 +2595,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('defers an update_plan exec envelope to turn/plan/updated', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -2633,7 +2651,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('correlates repeated update_plan calls within the same turn', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       for (const [index, step] of ['First plan', 'Second plan'].entries()) {
         const callId = `call_plan_${index}`;
@@ -2681,7 +2699,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('keeps a later identical raw-only call visible after a plan update completed', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('turn/plan/updated', {
         threadId: 't1',
@@ -2725,7 +2743,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('routes canonical command progress through a correlated raw function call', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -2797,7 +2815,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('keeps repeated commands as separate calls while coalescing each canonical event', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       for (const suffix of ['one', 'two']) {
         router.handleNotification('rawResponseItem/completed', {
@@ -2837,7 +2855,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('coalesces a canonical-first command with its later raw exec envelope', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('item/started', {
         threadId: 't1',
@@ -2900,7 +2918,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('does not replay canonical output when a later raw Bash call yields', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const canonicalItem = {
         type: 'commandExecution',
         id: 'exec_canonical',
@@ -2995,7 +3013,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('keeps a later identical raw-only command visible after a canonical command completed', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const canonicalItem = {
         type: 'commandExecution',
         id: 'exec_canonical',
@@ -3054,7 +3072,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('coalesces a canonical command delivered after the raw terminal output', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -3117,7 +3135,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('matches canonical-first commands by their full command alias', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const canonicalItem = {
         type: 'commandExecution',
         id: 'exec_canonical',
@@ -3177,7 +3195,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('keeps ambiguous concurrent identical commands visible instead of guessing a correlation', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       for (const callId of ['call_one', 'call_two']) {
         router.handleNotification('rawResponseItem/completed', {
@@ -3217,7 +3235,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('does not correlate identical commands from different working directories', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -3258,7 +3276,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('falls back to a direct raw-only apply_patch call at turn completion', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -3397,7 +3415,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('retains raw ownership claimed by patchUpdated through completion', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const patch = '*** Begin Patch\n*** Add File: note.md\n+hello\n*** End Patch';
       const changes = [{
         path: '/workspace/note.md',
@@ -3452,7 +3470,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('merges raw apply_patch input into the fileChange-owned tool call', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
         turnId: 'turn1',
@@ -3487,7 +3505,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('keeps a same-ID sparse direct patch owned by its canonical fileChange', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const patch = [
         '*** Begin Patch',
         '*** Update File: /workspace/foo.ts',
@@ -3550,7 +3568,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('keeps a canonical-completed-first direct patch owned when its raw call arrives later', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       const patch = [
         '*** Begin Patch',
         '*** Update File: /workspace/foo.ts',
@@ -3680,6 +3698,85 @@ describe('CodexNotificationRouter', () => {
   });
 
   describe('webSearch tool', () => {
+    // Shapes captured from the 2026-09-20 native research session.
+    it.each([
+      {
+        label: 'multi-query summary',
+        input: { search_query: [{ q: 'AI drug discovery' }, { q: 'clinical trials' }] },
+        item: {
+          query: 'AI drug discovery ...',
+          action: { type: 'search', query: null, queries: ['AI drug discovery', 'clinical trials'] },
+        },
+      },
+      {
+        label: 'open with an opaque native action',
+        input: { open: [{ ref_id: 'turn2view3' }] },
+        item: { query: '', action: { type: 'other' } },
+      },
+      {
+        label: 'click with an opaque native action',
+        input: { click: [{ ref_id: 'turn9view0', id: 13 }], response_length: 'short' },
+        item: { query: '', action: { type: 'other' } },
+      },
+      {
+        label: 'find without a native URL',
+        input: { find: [{ ref_id: 'turn10view0', pattern: 'FINANCIAL HIGHLIGHTS' }] },
+        item: {
+          query: "'FINANCIAL HIGHLIGHTS'",
+          action: { type: 'findInPage', url: null, pattern: 'FINANCIAL HIGHLIGHTS' },
+        },
+      },
+    ])('keeps $label before the final answer without a duplicate', ({ input, item }) => {
+      router.beginTurn();
+      router.handleNotification('rawResponseItem/completed', {
+        item: {
+          type: 'custom_tool_call', name: 'exec', call_id: 'call_web',
+          input: `text(await tools.web__run(${JSON.stringify(input)}));`,
+        },
+      });
+      router.handleNotification('item/completed', {
+        item: { ...item, type: 'webSearch', id: 'exec_web', status: 'completed' },
+      });
+      router.handleNotification('rawResponseItem/completed', {
+        item: { type: 'custom_tool_call_output', call_id: 'call_web', output: 'Sources found.' },
+      });
+      router.handleNotification('item/agentMessage/delta', {
+        itemId: 'final', delta: 'Research complete.',
+      });
+      router.handleNotification('turn/completed', {
+        turn: { id: 'turn1', items: [], status: 'completed', error: null },
+      });
+
+      expect(chunks).toEqual([
+        expect.objectContaining({ type: 'tool_use', id: 'exec_web', name: 'WebSearch' }),
+        { type: 'tool_result', id: 'exec_web', content: 'Search complete', isError: false },
+        { type: 'text', content: 'Research complete.' },
+        { type: 'done' },
+      ]);
+    });
+
+    it('preserves concurrent raw opens when an opaque native action cannot identify one', () => {
+      router.beginTurn();
+      for (const [callId, refId] of [['call_first', 'turn1view0'], ['call_second', 'turn2view0']]) {
+        router.handleNotification('rawResponseItem/completed', {
+          item: {
+            type: 'custom_tool_call', name: 'exec', call_id: callId,
+            input: `text(await tools.web__run({open:[{ref_id:"${refId}"}]}));`,
+          },
+        });
+      }
+      router.handleNotification('item/completed', {
+        item: { type: 'webSearch', id: 'exec_web', action: { type: 'other' }, status: 'completed' },
+      });
+      router.handleNotification('turn/completed', {
+        turn: { id: 'turn1', items: [], status: 'completed', error: null },
+      });
+
+      expect(chunks.filter(chunk => chunk.type === 'tool_use').map(chunk => chunk.id)).toEqual([
+        'exec_web', 'call_first', 'call_second',
+      ]);
+    });
+
     it('maps webSearch item/started to tool_use chunk', () => {
       router.handleNotification('item/started', {
         item: {
@@ -3802,7 +3899,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('ignores a late same-ID raw function call after canonical collab completion', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       router.handleNotification('item/completed', {
         item: {
           type: 'collabAgentToolCall',
@@ -3840,7 +3937,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('closes a raw-only function call without output at turn completion', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
         turnId: 'turn1',
@@ -3865,7 +3962,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('ignores a late raw output after a same-id canonical collab completion', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -3928,7 +4025,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('flushes a deferred raw-only operation before a terminal error', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -3965,7 +4062,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('marks an unfinished deferred raw-only operation failed at a terminal error', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -3992,7 +4089,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('closes a claimed canonical operation before a terminal error', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -4039,7 +4136,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('flushes deferred operations before a failed-turn error', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -4076,7 +4173,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('closes a deferred raw-only operation without output at turn completion', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -4099,7 +4196,7 @@ describe('CodexNotificationRouter', () => {
     });
 
     it('closes a yielded Bash operation at turn completion', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
 
       router.handleNotification('rawResponseItem/completed', {
         threadId: 't1',
@@ -4167,7 +4264,6 @@ describe('CodexNotificationRouter', () => {
           cacheReadInputTokens: 5000,
           cacheCreationInputTokens: 0,
           contextWindow: 200000,
-          contextWindowIsAuthoritative: true,
           contextTokens: 9000,
           percentage: 5,
         },
@@ -4176,13 +4272,12 @@ describe('CodexNotificationRouter', () => {
   });
 
   describe('turn completion', () => {
-    it('records assistant turn metadata then emits done on completion', () => {
+    it('emits done on turn/completed with status completed', () => {
       router.handleNotification('turn/completed', {
         threadId: 't1',
         turn: { id: 'turn1', items: [], status: 'completed', error: null },
       });
 
-      expect(turnMetadata).toContainEqual({ assistantMessageId: 'turn1' });
       expect(chunks).toEqual([{ type: 'done' }]);
     });
 
@@ -4426,94 +4521,6 @@ describe('CodexNotificationRouter', () => {
     });
   });
 
-  describe('plan_completed emission', () => {
-    it('records plan completion metadata before done on successful plan turn with plan deltas', () => {
-      router.beginTurn({ isPlanTurn: true });
-
-      router.handleNotification('item/plan/delta', {
-        threadId: 't1', turnId: 'turn1', itemId: 'plan-1', delta: 'Plan step 1',
-      });
-      router.handleNotification('turn/completed', {
-        threadId: 't1',
-        turn: { id: 'turn1', items: [], status: 'completed', error: null },
-      });
-
-      expect(turnMetadata).toContainEqual(expect.objectContaining({ planCompleted: true }));
-      expect(chunks.map(c => c.type)).toContain('done');
-    });
-
-    it('does not emit plan_completed when no plan delta was seen', () => {
-      router.beginTurn({ isPlanTurn: true });
-
-      router.handleNotification('turn/completed', {
-        threadId: 't1',
-        turn: { id: 'turn1', items: [], status: 'completed', error: null },
-      });
-
-      expect(chunks.map(c => c.type)).not.toContain('plan_completed');
-      expect(chunks.map(c => c.type)).toContain('done');
-    });
-
-    it('does not emit plan_completed when turn failed', () => {
-      router.beginTurn({ isPlanTurn: true });
-
-      router.handleNotification('item/plan/delta', {
-        threadId: 't1', turnId: 'turn1', itemId: 'plan-1', delta: 'Step',
-      });
-      router.handleNotification('turn/completed', {
-        threadId: 't1',
-        turn: {
-          id: 'turn1', items: [], status: 'failed',
-          error: { message: 'Error', codexErrorInfo: 'other', additionalDetails: null },
-        },
-      });
-
-      expect(chunks.map(c => c.type)).not.toContain('plan_completed');
-    });
-
-    it('does not emit plan_completed when beginTurn was called with isPlanTurn: false', () => {
-      router.beginTurn({ isPlanTurn: false });
-
-      router.handleNotification('item/plan/delta', {
-        threadId: 't1', turnId: 'turn1', itemId: 'plan-1', delta: 'Step',
-      });
-      router.handleNotification('turn/completed', {
-        threadId: 't1',
-        turn: { id: 'turn1', items: [], status: 'completed', error: null },
-      });
-
-      expect(chunks.map(c => c.type)).not.toContain('plan_completed');
-    });
-
-    it('does not emit plan_completed when beginTurn was not called', () => {
-      router.handleNotification('item/plan/delta', {
-        threadId: 't1', turnId: 'turn1', itemId: 'plan-1', delta: 'Step',
-      });
-      router.handleNotification('turn/completed', {
-        threadId: 't1',
-        turn: { id: 'turn1', items: [], status: 'completed', error: null },
-      });
-
-      expect(chunks.map(c => c.type)).not.toContain('plan_completed');
-    });
-
-    it('resets plan state after endTurn', () => {
-      router.beginTurn({ isPlanTurn: true });
-      router.handleNotification('item/plan/delta', {
-        threadId: 't1', turnId: 'turn1', itemId: 'plan-1', delta: 'Step',
-      });
-      router.endTurn();
-
-      // New turn without beginTurn should not emit plan_completed
-      router.handleNotification('turn/completed', {
-        threadId: 't1',
-        turn: { id: 'turn2', items: [], status: 'completed', error: null },
-      });
-
-      expect(chunks.map(c => c.type)).not.toContain('plan_completed');
-    });
-  });
-
   describe('error notifications', () => {
     it('emits error chunk for non-retryable error', () => {
       router.handleNotification('error', {
@@ -4560,7 +4567,7 @@ describe('CodexNotificationRouter', () => {
     };
 
     it('buffers a command output delta until its tool use starts', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       router.handleNotification('item/commandExecution/outputDelta', {
         threadId: 't1',
         turnId: 'turn1',
@@ -4591,25 +4598,15 @@ describe('CodexNotificationRouter', () => {
       expect(chunks.map(chunk => chunk.type)).toEqual(['tool_use', 'tool_output']);
     });
 
-    it('emits tool_output chunk for incremental command output', () => {
-      startCommand();
-      router.handleNotification('item/commandExecution/outputDelta', {
-        threadId: 't1',
-        turnId: 'turn1',
-        itemId: 'call_1',
-        delta: 'line 1\n',
-      });
-
-      expect(chunks.filter(chunk => chunk.type === 'tool_output')).toEqual([
-        { type: 'tool_output', id: 'call_1', content: 'line 1\n' },
-      ]);
-    });
-
     it('accumulates multiple output deltas', () => {
       startCommand();
       router.handleNotification('item/commandExecution/outputDelta', {
         threadId: 't1', turnId: 'turn1', itemId: 'call_1', delta: 'line 1\n',
       });
+      expect(chunks.filter(chunk => chunk.type === 'tool_output')).toEqual([
+        { type: 'tool_output', id: 'call_1', content: 'line 1\n' },
+      ]);
+
       router.handleNotification('item/commandExecution/outputDelta', {
         threadId: 't1', turnId: 'turn1', itemId: 'call_1', delta: 'line 2\n',
       });
@@ -4636,7 +4633,7 @@ describe('CodexNotificationRouter', () => {
     };
 
     it('buffers a file change output delta until its tool use starts', () => {
-      router.beginTurn({ isPlanTurn: false });
+      router.beginTurn();
       router.handleNotification('item/fileChange/outputDelta', {
         threadId: 't1',
         turnId: 'turn1',
@@ -4763,42 +4760,6 @@ describe('CodexNotificationRouter', () => {
       expect(chunks).toEqual([
         { type: 'assistant_message_start', itemId: 'a1' },
       ]);
-    });
-  });
-
-  describe('assistant metadata emission', () => {
-    it('records assistant metadata before done on completed turn', () => {
-      router.handleNotification('turn/completed', {
-        threadId: 't1',
-        turn: { id: 'turn-uuid-123', items: [], status: 'completed', error: null },
-      });
-
-      const types = chunks.map(c => c.type);
-      expect(types).toContain('done');
-      expect(turnMetadata).toContainEqual({ assistantMessageId: 'turn-uuid-123' });
-    });
-
-    it('does NOT record assistant metadata on failed turn', () => {
-      router.handleNotification('turn/completed', {
-        threadId: 't1',
-        turn: {
-          id: 'turn-failed-1',
-          items: [],
-          status: 'failed',
-          error: { message: 'Error', codexErrorInfo: 'other', additionalDetails: null },
-        },
-      });
-
-      expect(turnMetadata).toEqual([]);
-    });
-
-    it('does NOT record assistant metadata on interrupted turn', () => {
-      router.handleNotification('turn/completed', {
-        threadId: 't1',
-        turn: { id: 'turn-interrupted-1', items: [], status: 'interrupted', error: null },
-      });
-
-      expect(turnMetadata).toEqual([]);
     });
   });
 });
