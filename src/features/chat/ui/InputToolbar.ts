@@ -154,29 +154,19 @@ export class ModeSelector {
   private container: HTMLElement;
   private labelEl: HTMLElement | null = null;
   private toggleEl: HTMLElement | null = null;
+  private buttonEl: HTMLElement | null = null;
+  private dropdownEl: HTMLElement | null = null;
+  private layout: 'empty' | 'toggle' | 'dropdown' = 'empty';
   private callbacks: ToolbarCallbacks;
 
   constructor(parentEl: HTMLElement, callbacks: ToolbarCallbacks) {
     this.callbacks = callbacks;
     this.container = parentEl.createDiv({ cls: 'claudian-mode-selector' });
-    this.render();
+    this.updateDisplay();
   }
 
   #getSelectorConfig(): ProviderModeSelectorConfig | null {
     return this.callbacks.getUIConfig().getModeSelector?.(this.callbacks.getSettings()) ?? null;
-  }
-
-  private render() {
-    this.container.empty();
-
-    this.labelEl = this.container.createSpan({ cls: 'claudian-mode-label' });
-    this.toggleEl = this.container.createDiv({ cls: 'claudian-toggle-switch' });
-
-    this.toggleEl.addEventListener('click', () => {
-      runToolbarAction(() => this.toggle(), 'Failed to change mode');
-    });
-
-    this.updateDisplay();
   }
 
   /** Resolves the active/inactive option pair for a two-option toggle. */
@@ -191,18 +181,70 @@ export class ModeSelector {
     return { active, inactive };
   }
 
+  /** Chooses the layout for the current config: hidden, two-option toggle, or N-option dropdown. */
+  #resolveLayout(
+    selectorConfig: ProviderModeSelectorConfig | null,
+  ): 'empty' | 'toggle' | 'dropdown' {
+    if (!selectorConfig || selectorConfig.options.length < 2) {
+      return 'empty';
+    }
+    return selectorConfig.options.length === 2 ? 'toggle' : 'dropdown';
+  }
+
+  #buildToggle() {
+    this.container.empty();
+    this.labelEl = this.container.createSpan({ cls: 'claudian-mode-label' });
+    this.toggleEl = this.container.createDiv({ cls: 'claudian-toggle-switch' });
+    this.buttonEl = null;
+    this.dropdownEl = null;
+    this.toggleEl.addEventListener('click', () => {
+      runToolbarAction(() => this.toggle(), 'Failed to change mode');
+    });
+  }
+
+  #buildDropdown() {
+    this.container.empty();
+    this.buttonEl = this.container.createDiv({ cls: 'claudian-mode-btn' });
+    this.dropdownEl = this.container.createDiv({ cls: 'claudian-mode-dropdown' });
+    this.labelEl = null;
+    this.toggleEl = null;
+  }
+
   updateDisplay() {
-    if (!this.toggleEl || !this.labelEl) {
-      return;
+    const selectorConfig = this.#getSelectorConfig();
+    const layout = this.#resolveLayout(selectorConfig);
+    if (layout !== this.layout) {
+      this.layout = layout;
+      if (layout === 'toggle') {
+        this.#buildToggle();
+      } else if (layout === 'dropdown') {
+        this.#buildDropdown();
+      } else {
+        this.container.empty();
+        this.labelEl = null;
+        this.toggleEl = null;
+        this.buttonEl = null;
+        this.dropdownEl = null;
+      }
     }
 
-    const selectorConfig = this.#getSelectorConfig();
-    if (!selectorConfig || selectorConfig.options.length !== 2) {
+    if (!selectorConfig || layout === 'empty') {
       this.container.addClass('claudian-hidden');
       return;
     }
-
     this.container.removeClass('claudian-hidden');
+
+    if (layout === 'toggle') {
+      this.#updateToggle(selectorConfig);
+    } else {
+      this.#updateDropdown(selectorConfig);
+    }
+  }
+
+  #updateToggle(selectorConfig: ProviderModeSelectorConfig) {
+    if (!this.toggleEl || !this.labelEl) {
+      return;
+    }
     const { active, inactive } = this.#resolveOptionPair(selectorConfig);
     const currentOption = selectorConfig.options.find((option) => option.value === selectorConfig.value)
       ?? selectorConfig.options[0];
@@ -221,6 +263,43 @@ export class ModeSelector {
       titleParts.push(currentOption.description);
     }
     this.container.setAttribute('title', titleParts.join('\n'));
+  }
+
+  #updateDropdown(selectorConfig: ProviderModeSelectorConfig) {
+    if (!this.buttonEl) {
+      return;
+    }
+    const currentOption = selectorConfig.options.find((option) => option.value === selectorConfig.value)
+      ?? selectorConfig.options[0];
+    this.buttonEl.empty();
+    this.buttonEl.createSpan({ cls: 'claudian-mode-btn-prefix', text: `${selectorConfig.label}: ` });
+    this.buttonEl.createSpan({ cls: 'claudian-mode-btn-label', text: currentOption.label });
+    this.container.setAttribute('title', currentOption.description ?? currentOption.label);
+    this.#renderDropdownOptions(selectorConfig, currentOption.value);
+  }
+
+  #renderDropdownOptions(selectorConfig: ProviderModeSelectorConfig, currentValue: string) {
+    if (!this.dropdownEl) {
+      return;
+    }
+    this.dropdownEl.empty();
+    for (const option of [...selectorConfig.options].reverse()) {
+      const optionEl = this.dropdownEl.createDiv({ cls: 'claudian-mode-option' });
+      if (option.value === currentValue) {
+        optionEl.addClass('selected');
+      }
+      optionEl.createSpan({ text: option.label });
+      if (option.description) {
+        optionEl.setAttribute('title', option.description);
+      }
+      optionEl.addEventListener('click', (event) => {
+        event.stopPropagation();
+        runToolbarAction(async () => {
+          await this.callbacks.onModeChange(option.value);
+          this.updateDisplay();
+        }, 'Failed to change mode');
+      });
+    }
   }
 
   renderOptions() {

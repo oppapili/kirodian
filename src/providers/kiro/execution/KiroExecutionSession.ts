@@ -64,7 +64,7 @@ import { waitForKiroCancelDelivery } from '../runtime/KiroCancelDelivery';
 import type { KiroModelCatalogCoordinator } from '../runtime/KiroModelCatalogCoordinator';
 import { buildKiroRuntimeEnv } from '../runtime/KiroRuntimeEnvironment';
 import { KiroSessionNotificationMirrorDeduplicator } from '../runtime/KiroSessionNotificationMirrorDeduplicator';
-import { getKiroProviderSettings } from '../settings';
+import { getKiroProviderSettings, resolveKiroSelectedAgentMode, updateCurrentKiroAgentModes } from '../settings';
 import { parseKiroProviderState } from '../types';
 import type {
   KiroExecutionNativeConnection,
@@ -76,6 +76,7 @@ import {
   normalizeKiroSessionModelMetadata,
   normalizeKiroSetModelMetadata,
 } from './KiroSessionModelMetadata';
+import { normalizeKiroSessionModeMetadata } from './KiroSessionModeMetadata';
 
 interface KiroExecutionSessionOptions {
   readonly commandCatalog?: Pick<KiroCommandCatalog, 'setCommandSnapshot'>;
@@ -656,6 +657,7 @@ RewindableExecutionSession {
     this.updateSnapshot(this.active ? 'executing' : 'idle');
     this.emitCurrentSnapshot();
     await this.publishSessionModels(response, owner.modelContextKey);
+    this.publishSessionModes(response);
     this.throwIfCancellationRequested(active);
     return response.sessionId;
   }
@@ -687,6 +689,7 @@ RewindableExecutionSession {
     this.updateSnapshot(this.active ? 'executing' : 'idle');
     this.emitCurrentSnapshot();
     await this.publishSessionModels(response, owner.modelContextKey);
+    this.publishSessionModes(response);
     this.throwIfCancellationRequested(active);
     return loadedSessionId;
   }
@@ -755,7 +758,13 @@ RewindableExecutionSession {
         this.throwIfCancellationRequested(active);
       }
     }
-    const requestedMode = resolveKiroNativeMode(request);
+    // The explicit Agent selector wins over the permission-toggle-derived mode.
+    // resolveKiroSelectedAgentMode only returns an id present in the persisted
+    // availableModes snapshot, so it can never send an unknown id (which Kiro
+    // rejects with a JSON-RPC Internal error). It falls back to null when nothing
+    // is selected, at which point the permission mapping drives the mode as before.
+    const requestedMode = resolveKiroSelectedAgentMode(this.plugin.settings)
+      ?? resolveKiroNativeMode(request);
     if (requestedMode) {
       await native.setMode({
         modeId: requestedMode,
@@ -1116,6 +1125,31 @@ RewindableExecutionSession {
         sourceContextKey,
       );
     }
+  }
+
+  /**
+   * Persists the agent modes advertised by a `session/new` or `session/load` response so the
+   * toolbar's Agent selector can render them synchronously from settings. Best-effort: a
+   * snapshot with no modes leaves the prior snapshot untouched, and persistence failures never
+   * disrupt the turn.
+   */
+  private publishSessionModes(
+    response: Pick<
+      Awaited<ReturnType<KiroExecutionNativeConnection['newSession']>>,
+      'configOptions' | 'modes'
+    >,
+  ): void {
+    const { currentModeId, modes } = normalizeKiroSessionModeMetadata(response);
+    if (modes.length === 0) return;
+    let changed = false;
+    void this.plugin.mutateSettingsConditionally(settings => {
+      changed = updateCurrentKiroAgentModes(settings, { currentModeId, modes }) !== null;
+      return changed;
+    }).then(() => {
+      if (changed) this.plugin.notifyProviderChatOptionsChanged('kiro');
+    }).catch(() => {
+      // Agent-mode publication is best-effort and cannot disrupt the session.
+    });
   }
 
   private async publishModelUpdate(

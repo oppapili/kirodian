@@ -1,5 +1,6 @@
 import type {
   ProviderChatUIConfig,
+  ProviderModeSelectorConfig,
   ProviderPermissionModeToggleConfig,
   ProviderReasoningOption,
   ProviderUIOption,
@@ -16,6 +17,7 @@ import {
 import {
   getKiroProviderSettings,
   getOrderedKiroVisibleModelIds,
+  resolveKiroSelectedAgentMode,
   updateKiroProviderSettings,
 } from '../settings';
 
@@ -162,8 +164,41 @@ export const kiroChatUIConfig: ProviderChatUIConfig = {
     }
   },
 
-  getModeSelector(): null {
-    return null;
+  getModeSelector(settings): ProviderModeSelectorConfig | null {
+    const kiroSettings = getKiroProviderSettings(settings);
+    const modes = kiroSettings.currentAgentModes?.modes ?? [];
+    if (modes.length === 0) {
+      return null;
+    }
+    const options: ProviderUIOption[] = modes.map(mode => ({
+      value: mode.id,
+      label: mode.name,
+      ...(mode.description ? { description: mode.description } : {}),
+    }));
+    // Resolve against the live modes so the displayed value is always a real,
+    // sendable id: the user's explicit choice when it still exists, else the
+    // session's current mode, else the first advertised mode.
+    const value = resolveKiroSelectedAgentMode(settings)
+      ?? kiroSettings.currentAgentModes?.currentModeId
+      ?? options[0].value;
+    return {
+      label: 'Agent',
+      options,
+      value,
+    };
+  },
+
+  applyModeSelection(value, settings): void {
+    if (!isRecord(settings)) {
+      return;
+    }
+    const kiroSettings = getKiroProviderSettings(settings);
+    const known = new Set((kiroSettings.currentAgentModes?.modes ?? []).map(mode => mode.id));
+    // Only persist ids Kiro actually advertises; ignore anything else so the
+    // execution layer never drives set_mode with an unknown id.
+    updateKiroProviderSettings(settings, {
+      selectedAgentMode: known.has(value) ? value : null,
+    });
   },
 
   getProviderIcon() {
