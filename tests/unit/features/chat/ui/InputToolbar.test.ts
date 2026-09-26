@@ -824,16 +824,21 @@ describe('InputToolbarLayoutController', () => {
 
 describe('createInputToolbar', () => {
 
-  it('should place the mode selector after the permission toggle in toolbar order', () => {
+  it('should place the mode selector right after the model selector and the permission toggle last', () => {
     const parentEl = createMockEl();
     const callbacks = createMockCallbacks();
 
     createInputToolbar(parentEl, callbacks);
 
-    const permissionIndex = parentEl.children.findIndex((child: any) => child.hasClass('claudian-permission-toggle'));
+    const modelIndex = parentEl.children.findIndex((child: any) => child.hasClass('claudian-model-selector'));
     const modeIndex = parentEl.children.findIndex((child: any) => child.hasClass('claudian-mode-selector'));
-    expect(permissionIndex).toBeGreaterThanOrEqual(0);
-    expect(modeIndex).toBeGreaterThan(permissionIndex);
-    expect(modeIndex).toBe(parentEl.children.length - 1);
+    const permissionIndex = parentEl.children.findIndex((child: any) => child.hasClass('claudian-permission-toggle'));
+
+    // Model selector comes first, the agent (mode) selector sits immediately after it.
+    expect(modelIndex).toBeGreaterThanOrEqual(0);
+    expect(modeIndex).toBe(modelIndex + 1);
+    // The permission toggle is appended last so `margin-left: auto` pins it right.
+    expect(permissionIndex).toBe(parentEl.children.length - 1);
+    expect(permissionIndex).toBeGreaterThan(modeIndex);
   });
 });
