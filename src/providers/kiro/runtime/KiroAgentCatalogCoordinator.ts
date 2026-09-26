@@ -1,6 +1,5 @@
 import type { ProviderHost } from '../../../core/providers/ProviderHost';
 import type { ProviderTransitionOwnerContext } from '../../../core/providers/types';
-import type { KiroAgentMode } from '../execution/KiroSessionModeMetadata';
 import {
   getCurrentKiroAgentModes,
   getKiroProviderSettings,
@@ -75,6 +74,7 @@ export class KiroAgentCatalogCoordinator {
     }
     const changed = await this.persist({
       currentModeId: discovery.currentAgentId,
+      directories: discovery.directories,
       modes,
     });
     if (changed) {
@@ -83,10 +83,7 @@ export class KiroAgentCatalogCoordinator {
     return { changed, kind: 'completed' };
   }
 
-  private async persist(snapshot: {
-    currentModeId: string | null;
-    modes: KiroAgentMode[];
-  }): Promise<boolean> {
+  private async persist(snapshot: KiroAgentModeSnapshot): Promise<boolean> {
     let changed = false;
     await this.plugin.mutateSettingsConditionally((settings) => {
       if (this.disposed) {
@@ -105,9 +102,17 @@ export class KiroAgentCatalogCoordinator {
 
 function sameSnapshot(
   left: KiroAgentModeSnapshot | null,
-  right: { currentModeId: string | null; modes: KiroAgentMode[] },
+  right: KiroAgentModeSnapshot,
 ): boolean {
   return left !== null
-    && JSON.stringify({ currentModeId: left.currentModeId, modes: left.modes })
-      === JSON.stringify({ currentModeId: right.currentModeId, modes: right.modes });
+    && JSON.stringify({
+      currentModeId: left.currentModeId,
+      directories: left.directories ?? null,
+      modes: left.modes,
+    })
+      === JSON.stringify({
+        currentModeId: right.currentModeId,
+        directories: right.directories ?? null,
+        modes: right.modes,
+      });
 }

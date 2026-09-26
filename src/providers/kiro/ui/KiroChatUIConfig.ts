@@ -1,5 +1,6 @@
 import type {
   ProviderChatUIConfig,
+  ProviderModelSelectorLock,
   ProviderModeSelectorConfig,
   ProviderPermissionModeToggleConfig,
   ProviderReasoningOption,
@@ -14,6 +15,7 @@ import {
   isKiroModelSelectionId,
   resolveKiroDefaultReasoningEffort,
 } from '../models';
+import { readKiroAgentModelLock } from '../runtime/KiroAgentModelLock';
 import {
   getKiroProviderSettings,
   getOrderedKiroVisibleModelIds,
@@ -214,6 +216,34 @@ export const kiroChatUIConfig: ProviderChatUIConfig = {
 
   getProviderIcon() {
     return KIRO_PROVIDER_ICON;
+  },
+
+  getModelSelectorLock(settings): ProviderModelSelectorLock | null {
+    const kiroSettings = getKiroProviderSettings(settings);
+    const snapshot = kiroSettings.currentAgentModes;
+    const directories = snapshot?.directories;
+    // No prefetched agent directories means we cannot resolve a `<dir>/<id>.json`, so there
+    // is nothing to lock (best-effort: absence is "no lock", never a disabled selector).
+    if (!directories) {
+      return null;
+    }
+    const known = new Set((snapshot?.modes ?? []).map(mode => mode.id));
+    const selectedAgentId = resolveKiroSelectedAgentMode(settings, known);
+    if (!selectedAgentId) {
+      return null;
+    }
+    // Built-in agents have no json and read back as null; custom agents pinning a `"model"`
+    // (including `"auto"`) return the pinned value, which locks the selector.
+    const pinnedModel = readKiroAgentModelLock(selectedAgentId, directories);
+    if (!pinnedModel) {
+      return null;
+    }
+    const agentName = snapshot?.modes.find(mode => mode.id === selectedAgentId)?.name
+      ?? selectedAgentId;
+    return {
+      lockedToModelId: encodeKiroModelId(pinnedModel),
+      reason: `Model is fixed to "${pinnedModel}" by agent "${agentName}"`,
+    };
   },
 };
 

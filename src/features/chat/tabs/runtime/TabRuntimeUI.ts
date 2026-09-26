@@ -356,6 +356,11 @@ function buildInputToolbar(
       });
       tab.ui.modeSelector.updateDisplay();
       tab.ui.modeSelector.renderOptions();
+      // A provider may lock the model to the selected agent's pinned model (Kiro),
+      // so refresh the model selector too — otherwise its locked/unlocked state only
+      // updates on the next hover-triggered re-render.
+      tab.ui.modelSelector.updateDisplay();
+      tab.ui.modelSelector.renderOptions();
       onUserModified();
     },
     onThinkingBudgetChange: async (budget: string) => {

@@ -1,7 +1,14 @@
+import type { ProviderHost } from '@/core/providers/ProviderHost';
 import {
+  KiroAgentCatalogService,
+  parseKiroAgentListDirectories,
   parseKiroAgentListOutput,
   toKiroAgentModes,
 } from '@/providers/kiro/runtime/KiroAgentCatalogService';
+import type {
+  KiroCatalogCommandResult,
+  KiroCatalogCommandRunner,
+} from '@/providers/kiro/runtime/KiroModelCatalogService';
 
 const ESC = String.fromCharCode(27);
 const DIM = `${ESC}[38;5;244m`;
@@ -178,5 +185,132 @@ describe('toKiroAgentModes', () => {
 
     expect(lite).toEqual({ id: 'kirocrew-lite', name: 'kirocrew-lite' });
     expect(lite && 'description' in lite).toBe(false);
+  });
+});
+
+describe('parseKiroAgentListDirectories', () => {
+  it('extracts the local and global agent directories from the header lines', () => {
+    const directories = parseKiroAgentListDirectories(REAL_OUTPUT);
+
+    expect(directories).toEqual({
+      localDir: '~/projects/kirodian/.kiro/agents',
+      globalDir: '~/.kiro/agents',
+    });
+  });
+
+  it('returns null for the local directory when the Workspace header is absent', () => {
+    const output = [
+      `${DIM}Global:    ${RESET}~/.kiro/agents`,
+      `* kiro_default                   ${DIM}(Built-in)${RESET}    Default agent`,
+    ].join('\n');
+
+    expect(parseKiroAgentListDirectories(output)).toEqual({
+      localDir: null,
+      globalDir: '~/.kiro/agents',
+    });
+  });
+
+  it('returns null for both directories when no header lines are present', () => {
+    const output = [
+      `* kiro_default                   ${DIM}(Built-in)${RESET}    Default agent`,
+    ].join('\n');
+
+    expect(parseKiroAgentListDirectories(output)).toEqual({
+      localDir: null,
+      globalDir: null,
+    });
+  });
+
+  it('captures a count-suffixed header value verbatim (a non-path, harmless downstream)', () => {
+    const output = ['Global: 3 agents'].join('\n');
+
+    expect(parseKiroAgentListDirectories(output)).toEqual({
+      localDir: null,
+      globalDir: '3 agents',
+    });
+  });
+});
+
+describe('KiroAgentCatalogService.discoverCatalog', () => {
+  function makeService(result: KiroCatalogCommandResult): KiroAgentCatalogService {
+    const runner: KiroCatalogCommandRunner = {
+      run: async () => result,
+    };
+    const plugin = {
+      settings: { providerConfigs: { kiro: { enabled: true } } },
+      app: { vault: { adapter: { basePath: '/vault' } } },
+      getResolvedProviderCliPath: async () => 'kiro-cli',
+    } as unknown as ProviderHost;
+    return new KiroAgentCatalogService(plugin, { runner });
+  }
+
+  it('parses the listing even when the CLI exits non-zero with stdout present', async () => {
+    // `kiro-cli agent list` can exit non-zero on a partial error (e.g. an
+    // `Error: File URI not found` for an unrelated agent's prompt) while still
+    // printing the full listing. The catalog must NOT be discarded in that case.
+    const stdout = [
+      'Error: File URI not found: file:///missing/prompt.md',
+      'Workspace: ~/projects/kirodian/.kiro/agents',
+      'Global:    ~/.kiro/agents',
+      '',
+      '* kiro_default                (Built-in)    Default agent',
+      '  kirocrew                    Global        Autonomous personal AI agent',
+    ].join('\n');
+    const result = await makeService({
+      exitCode: 1,
+      stdout,
+      stderr: '',
+      termination: undefined,
+    }).discoverCatalog();
+
+    expect(result.kind).toBe('completed');
+    if (result.kind !== 'completed') return;
+    expect(result.agents.map((agent) => agent.id)).toEqual(['kiro_default', 'kirocrew']);
+    expect(result.currentAgentId).toBe('kiro_default');
+    expect(result.directories).toEqual({
+      localDir: '~/projects/kirodian/.kiro/agents',
+      globalDir: '~/.kiro/agents',
+    });
+  });
+
+  it('parses the listing from stderr when stdout is empty', async () => {
+    // Verified on kiro-cli 2.18: `agent list` prints the whole listing on STDERR
+    // and leaves stdout empty. The catalog must read stderr in that case.
+    const stderr = [
+      'Workspace: ~/projects/kirodian/.kiro/agents',
+      'Global:    ~/.kiro/agents',
+      '',
+      '* kiro_default                (Built-in)    Default agent',
+      '  kirocrew                    Global        Autonomous personal AI agent',
+    ].join('\n');
+    const result = await makeService({
+      exitCode: 0,
+      stdout: '',
+      stderr,
+      termination: undefined,
+    }).discoverCatalog();
+
+    expect(result.kind).toBe('completed');
+    if (result.kind !== 'completed') return;
+    expect(result.agents.map((agent) => agent.id)).toEqual(['kiro_default', 'kirocrew']);
+    expect(result.currentAgentId).toBe('kiro_default');
+    expect(result.directories).toEqual({
+      localDir: '~/projects/kirodian/.kiro/agents',
+      globalDir: '~/.kiro/agents',
+    });
+  });
+
+  it('returns an empty completed result on a hard termination', async () => {
+    const result = await makeService({
+      exitCode: null,
+      stdout: '',
+      stderr: '',
+      termination: 'timeout',
+    }).discoverCatalog();
+
+    expect(result.kind).toBe('completed');
+    if (result.kind !== 'completed') return;
+    expect(result.agents).toEqual([]);
+    expect(result.directories).toEqual({ localDir: null, globalDir: null });
   });
 });

@@ -304,6 +304,25 @@ export interface ProviderChatUIConfig {
 
   /** SVG icon for the provider (shown next to model names in selectors). */
   getProviderIcon?(): ProviderIconSvg | null;
+
+  /**
+   * Optional lock on the model selector. When a provider returns non-null, the toolbar's
+   * Model selector is rendered disabled, its displayed value forced to `lockedToModelId`,
+   * and `reason` surfaced (tooltip/label) to explain why the choice is fixed. Return null
+   * to leave the selector fully interactive (the default for providers that never lock).
+   *
+   * Added for Kiro custom agents, whose json can pin a `"model"` (including `"auto"`) that
+   * overrides any UI model selection; optional so no other provider is affected.
+   */
+  getModelSelectorLock?(settings: Record<string, unknown>): ProviderModelSelectorLock | null;
+}
+
+/** Describes a locked model selector: the forced model id and a human-readable reason. */
+export interface ProviderModelSelectorLock {
+  /** The model id to force as the selector's displayed value. */
+  lockedToModelId: string;
+  /** Human-readable explanation of why the model is fixed (shown as a tooltip/note). */
+  reason: string;
 }
 
 // ---------------------------------------------------------------------------

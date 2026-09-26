@@ -1,3 +1,7 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
 import {
   getKiroProviderSettings,
   reconcileKiroSessionAgentModes,
@@ -142,5 +146,85 @@ describe('kiroChatUIConfig.getModeSelector', () => {
     // The guarded fallback rejects the unlisted currentModeId and shows the first option.
     expect(config?.value).toBe('kiro_default');
     expect(config?.options.map((option) => option.value)).not.toContain('ghost_mode');
+  });
+});
+
+describe('kiroChatUIConfig.getModelSelectorLock', () => {
+  let tmpRoot: string;
+  let globalDir: string;
+  let localDir: string;
+
+  beforeEach(() => {
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'kiro-uiconfig-lock-'));
+    globalDir = path.join(tmpRoot, 'global', '.kiro', 'agents');
+    localDir = path.join(tmpRoot, 'local', '.kiro', 'agents');
+    fs.mkdirSync(globalDir, { recursive: true });
+    fs.mkdirSync(localDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpRoot, { recursive: true, force: true });
+  });
+
+  function writeAgentJson(dir: string, id: string, model: unknown): void {
+    fs.writeFileSync(path.join(dir, `${id}.json`), JSON.stringify({ model }), 'utf8');
+  }
+
+  function settingsWithAgentDirs(currentModeId: string): Record<string, unknown> {
+    const settings: Record<string, unknown> = {};
+    updateCurrentKiroAgentModes(settings, {
+      currentModeId,
+      directories: { globalDir, localDir },
+      modes: [
+        { id: 'kiro_default', name: 'Default' },
+        { id: 'kirocrew', name: 'kirocrew' },
+      ],
+    });
+    return settings;
+  }
+
+  it('returns a lock when the selected custom agent pins a model (auto)', () => {
+    writeAgentJson(globalDir, 'kirocrew', 'auto');
+    const settings = settingsWithAgentDirs('kirocrew');
+
+    const lock = kiroChatUIConfig.getModelSelectorLock?.(settings);
+
+    expect(lock).toEqual({
+      lockedToModelId: 'kiro/auto',
+      reason: 'Model is fixed to "auto" by agent "kirocrew"',
+    });
+  });
+
+  it('returns null for a built-in agent that has no json', () => {
+    const settings = settingsWithAgentDirs('kiro_default');
+
+    expect(kiroChatUIConfig.getModelSelectorLock?.(settings)).toBeNull();
+  });
+
+  it('returns null when the session has advertised no agent directories', () => {
+    const settings: Record<string, unknown> = {};
+    updateCurrentKiroAgentModes(settings, {
+      currentModeId: 'kirocrew',
+      modes: [{ id: 'kirocrew', name: 'kirocrew' }],
+    });
+
+    expect(kiroChatUIConfig.getModelSelectorLock?.(settings)).toBeNull();
+  });
+
+  it('returns null when no agent modes exist yet', () => {
+    expect(kiroChatUIConfig.getModelSelectorLock?.({})).toBeNull();
+  });
+
+  it('locks to an explicitly selected custom agent over the session current mode', () => {
+    writeAgentJson(globalDir, 'kirocrew', 'claude-opus-5');
+    const settings = settingsWithAgentDirs('kiro_default');
+    kiroChatUIConfig.applyModeSelection?.('kirocrew', settings);
+
+    const lock = kiroChatUIConfig.getModelSelectorLock?.(settings);
+
+    expect(lock).toEqual({
+      lockedToModelId: 'kiro/claude-opus-5',
+      reason: 'Model is fixed to "claude-opus-5" by agent "kirocrew"',
+    });
   });
 });

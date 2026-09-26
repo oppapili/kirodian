@@ -3,6 +3,7 @@ import type { ProviderTransitionOwnerContext } from '../../../core/providers/typ
 import { getVaultPath } from '../../../utils/path';
 import type { KiroAgentMode } from '../execution/KiroSessionModeMetadata';
 import { getKiroProviderSettings } from '../settings';
+import type { KiroAgentDirectories } from './KiroAgentModelLock';
 import {
   type KiroCatalogCommandRunner,
   SpawnKiroCatalogCommandRunner,
@@ -42,6 +43,12 @@ export type KiroAgentCatalogDiscoveryResult =
   | {
     agents: KiroDiscoveredAgent[];
     currentAgentId: string | null;
+    /**
+     * Agent-definition directories mined from the `agent list` headers. Optional so existing
+     * callers/fixtures that predate the model-lock feature still satisfy the type; the live
+     * `discoverCatalog` always populates it (with nulls when a header is absent).
+     */
+    directories?: KiroAgentDirectories;
     kind: 'completed';
   }
   | {
@@ -83,9 +90,27 @@ const SCOPE_TOKENS: ReadonlyMap<string, KiroAgentScope> = new Map([
  * untouched. Duplicate ids collapse to the first occurrence. The raw `id` is the
  * sendable `session/set_mode` id, so only real agent ids are emitted.
  *
- * @param output - Raw stdout from `kiro-cli agent list`.
+ * @param output - Raw listing text from `kiro-cli agent list` (stdout or stderr).
  * @returns The parsed agents in listing order.
  */
+/**
+ * `kiro-cli agent list` prints its listing on stderr, but a future version could move
+ * it to stdout. Choose the stream that actually contains agent rows: prefer whichever
+ * parses to at least one agent, else fall back to stdout then stderr so directory
+ * headers can still be mined.
+ */
+export function pickKiroAgentListing(stdout: string, stderr: string): string {
+  const out = stdout ?? '';
+  const err = stderr ?? '';
+  if (parseKiroAgentListOutput(out).length > 0) {
+    return out;
+  }
+  if (parseKiroAgentListOutput(err).length > 0) {
+    return err;
+  }
+  return out.trim().length > 0 ? out : err;
+}
+
 export function parseKiroAgentListOutput(output: string): KiroDiscoveredAgent[] {
   const agents: KiroDiscoveredAgent[] = [];
   const seen = new Set<string>();
@@ -129,11 +154,57 @@ export function parseKiroAgentListOutput(output: string): KiroDiscoveredAgent[] 
   return agents;
 }
 
+// A `Workspace:` / `Global:` header line, capturing the scope label and the directory path
+// that follows the colon. These lines are excluded from the agent list by
+// SECTION_HEADER_PATTERN; here we additionally mine them for the agent-definition dirs so a
+// selected agent's `<dir>/<id>.json` (which carries its pinned `"model"`) can be resolved
+// later. The path is whatever trails the colon after ANSI codes are stripped; a count-suffixed
+// header (`Global: 3 agents`) yields a non-path value and is simply ignored downstream.
+const AGENT_DIR_HEADER_PATTERN = /^(Workspace|Global)\s*(?:\([^)]*\))?\s*:\s*(.+?)\s*$/u;
+
+/**
+ * Extracts the local and global agent-definition directories from the `Workspace:` and
+ * `Global:` header lines of `kiro-cli agent list` output.
+ *
+ * `Workspace:` points at the local `<project>/.kiro/agents` directory and `Global:` at
+ * `~/.kiro/agents`. Either may be absent (no local `.kiro/agents`, or a headless invocation
+ * that omits the workspace header). A header whose value is not a path (e.g. a count suffix
+ * such as `Global: 3 agents`) is captured verbatim; the reader treats a non-existent
+ * directory as "no json", so a spurious value cannot lock the selector.
+ *
+ * @param output - Raw stdout from `kiro-cli agent list`.
+ * @returns The captured directories, each `null` when its header is absent.
+ */
+export function parseKiroAgentListDirectories(output: string): KiroAgentDirectories {
+  let localDir: string | null = null;
+  let globalDir: string | null = null;
+
+  for (const rawLine of stripAnsi(output).split(/\r?\n/)) {
+    const match = AGENT_DIR_HEADER_PATTERN.exec(rawLine.trim());
+    if (!match) {
+      continue;
+    }
+    const value = match[2].trim();
+    if (!value) {
+      continue;
+    }
+    if (match[1] === 'Workspace' && localDir === null) {
+      localDir = value;
+    } else if (match[1] === 'Global' && globalDir === null) {
+      globalDir = value;
+    }
+  }
+
+  return { globalDir, localDir };
+}
+
 /**
  * Reads the live agent catalog by running `kiro-cli agent list` through the same
- * spawn seam as the model catalog. Best-effort: a non-zero exit, a timeout, or a
- * parse yielding no agents returns an empty completed result so the selector hides
- * gracefully rather than throwing into the session.
+ * spawn seam as the model catalog. Best-effort: a hard termination (timeout / kill)
+ * or a parse yielding no agents returns an empty completed result so the selector
+ * hides gracefully rather than throwing into the session. A non-zero exit code does
+ * NOT discard the output — `agent list` can exit non-zero on a partial error while
+ * still printing the full listing, so stdout is parsed regardless of exit code.
  */
 export class KiroAgentCatalogService implements KiroAgentCatalogServiceLike {
   private readonly runner: KiroCatalogCommandRunner;
@@ -166,15 +237,33 @@ export class KiroAgentCatalogService implements KiroAgentCatalogServiceLike {
         signal,
         timeoutMs: this.options.agentCommandTimeoutMs ?? AGENT_COMMAND_TIMEOUT_MS,
       });
-      if (commandResult.termination || commandResult.exitCode !== 0) {
-        return { agents: [], currentAgentId: null, kind: 'completed' };
+      // A hard termination (timeout / killed) yields no usable output.
+      if (commandResult.termination) {
+        return {
+          agents: [],
+          currentAgentId: null,
+          directories: { globalDir: null, localDir: null },
+          kind: 'completed',
+        };
       }
 
-      const agents = parseKiroAgentListOutput(commandResult.stdout);
+      // `kiro-cli agent list` prints its listing on STDERR, not stdout (verified on
+      // kiro-cli 2.18; stdout comes back empty). It can also exit non-zero on a
+      // partial error (e.g. `Error: File URI not found` for an unrelated agent's
+      // prompt) while still printing the full listing. So we do not gate on exitCode
+      // and we parse both streams: prefer whichever yields agents.
+      const listing = pickKiroAgentListing(commandResult.stdout, commandResult.stderr);
+      const agents = parseKiroAgentListOutput(listing);
       const currentAgentId = agents.find(agent => agent.isCurrent)?.id ?? null;
-      return { agents, currentAgentId, kind: 'completed' };
+      const directories = parseKiroAgentListDirectories(listing);
+      return { agents, currentAgentId, directories, kind: 'completed' };
     } catch {
-      return { agents: [], currentAgentId: null, kind: 'completed' };
+      return {
+        agents: [],
+        currentAgentId: null,
+        directories: { globalDir: null, localDir: null },
+        kind: 'completed',
+      };
     }
   }
 }

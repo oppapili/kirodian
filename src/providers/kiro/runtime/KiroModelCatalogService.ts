@@ -40,6 +40,8 @@ export interface KiroCatalogCommandRequest {
 export interface KiroCatalogCommandResult {
   exitCode: number | null;
   stdout: string;
+  /** Captured stderr. `kiro-cli agent list` prints its listing here, not on stdout. */
+  stderr: string;
   termination?: 'abort' | 'error' | 'output-limit' | 'timeout';
 }
 
@@ -274,7 +276,7 @@ export class KiroModelCatalogService implements KiroModelCatalogServiceLike {
 export class SpawnKiroCatalogCommandRunner implements KiroCatalogCommandRunner {
   run(request: KiroCatalogCommandRequest): Promise<KiroCatalogCommandResult> {
     if (request.signal?.aborted) {
-      return Promise.resolve({ exitCode: null, stdout: '', termination: 'abort' });
+      return Promise.resolve({ exitCode: null, stdout: '', stderr: '', termination: 'abort' });
     }
 
     return new Promise((resolve) => {
@@ -282,10 +284,12 @@ export class SpawnKiroCatalogCommandRunner implements KiroCatalogCommandRunner {
       const proc = spawn(spawnSpec.command, spawnSpec.args, {
         cwd: request.cwd,
         env: request.env,
-        stdio: ['ignore', 'pipe', 'ignore'],
+        // stderr is piped too: `kiro-cli agent list` prints its listing on stderr.
+        stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       });
       const chunks: Buffer[] = [];
+      const errChunks: Buffer[] = [];
       let byteLength = 0;
       let settled = false;
 
@@ -303,11 +307,11 @@ export class SpawnKiroCatalogCommandRunner implements KiroCatalogCommandRunner {
       };
       const onAbort = (): void => {
         terminate();
-        finish({ exitCode: null, stdout: '', termination: 'abort' });
+        finish({ exitCode: null, stdout: '', stderr: '', termination: 'abort' });
       };
       const timeout = window.setTimeout(() => {
         terminate();
-        finish({ exitCode: null, stdout: '', termination: 'timeout' });
+        finish({ exitCode: null, stdout: '', stderr: '', termination: 'timeout' });
       }, request.timeoutMs);
 
       request.signal?.addEventListener('abort', onAbort, { once: true });
@@ -316,16 +320,30 @@ export class SpawnKiroCatalogCommandRunner implements KiroCatalogCommandRunner {
         byteLength += buffer.byteLength;
         if (byteLength > MAX_STDOUT_BYTES) {
           terminate();
-          finish({ exitCode: null, stdout: '', termination: 'output-limit' });
+          finish({ exitCode: null, stdout: '', stderr: '', termination: 'output-limit' });
           return;
         }
         chunks.push(buffer);
       });
+      proc.stderr.on('data', (chunk: Buffer | string) => {
+        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        byteLength += buffer.byteLength;
+        if (byteLength > MAX_STDOUT_BYTES) {
+          terminate();
+          finish({ exitCode: null, stdout: '', stderr: '', termination: 'output-limit' });
+          return;
+        }
+        errChunks.push(buffer);
+      });
       proc.once('error', () => {
-        finish({ exitCode: null, stdout: '', termination: 'error' });
+        finish({ exitCode: null, stdout: '', stderr: '', termination: 'error' });
       });
       proc.once('close', (exitCode) => {
-        finish({ exitCode, stdout: Buffer.concat(chunks).toString('utf8') });
+        finish({
+          exitCode,
+          stdout: Buffer.concat(chunks).toString('utf8'),
+          stderr: Buffer.concat(errChunks).toString('utf8'),
+        });
       });
     });
   }
