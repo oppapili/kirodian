@@ -90,9 +90,27 @@ const SCOPE_TOKENS: ReadonlyMap<string, KiroAgentScope> = new Map([
  * untouched. Duplicate ids collapse to the first occurrence. The raw `id` is the
  * sendable `session/set_mode` id, so only real agent ids are emitted.
  *
- * @param output - Raw stdout from `kiro-cli agent list`.
+ * @param output - Raw listing text from `kiro-cli agent list` (stdout or stderr).
  * @returns The parsed agents in listing order.
  */
+/**
+ * `kiro-cli agent list` prints its listing on stderr, but a future version could move
+ * it to stdout. Choose the stream that actually contains agent rows: prefer whichever
+ * parses to at least one agent, else fall back to stdout then stderr so directory
+ * headers can still be mined.
+ */
+export function pickKiroAgentListing(stdout: string, stderr: string): string {
+  const out = stdout ?? '';
+  const err = stderr ?? '';
+  if (parseKiroAgentListOutput(out).length > 0) {
+    return out;
+  }
+  if (parseKiroAgentListOutput(err).length > 0) {
+    return err;
+  }
+  return out.trim().length > 0 ? out : err;
+}
+
 export function parseKiroAgentListOutput(output: string): KiroDiscoveredAgent[] {
   const agents: KiroDiscoveredAgent[] = [];
   const seen = new Set<string>();
@@ -229,13 +247,15 @@ export class KiroAgentCatalogService implements KiroAgentCatalogServiceLike {
         };
       }
 
-      // `kiro-cli agent list` can exit non-zero for a PARTIAL failure (e.g. an
-      // `Error: File URI not found` while resolving an unrelated agent's prompt)
-      // yet still print the full listing on stdout. So we do not gate on exitCode:
-      // parse stdout regardless, and only fall back to empty when nothing parsed.
-      const agents = parseKiroAgentListOutput(commandResult.stdout);
+      // `kiro-cli agent list` prints its listing on STDERR, not stdout (verified on
+      // kiro-cli 2.18; stdout comes back empty). It can also exit non-zero on a
+      // partial error (e.g. `Error: File URI not found` for an unrelated agent's
+      // prompt) while still printing the full listing. So we do not gate on exitCode
+      // and we parse both streams: prefer whichever yields agents.
+      const listing = pickKiroAgentListing(commandResult.stdout, commandResult.stderr);
+      const agents = parseKiroAgentListOutput(listing);
       const currentAgentId = agents.find(agent => agent.isCurrent)?.id ?? null;
-      const directories = parseKiroAgentListDirectories(commandResult.stdout);
+      const directories = parseKiroAgentListDirectories(listing);
       return { agents, currentAgentId, directories, kind: 'completed' };
     } catch {
       return {

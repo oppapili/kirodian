@@ -259,6 +259,34 @@ describe('KiroAgentCatalogService.discoverCatalog', () => {
     const result = await makeService({
       exitCode: 1,
       stdout,
+      stderr: '',
+      termination: undefined,
+    }).discoverCatalog();
+
+    expect(result.kind).toBe('completed');
+    if (result.kind !== 'completed') return;
+    expect(result.agents.map((agent) => agent.id)).toEqual(['kiro_default', 'kirocrew']);
+    expect(result.currentAgentId).toBe('kiro_default');
+    expect(result.directories).toEqual({
+      localDir: '~/projects/kirodian/.kiro/agents',
+      globalDir: '~/.kiro/agents',
+    });
+  });
+
+  it('parses the listing from stderr when stdout is empty', async () => {
+    // Verified on kiro-cli 2.18: `agent list` prints the whole listing on STDERR
+    // and leaves stdout empty. The catalog must read stderr in that case.
+    const stderr = [
+      'Workspace: ~/projects/kirodian/.kiro/agents',
+      'Global:    ~/.kiro/agents',
+      '',
+      '* kiro_default                (Built-in)    Default agent',
+      '  kirocrew                    Global        Autonomous personal AI agent',
+    ].join('\n');
+    const result = await makeService({
+      exitCode: 0,
+      stdout: '',
+      stderr,
       termination: undefined,
     }).discoverCatalog();
 
@@ -276,6 +304,7 @@ describe('KiroAgentCatalogService.discoverCatalog', () => {
     const result = await makeService({
       exitCode: null,
       stdout: '',
+      stderr: '',
       termination: 'timeout',
     }).discoverCatalog();
 
