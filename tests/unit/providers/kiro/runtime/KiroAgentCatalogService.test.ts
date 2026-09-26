@@ -1,0 +1,131 @@
+import {
+  parseKiroAgentListOutput,
+  toKiroAgentModes,
+} from '@/providers/kiro/runtime/KiroAgentCatalogService';
+
+const ESC = String.fromCharCode(27);
+const DIM = `${ESC}[38;5;244m`;
+const RESET = `${ESC}[0m`;
+
+// Expected values are derived from captured `kiro-cli agent list` output (kiro-cli
+// 2.18.0), not from the parser implementation. The scope word and header labels are
+// wrapped in ANSI colour codes; descriptions wrap onto blank-id continuation lines.
+const REAL_OUTPUT = [
+  `${DIM}Workspace: ${RESET}~/projects/kirodian/.kiro/agents`,
+  `${DIM}Global:    ${RESET}~/.kiro/agents`,
+  '',
+  `* kiro_default                   ${DIM}(Built-in)${RESET}    Default agent`,
+  `  kiro_help                      ${DIM}(Built-in)${RESET}    Help agent that answers questions about Kiro CLI features using`,
+  '                                                documentation',
+  '  kirocrew                       Global        Autonomous personal AI agent that schedules recurring tasks, spawns',
+  '                                                parallel workers, and operates independently',
+  '  kirocrew-lite                  Global        ',
+  '  project_helper                 Local         Repo-specific helper',
+].join('\n');
+
+describe('parseKiroAgentListOutput', () => {
+  it('skips the Workspace / Global header lines', () => {
+    const ids = parseKiroAgentListOutput(REAL_OUTPUT).map((agent) => agent.id);
+
+    expect(ids).toEqual([
+      'kiro_default',
+      'kiro_help',
+      'kirocrew',
+      'kirocrew-lite',
+      'project_helper',
+    ]);
+  });
+
+  it('marks the leading-* agent as current and the others as not', () => {
+    const agents = parseKiroAgentListOutput(REAL_OUTPUT);
+
+    expect(agents[0]).toMatchObject({ id: 'kiro_default', isCurrent: true });
+    expect(agents.slice(1).every((agent) => !agent.isCurrent)).toBe(true);
+  });
+
+  it('resolves all three scopes', () => {
+    const byId = new Map(
+      parseKiroAgentListOutput(REAL_OUTPUT).map((agent) => [agent.id, agent.scope]),
+    );
+
+    expect(byId.get('kiro_default')).toBe('built-in');
+    expect(byId.get('kirocrew')).toBe('global');
+    expect(byId.get('project_helper')).toBe('local');
+  });
+
+  it('joins a wrapped multi-line description onto its agent', () => {
+    const agent = parseKiroAgentListOutput(REAL_OUTPUT).find(
+      (entry) => entry.id === 'kiro_help',
+    );
+
+    expect(agent?.description).toBe(
+      'Help agent that answers questions about Kiro CLI features using documentation',
+    );
+  });
+
+  it('preserves an empty description', () => {
+    const agent = parseKiroAgentListOutput(REAL_OUTPUT).find(
+      (entry) => entry.id === 'kirocrew-lite',
+    );
+
+    expect(agent?.description).toBe('');
+  });
+
+  it('preserves a unicode (Japanese) description untouched', () => {
+    const output = [
+      `  taskmaster                     Global        タスクを分解して実行する自律エージェント`,
+    ].join('\n');
+
+    expect(parseKiroAgentListOutput(output)[0]).toMatchObject({
+      id: 'taskmaster',
+      description: 'タスクを分解して実行する自律エージェント',
+      scope: 'global',
+      isCurrent: false,
+    });
+  });
+
+  it('skips the WSL "Error: File URI not found" line', () => {
+    const output = [
+      'Error: File URI not found: file:///mnt/c/Users/dev',
+      `${DIM}Global:    ${RESET}~/.kiro/agents`,
+      `* kiro_default                   ${DIM}(Built-in)${RESET}    Default agent`,
+    ].join('\n');
+
+    const agents = parseKiroAgentListOutput(output);
+
+    expect(agents).toHaveLength(1);
+    expect(agents[0]).toMatchObject({ id: 'kiro_default', isCurrent: true });
+  });
+
+  it('collapses a duplicate id to its first occurrence', () => {
+    const output = [
+      `  kiro_default                   ${DIM}(Built-in)${RESET}    Default agent`,
+      `  kiro_default                   ${DIM}(Built-in)${RESET}    Duplicate line`,
+    ].join('\n');
+
+    const agents = parseKiroAgentListOutput(output);
+
+    expect(agents).toHaveLength(1);
+    expect(agents[0].description).toBe('Default agent');
+  });
+
+  it('returns an empty list for output with no agent rows', () => {
+    expect(parseKiroAgentListOutput('Error: something went wrong')).toEqual([]);
+  });
+});
+
+describe('toKiroAgentModes', () => {
+  it('projects agents onto {id, name, description} using the raw id as name', () => {
+    const modes = toKiroAgentModes(parseKiroAgentListOutput(REAL_OUTPUT));
+
+    expect(modes[0]).toEqual({ id: 'kiro_default', name: 'kiro_default', description: 'Default agent' });
+  });
+
+  it('omits the description key when the agent description is empty', () => {
+    const modes = toKiroAgentModes(parseKiroAgentListOutput(REAL_OUTPUT));
+    const lite = modes.find((mode) => mode.id === 'kirocrew-lite');
+
+    expect(lite).toEqual({ id: 'kirocrew-lite', name: 'kirocrew-lite' });
+    expect(lite && 'description' in lite).toBe(false);
+  });
+});
