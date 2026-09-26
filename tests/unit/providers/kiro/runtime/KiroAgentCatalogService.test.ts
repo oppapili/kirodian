@@ -103,6 +103,26 @@ describe('parseKiroAgentListOutput', () => {
     });
   });
 
+  it('excludes section headers that carry a count or parenthetical, not just a bare colon', () => {
+    // A future CLI could print `Global: 3 agents` or `Global (2):` instead of a
+    // bare `Global:`. The `Global` heading word is itself a scope token, so the
+    // header must be dropped by the dedicated section-header shape (not the
+    // empty-id fallthrough) and must never surface as a phantom agent.
+    const output = [
+      'Global: 3 agents',
+      '  kirocrew-lead   Global      Coordinates a crew of specialised subagents',
+      'Workspace (1):',
+      '  repo-reviewer   Local       Reviews changes against this repository',
+    ].join('\n');
+    const parsed = parseKiroAgentListOutput(output);
+    expect(parsed.agents.map((agent) => agent.id)).toEqual([
+      'kirocrew-lead',
+      'repo-reviewer',
+    ]);
+    expect(parsed.agents.map((agent) => agent.id)).not.toContain('Global');
+    expect(parsed.agents.map((agent) => agent.id)).not.toContain('Workspace');
+  });
+
   it('collapses duplicate ids to the first occurrence and drops the current flag on an unknown mark', () => {
     const output = [
       '  kiro_default  (Built-in)  First definition',

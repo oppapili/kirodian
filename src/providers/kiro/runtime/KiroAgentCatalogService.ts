@@ -24,6 +24,14 @@ const ANSI_ESCAPE_SEQUENCE = new RegExp(
 );
 // Scope tokens as printed by `kiro-cli agent list`.
 const SCOPE_TOKEN_PATTERN = /\(Built-in\)|\bGlobal\b|\bLocal\b/u;
+// Section headers printed by `kiro-cli agent list` (e.g. `Global:`, `Workspace:`).
+// The heading word is followed directly by a colon, optionally trailed by a count
+// or parenthetical (`Global: 3 agents`, `Global (2):`) but never by an id/scope
+// column. Matching the header shape explicitly means the exclusion is intentional
+// rather than relying on the empty-id fallthrough in `parseAgentRow`, which would
+// otherwise let a `Global: 3 agents`-style header parse as a phantom agent because
+// `Global` matches SCOPE_TOKEN_PATTERN.
+const SECTION_HEADER_PATTERN = /^[A-Za-z][\w -]*(?:\s*\([^)]*\))?\s*:(?:\s+\d.*)?$/u;
 
 export interface KiroAgentListParseResult {
   agents: KiroDiscoveredAgent[];
@@ -164,8 +172,11 @@ function isNoiseLine(line: string): boolean {
   if (trimmed.startsWith('Error:')) {
     return true;
   }
-  // `Workspace:` / `Global:` section headers end with a colon and carry no scope token.
-  if (/^[A-Za-z][\w -]*:$/u.test(trimmed) && !SCOPE_TOKEN_PATTERN.test(trimmed)) {
+  // `Workspace:` / `Global:` section headers: a leading word directly followed by a
+  // colon (optionally with a count such as `Global: 3 agents` or a `(2)` parenthetical).
+  // Matched as a dedicated shape so headers are excluded intentionally, even when the
+  // heading word (`Global`) happens to be a scope token.
+  if (SECTION_HEADER_PATTERN.test(trimmed)) {
     return true;
   }
   return false;

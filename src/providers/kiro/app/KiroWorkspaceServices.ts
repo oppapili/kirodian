@@ -99,6 +99,16 @@ export async function createKiroWorkspaceServices(
     async prepareSettings() {
       // Pre-fetch both catalogs at settings/startup so the model and Agent
       // selectors render before the first prompt establishes a session.
+      //
+      // Each coordinator's discovery independently spawns a `--version` fingerprint
+      // probe plus its list command, so this is four CLI spawns rather than two. We
+      // deliberately keep the two pipelines independent instead of sharing a single
+      // `--version` probe: the two probes run concurrently (Promise.all) and each
+      // list command carries a bounded 20s timeout, so the wall-clock impact is
+      // capped, and independence preserves the model-catalog pattern this pipeline
+      // mirrors (no cross-coupling of fingerprints or failure modes between the two).
+      // A shared probe would only shave one concurrent spawn while entangling the two
+      // catalogs' lifecycles; the parity and boundedness justify leaving it as-is.
       await Promise.all([
         modelCatalogCoordinator.ensureFresh('settings'),
         agentCatalogCoordinator.ensureFresh('settings'),
