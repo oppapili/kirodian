@@ -11,7 +11,6 @@ import {
   findKiroModel,
   getKiroAvailableReasoningEfforts,
   isKiroModelSelectionId,
-  resolveKiroContextWindow,
   resolveKiroDefaultReasoningEffort,
 } from '../models';
 import {
@@ -25,8 +24,6 @@ const KIRO_PERMISSION_MODE_TOGGLE: ProviderPermissionModeToggleConfig = {
   inactiveLabel: 'Safe',
   activeValue: 'yolo',
   activeLabel: 'YOLO',
-  planValue: 'plan',
-  planLabel: 'PLAN',
 };
 
 export const kiroChatUIConfig: ProviderChatUIConfig = {
@@ -87,15 +84,6 @@ export const kiroChatUIConfig: ProviderChatUIConfig = {
     return resolveKiroDefaultReasoningEffort(
       selectedModel ? { ...selectedModel, reasoningEfforts: [...efforts] } : null,
       kiroSettings.preferredReasoningByModel[rawId],
-    );
-  },
-
-  getContextWindowSize(model, customLimits = {}, settings = {}): number {
-    const rawId = resolveSelectedKiroRawModelId(model, settings);
-    return resolveKiroContextWindow(
-      rawId ? encodeKiroModelId(rawId) : model,
-      getKiroProviderSettings(settings).currentCatalog?.models ?? [],
-      customLimits,
     );
   },
 
@@ -165,23 +153,12 @@ export const kiroChatUIConfig: ProviderChatUIConfig = {
   },
 
   resolvePermissionMode(settings): string {
-    if (settings.permissionMode === 'plan') return 'plan';
     return settings.permissionMode === 'yolo' ? 'yolo' : 'normal';
   },
 
   applyPermissionMode(value, settings): void {
     if (isRecord(settings)) {
-      const currentMode = settings.permissionMode;
-      if (value === 'plan') {
-        if (currentMode === 'normal' || currentMode === 'yolo') {
-          updateKiroProviderSettings(settings, { planBasePermissionMode: currentMode });
-        }
-        settings.permissionMode = 'plan';
-        return;
-      }
-      const baseMode = value === 'yolo' ? 'yolo' : 'normal';
-      updateKiroProviderSettings(settings, { planBasePermissionMode: baseMode });
-      settings.permissionMode = baseMode;
+      settings.permissionMode = value === 'yolo' ? 'yolo' : 'normal';
     }
   },
 
@@ -218,13 +195,6 @@ function normalizeSelection(model: string): string {
   const normalized = model.trim();
   const rawId = decodeKiroModelId(normalized);
   return rawId ? encodeKiroModelId(rawId) : model;
-}
-
-function resolveSelectedKiroRawModelId(
-  model: string,
-  settings: Record<string, unknown>,
-): string | null {
-  return decodeKiroModelId(model);
 }
 
 function getExplicitlySelectedKiroModel(

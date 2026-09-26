@@ -10,7 +10,6 @@ import { KIRO_PROVIDER_CAPABILITIES } from './capabilities';
 import { kiroSettingsReconciler } from './env/KiroSettingsReconciler';
 import { KiroExecutionBackend } from './execution/KiroExecutionBackend';
 import { KiroConversationHistoryService } from './history/KiroConversationHistoryService';
-import { isKiroModelSelectionId } from './models';
 import { kiroSubagentLifecycleAdapter } from './normalization/kiroSubagentNormalization';
 import { getKiroProviderSettings, updateKiroProviderSettings } from './settings';
 import { kiroChatUIConfig } from './ui/KiroChatUIConfig';
@@ -26,12 +25,6 @@ export const kiroProviderRegistration: ProviderModule = {
       commandCatalog: workspace.commandCatalog,
       modelCatalogCoordinator: workspace.modelCatalogCoordinator,
     });
-  },
-  resolveTitleGenerationModel: (plugin) => {
-    const model = typeof plugin.settings.titleGenerationModel === 'string'
-      ? plugin.settings.titleGenerationModel.trim()
-      : '';
-    return model && isKiroModelSelectionId(model) ? model : undefined;
   },
   displayName: 'Kiro',
   environmentKeyPatterns: [/^KIRO_/i, /^AWS_/i],

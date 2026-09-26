@@ -1,9 +1,9 @@
-import { CachedProviderCliResolver } from '../../../core/providers/cli/CachedProviderCliResolver';
+import { CachedProviderCLIResolver } from '../../../core/providers/cli/CachedProviderCLIResolver';
 import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
 import { getKiroProviderSettings } from '../settings';
 
-export class KiroCliResolver {
-  private readonly resolver = new CachedProviderCliResolver({
+export class KiroCLIResolver {
+  private readonly resolver = new CachedProviderCLIResolver({
     binaryName: 'kiro-cli',
     getSettingsProjection: (settings) => {
       const providerSettings = getKiroProviderSettings(settings);

@@ -1,4 +1,4 @@
-import type { AcpAvailableCommand } from '../../acp';
+import type { ACPAvailableCommand } from '../../acp';
 
 // Kiro streams its session updates over standard ACP `session/update`, so unlike
 // Grok there is no `x.ai/*` wrapped-notification envelope to unwrap here. The only
@@ -16,14 +16,14 @@ export const KIRO_COMMANDS_AVAILABLE_NOTIFICATION_METHODS = [
  */
 export function parseKiroAvailableCommandsNotification(
   params: unknown,
-): AcpAvailableCommand[] | null {
+): ACPAvailableCommand[] | null {
   if (!isRecord(params) || !Array.isArray(params.commands)) {
     return null;
   }
-  return params.commands.filter(isAcpAvailableCommand);
+  return params.commands.filter(isACPAvailableCommand);
 }
 
-function isAcpAvailableCommand(value: unknown): value is AcpAvailableCommand {
+function isACPAvailableCommand(value: unknown): value is ACPAvailableCommand {
   return isRecord(value) && typeof value.name === 'string';
 }
 

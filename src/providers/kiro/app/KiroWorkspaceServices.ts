@@ -8,15 +8,16 @@ import type {
   ProviderWorkspaceServices,
 } from '../../../core/providers/types';
 import { KiroCommandCatalog } from '../commands/KiroCommandCatalog';
-import { KiroCliResolver } from '../runtime/KiroCliResolver';
+import { KiroCLIResolver } from '../runtime/KiroCLIResolver';
 import { KiroModelCatalogCoordinator } from '../runtime/KiroModelCatalogCoordinator';
 import { KiroModelCatalogService } from '../runtime/KiroModelCatalogService';
+import { createKiroModels } from '../runtime/KiroModels';
 import { kiroSettingsTabRenderer } from '../ui/KiroSettingsTab';
 import { KiroCommandLoader } from './KiroCommandLoader';
 import { KiroCommandMetadataProbe } from './KiroCommandMetadataProbe';
 
 export interface KiroWorkspaceServices extends ProviderWorkspaceServices {
-  cliResolver: KiroCliResolver;
+  cliResolver: KiroCLIResolver;
   commandCatalog: ProviderCommandCatalog;
   modelCatalogCoordinator: KiroModelCatalogCoordinator;
   refreshModelCatalog(
@@ -47,9 +48,11 @@ export async function createKiroWorkspaceServices(
   );
   const commandMetadataProbe = options.commandMetadataProbe
     ?? new KiroCommandMetadataProbe(plugin);
+  const modelCatalog = createKiroModels(plugin, modelCatalogCoordinator);
   const unregisterTransitionHook =
     plugin.executionLifecycleRegistry.registerTransitionHook('kiro', {
       beforeTransition: async () => {
+        modelCatalog.beginTransition();
         modelCatalogCoordinator.beginEnvironmentTransition();
         commandMetadataProbe.beginEnvironmentTransition();
         await Promise.all([
@@ -66,17 +69,19 @@ export async function createKiroWorkspaceServices(
         } finally {
           modelCatalogCoordinator.endEnvironmentTransition();
           commandMetadataProbe.endEnvironmentTransition();
+          modelCatalog.endTransition();
         }
       },
     });
 
   return {
-    cliResolver: new KiroCliResolver(),
+    cliResolver: new KiroCLIResolver(),
     commandCatalog: new KiroCommandCatalog(),
     modelCatalogCoordinator,
     commandLoader: new KiroCommandLoader(commandMetadataProbe),
     settingsTabRenderer: kiroSettingsTabRenderer,
     tabWarmupPolicy: kiroTabWarmupPolicy,
+    modelCatalog,
     refreshModelCatalog: context => modelCatalogCoordinator.refreshModelCatalog(context),
     async prepareSettings() {
       await modelCatalogCoordinator.ensureFresh('settings');
@@ -85,6 +90,7 @@ export async function createKiroWorkspaceServices(
       unregisterTransitionHook();
       modelCatalogCoordinator.dispose();
       await Promise.all([
+        modelCatalog.dispose(),
         modelCatalogCoordinator.quiesceForEnvironmentChange(),
         commandMetadataProbe.dispose(),
       ]);
