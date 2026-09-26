@@ -14,6 +14,14 @@ const ANSI_ESCAPE_SEQUENCE = new RegExp(
   `${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`,
   'g',
 );
+// Section headers printed by `kiro-cli agent list` (`Workspace:`, `Global:`), which
+// point at agent directories rather than naming an agent. The heading word is followed
+// directly by a colon, optionally trailed by a count or parenthetical (`Global: 3 agents`,
+// `Global (2):`) but never by the two-column `<scope>  <description>` layout of a real row.
+// Matching the header shape explicitly makes the exclusion intentional rather than relying
+// on `parseAgentLine` failing to find a scope token — a header whose word is itself a scope
+// token (`Global`) must never be mistaken for an agent id.
+const SECTION_HEADER_PATTERN = /^[A-Za-z][\w -]*(?:\s*\([^)]*\))?\s*:(?:\s+\d.*)?$/u;
 
 /** The three scopes `kiro-cli agent list` labels each agent with. */
 export type KiroAgentScope = 'built-in' | 'global' | 'local';
@@ -201,9 +209,11 @@ function parseAgentLine(line: string, marker: boolean): KiroDiscoveredAgent | nu
 
 function isSkippableLine(line: string): boolean {
   const trimmed = line.trim();
+  // The WSL URI-resolution failure line, then section headers matched by their explicit
+  // shape (see SECTION_HEADER_PATTERN). A header such as `Global: 3 agents` or `Global (2):`
+  // is excluded intentionally here rather than by `parseAgentLine` happening to reject it.
   return trimmed.startsWith('Error:')
-    || trimmed.startsWith('Workspace:')
-    || trimmed.startsWith('Global:');
+    || SECTION_HEADER_PATTERN.test(trimmed);
 }
 
 function stripAnsi(value: string): string {

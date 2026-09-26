@@ -100,6 +100,17 @@ export async function createKiroWorkspaceServices(
   // selector is populated as soon as a Kiro chat tab is ready, rather than only after
   // the user opens the settings tab (`prepareSettings`) or sends a first prompt.
   //
+  // The model and agent startup prefetches deliberately keep INDEPENDENT `--version`
+  // probes rather than sharing one. The model catalog derives a fingerprint from
+  // `kiro-cli --version` (see `KiroModelCatalogService.resolveFingerprint`) to drive its
+  // TTL/staleness invalidation; the agent catalog uses its own probe path when it needs
+  // one. Keeping them separate is intentional: each probe is bounded (a short-timeout,
+  // best-effort `--version`) and the two prefetches run CONCURRENTLY, so a shared probe
+  // would only add ordering coupling for no latency win — one prefetch would have to wait
+  // on the other's version read. Independence also preserves model-catalog parity: the
+  // model prefetch keeps the exact fingerprint semantics it had before the agent selector
+  // existed, so adding agent discovery never perturbs model-catalog staleness behaviour.
+  //
   // Best-effort and non-blocking: `refresh` no-ops while the provider is disabled,
   // swallows a missing CLI / non-zero exit / parse failure into an empty completed
   // result (leaving the persisted snapshot untouched so the selector simply stays

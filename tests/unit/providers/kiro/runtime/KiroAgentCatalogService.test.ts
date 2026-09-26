@@ -112,6 +112,57 @@ describe('parseKiroAgentListOutput', () => {
   it('returns an empty list for output with no agent rows', () => {
     expect(parseKiroAgentListOutput('Error: something went wrong')).toEqual([]);
   });
+
+  it('excludes a count-suffixed section header (Global: 3 agents) explicitly', () => {
+    const output = [
+      'Global: 3 agents',
+      `  kiro_default                   ${DIM}(Built-in)${RESET}    Default agent`,
+    ].join('\n');
+
+    const agents = parseKiroAgentListOutput(output);
+
+    expect(agents.map((agent) => agent.id)).toEqual(['kiro_default']);
+  });
+
+  it('excludes a parenthesized section header (Global (2):) explicitly', () => {
+    const output = [
+      'Global (2):',
+      'Workspace (1):',
+      `  kirocrew                       Global        Autonomous agent`,
+    ].join('\n');
+
+    const agents = parseKiroAgentListOutput(output);
+
+    expect(agents.map((agent) => agent.id)).toEqual(['kirocrew']);
+  });
+
+  it('keeps a real agent row whose id starts like a scope word (Globaltron)', () => {
+    // Regression guard: a header word that is also a scope token (Global) must be
+    // excluded, but a genuine agent whose id merely begins with those letters must
+    // survive — the header exclusion keys on the header SHAPE, not the word.
+    const output = [
+      'Global: 2 agents',
+      `  globaltron                     Global        Custom agent`,
+    ].join('\n');
+
+    const agents = parseKiroAgentListOutput(output);
+
+    expect(agents.map((agent) => agent.id)).toEqual(['globaltron']);
+  });
+
+  it('does not exclude a row whose description merely contains a colon', () => {
+    const output = [
+      `  kiro_help                      ${DIM}(Built-in)${RESET}    Answers: questions about Kiro`,
+    ].join('\n');
+
+    const agents = parseKiroAgentListOutput(output);
+
+    expect(agents).toHaveLength(1);
+    expect(agents[0]).toMatchObject({
+      id: 'kiro_help',
+      description: 'Answers: questions about Kiro',
+    });
+  });
 });
 
 describe('toKiroAgentModes', () => {
