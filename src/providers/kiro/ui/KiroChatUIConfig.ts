@@ -166,6 +166,11 @@ export const kiroChatUIConfig: ProviderChatUIConfig = {
 
   getModeSelector(settings): ProviderModeSelectorConfig | null {
     const kiroSettings = getKiroProviderSettings(settings);
+    // Primary source: the CLI-prefetched agent catalog. On startup the coordinator
+    // persists the prefetched agents into `currentAgentModes`, and a live session's
+    // advertised modes are folded into that SAME snapshot as a supplement (see
+    // `reconcileKiroSessionAgentModes`), so `currentAgentModes.modes` already carries the
+    // union of catalog ids and session ids with the catalog kept as the primary source.
     const modes = kiroSettings.currentAgentModes?.modes ?? [];
     if (modes.length === 0) {
       return null;
@@ -175,11 +180,16 @@ export const kiroChatUIConfig: ProviderChatUIConfig = {
       label: mode.name,
       ...(mode.description ? { description: mode.description } : {}),
     }));
-    // Resolve against the live modes so the displayed value is always a real,
-    // sendable id: the user's explicit choice when it still exists, else the
-    // session's current mode, else the first advertised mode.
-    const value = resolveKiroSelectedAgentMode(settings)
-      ?? kiroSettings.currentAgentModes?.currentModeId
+    // The set of ids actually rendered — the catalog ∪ session union. Resolve and
+    // validate the displayed value against exactly this set so the shown value is always
+    // a real, sendable id: the user's explicit choice when it still exists, else the
+    // session's current mode (only when it is one of the listed options), else the first
+    // advertised mode. Guarding the `currentModeId` fallback against `known` means a stale
+    // current id that is not in the option list can never be surfaced as selectable.
+    const known = new Set(options.map(option => option.value));
+    const currentModeId = kiroSettings.currentAgentModes?.currentModeId;
+    const value = resolveKiroSelectedAgentMode(settings, known)
+      ?? (currentModeId && known.has(currentModeId) ? currentModeId : undefined)
       ?? options[0].value;
     return {
       label: 'Agent',
@@ -193,9 +203,10 @@ export const kiroChatUIConfig: ProviderChatUIConfig = {
       return;
     }
     const kiroSettings = getKiroProviderSettings(settings);
+    // Only persist ids Kiro actually advertises — the catalog ∪ session union carried by
+    // `currentAgentModes.modes`; ignore anything else so the execution layer never drives
+    // `session/set_mode` with an id absent from both the prefetched catalog and the session.
     const known = new Set((kiroSettings.currentAgentModes?.modes ?? []).map(mode => mode.id));
-    // Only persist ids Kiro actually advertises; ignore anything else so the
-    // execution layer never drives set_mode with an unknown id.
     updateKiroProviderSettings(settings, {
       selectedAgentMode: known.has(value) ? value : null,
     });

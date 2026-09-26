@@ -1,5 +1,6 @@
 import {
   getKiroProviderSettings,
+  reconcileKiroSessionAgentModes,
   updateCurrentKiroAgentModes,
   updateKiroProviderSettings,
 } from '@/providers/kiro/settings';
@@ -90,5 +91,56 @@ describe('kiroChatUIConfig.getModeSelector', () => {
 
     // Selection persists in storage but must not be surfaced as a sendable value.
     expect(kiroChatUIConfig.getModeSelector?.(settings)?.value).toBe('kiro_default');
+  });
+
+  it('sources the catalog∪session union and lets a session-only mode be selected', () => {
+    const settings: Record<string, unknown> = {};
+    // Prefetched CLI catalog (primary source).
+    updateCurrentKiroAgentModes(settings, {
+      currentModeId: 'kiro_default',
+      modes: [
+        { id: 'kiro_default', name: 'kiro_default' },
+        { id: 'kirocrew', name: 'kirocrew' },
+      ],
+    });
+    // A live session advertises an extra mode absent from the CLI catalog; it is
+    // folded into the same snapshot as a supplement.
+    reconcileKiroSessionAgentModes(settings, {
+      currentModeId: 'kiro_default',
+      modes: [
+        { id: 'kiro_default', name: 'kiro_default' },
+        { id: 'session_only', name: 'session_only' },
+      ],
+    });
+
+    const config = kiroChatUIConfig.getModeSelector?.(settings);
+    // Catalog agents lead (primary), the session-only mode is appended (supplement).
+    expect(config?.options.map((option) => option.value)).toEqual([
+      'kiro_default',
+      'kirocrew',
+      'session_only',
+    ]);
+
+    // A session-supplemented id is part of the known union, so selecting it sticks.
+    kiroChatUIConfig.applyModeSelection?.('session_only', settings);
+    expect(getKiroProviderSettings(settings).selectedAgentMode).toBe('session_only');
+    expect(kiroChatUIConfig.getModeSelector?.(settings)?.value).toBe('session_only');
+  });
+
+  it('never surfaces a currentModeId that is absent from the rendered options', () => {
+    const settings: Record<string, unknown> = {};
+    updateCurrentKiroAgentModes(settings, {
+      // currentModeId points at an id that is NOT in modes (a stale/mismatched snapshot).
+      currentModeId: 'ghost_mode',
+      modes: [
+        { id: 'kiro_default', name: 'Default' },
+        { id: 'kiro_planner', name: 'Planner' },
+      ],
+    });
+
+    const config = kiroChatUIConfig.getModeSelector?.(settings);
+    // The guarded fallback rejects the unlisted currentModeId and shows the first option.
+    expect(config?.value).toBe('kiro_default');
+    expect(config?.options.map((option) => option.value)).not.toContain('ghost_mode');
   });
 });
