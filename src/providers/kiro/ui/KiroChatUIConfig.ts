@@ -15,6 +15,7 @@ import {
   resolveKiroDefaultReasoningEffort,
 } from '../models';
 import {
+  collectKnownKiroAgentIds,
   getKiroProviderSettings,
   getOrderedKiroVisibleModelIds,
   resolveKiroSelectedAgentMode,
@@ -166,19 +167,43 @@ export const kiroChatUIConfig: ProviderChatUIConfig = {
 
   getModeSelector(settings): ProviderModeSelectorConfig | null {
     const kiroSettings = getKiroProviderSettings(settings);
-    const modes = kiroSettings.currentAgentModes?.modes ?? [];
-    if (modes.length === 0) {
+    // Primary source: the pre-fetched `kiro-cli agent list` catalog, so the
+    // Agent selector renders from plugin startup before any session exists
+    // (mirroring how getModelOptions reads currentCatalog). The session-derived
+    // modes are demoted to supplementing/validating the catalog.
+    const catalogAgents = kiroSettings.currentAgentCatalog?.agents ?? [];
+    const sessionModes = kiroSettings.currentAgentModes?.modes ?? [];
+    const options: ProviderUIOption[] = [];
+    const seen = new Set<string>();
+    for (const agent of catalogAgents) {
+      seen.add(agent.id);
+      options.push({
+        value: agent.id,
+        label: agent.name ?? agent.id,
+        ...(agent.description ? { description: agent.description } : {}),
+      });
+    }
+    for (const mode of sessionModes) {
+      if (seen.has(mode.id)) {
+        continue;
+      }
+      seen.add(mode.id);
+      options.push({
+        value: mode.id,
+        label: mode.name,
+        ...(mode.description ? { description: mode.description } : {}),
+      });
+    }
+    if (options.length === 0) {
+      // Neither the catalog nor a session has agents: hide the selector so the
+      // CLI-unavailable / parse-failure case cannot break the session.
       return null;
     }
-    const options: ProviderUIOption[] = modes.map(mode => ({
-      value: mode.id,
-      label: mode.name,
-      ...(mode.description ? { description: mode.description } : {}),
-    }));
-    // Resolve against the live modes so the displayed value is always a real,
-    // sendable id: the user's explicit choice when it still exists, else the
-    // session's current mode, else the first advertised mode.
-    const value = resolveKiroSelectedAgentMode(settings)
+    // Resolve against the known ids (catalog + session) so the displayed value
+    // is always a real, sendable id: the user's explicit choice when it still
+    // exists, else the catalog/session current agent, else the first option.
+    const value = resolveKiroSelectedAgentMode(settings, seen)
+      ?? kiroSettings.currentAgentCatalog?.currentAgentId
       ?? kiroSettings.currentAgentModes?.currentModeId
       ?? options[0].value;
     return {
@@ -193,9 +218,10 @@ export const kiroChatUIConfig: ProviderChatUIConfig = {
       return;
     }
     const kiroSettings = getKiroProviderSettings(settings);
-    const known = new Set((kiroSettings.currentAgentModes?.modes ?? []).map(mode => mode.id));
-    // Only persist ids Kiro actually advertises; ignore anything else so the
-    // execution layer never drives set_mode with an unknown id.
+    // Only persist ids Kiro actually advertises (pre-fetched catalog union the
+    // session snapshot); ignore anything else so the execution layer never
+    // drives set_mode with an unknown id.
+    const known = collectKnownKiroAgentIds(kiroSettings);
     updateKiroProviderSettings(settings, {
       selectedAgentMode: known.has(value) ? value : null,
     });

@@ -4,6 +4,10 @@ import { STANDARD_REASONING_VALUES } from '../../core/providers/reasoning';
 import { normalizeHostnameStringMap } from '../../core/providers/settings/HostnameStringMap';
 import type { HostnameCLIPaths } from '../../core/types/settings';
 import { getHostnameKey } from '../../utils/env';
+import {
+  type KiroDiscoveredAgent,
+  normalizeKiroDiscoveredAgents,
+} from './agents';
 import type { KiroAgentMode } from './execution/KiroSessionModeMetadata';
 import {
   clearKiroReasoningMetadata,
@@ -20,6 +24,14 @@ export interface KiroCatalogSnapshot {
   refreshedAt: number;
 }
 
+/** Pre-fetched agent catalog from `kiro-cli agent list`, keyed by host. */
+export interface KiroAgentCatalogSnapshot {
+  agents: KiroDiscoveredAgent[];
+  currentAgentId: string | null;
+  fingerprint: string;
+  refreshedAt: number;
+}
+
 /** Runtime snapshot of the agent modes advertised by the live ACP session. */
 export interface KiroAgentModeSnapshot {
   modes: KiroAgentMode[];
@@ -31,6 +43,7 @@ export interface PersistedKiroProviderSettings {
   cliPath: string;
   cliPathsByHost: HostnameCLIPaths;
   catalogsByHost: Record<string, KiroCatalogSnapshot>;
+  agentCatalogsByHost: Record<string, KiroAgentCatalogSnapshot>;
   environmentVariables: string;
   environmentHash: string;
   visibleModels: string[] | null;
@@ -45,11 +58,14 @@ export interface PersistedKiroProviderSettings {
 
 export interface KiroProviderSettings extends PersistedKiroProviderSettings {
   currentCatalog: KiroCatalogSnapshot | null;
+  /** Pre-fetched agent catalog for the current host, resolved from `agentCatalogsByHost`. */
+  currentAgentCatalog: KiroAgentCatalogSnapshot | null;
   /** Agent modes for the current host, resolved from `agentModesByHost`. */
   currentAgentModes: KiroAgentModeSnapshot | null;
 }
 
 export const DEFAULT_KIRO_PROVIDER_SETTINGS: Readonly<PersistedKiroProviderSettings> = Object.freeze({
+  agentCatalogsByHost: {},
   agentModesByHost: {},
   catalogsByHost: {},
   cliPath: '',
@@ -104,6 +120,34 @@ export function normalizeKiroCatalogSnapshot(value: unknown): KiroCatalogSnapsho
   };
 }
 
+export function normalizeKiroAgentCatalogSnapshot(
+  value: unknown,
+): KiroAgentCatalogSnapshot | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const fingerprint = readTrimmedString(value.fingerprint);
+  const refreshedAt = typeof value.refreshedAt === 'number'
+    && Number.isFinite(value.refreshedAt)
+    && value.refreshedAt >= 0
+    ? Math.floor(value.refreshedAt)
+    : 0;
+  const agents = normalizeKiroDiscoveredAgents(value.agents);
+  const rawCurrentAgentId = readTrimmedString(value.currentAgentId) || null;
+  const currentAgentId = rawCurrentAgentId
+    && agents.some(agent => agent.id === rawCurrentAgentId)
+    ? rawCurrentAgentId
+    : null;
+
+  return {
+    agents,
+    currentAgentId,
+    fingerprint,
+    refreshedAt,
+  };
+}
+
 export function getKiroProviderSettings(
   settings: Record<string, unknown>,
 ): KiroProviderSettings {
@@ -112,6 +156,8 @@ export function getKiroProviderSettings(
   const cliPathsByHost = normalizeHostnameStringMap(config.cliPathsByHost);
   const catalogsByHost = normalizeKiroCatalogsByHost(config.catalogsByHost);
   const currentCatalog = catalogsByHost[currentHostKey] ?? null;
+  const agentCatalogsByHost = normalizeKiroAgentCatalogsByHost(config.agentCatalogsByHost);
+  const currentAgentCatalog = agentCatalogsByHost[currentHostKey] ?? null;
   const agentModesByHost = normalizeKiroAgentModesByHost(config.agentModesByHost);
   const currentAgentModes = agentModesByHost[currentHostKey] ?? null;
   const selectedModelIds = collectSelectedKiroRawModelIds(settings);
@@ -131,10 +177,12 @@ export function getKiroProviderSettings(
   );
 
   return {
+    agentCatalogsByHost,
     catalogsByHost,
     cliPath: readTrimmedString(config.cliPath)
       || DEFAULT_KIRO_PROVIDER_SETTINGS.cliPath,
     cliPathsByHost,
+    currentAgentCatalog,
     currentCatalog,
     agentModesByHost,
     currentAgentModes,
@@ -205,6 +253,10 @@ export function updateKiroProviderSettings(
     visibleModels ?? catalogModels.map(model => model.rawId),
   );
 
+  const agentCatalogsByHost = updates.agentCatalogsByHost !== undefined
+    ? normalizeKiroAgentCatalogsByHost(updates.agentCatalogsByHost)
+    : { ...current.agentCatalogsByHost };
+  const currentAgentCatalog = agentCatalogsByHost[currentHostKey] ?? null;
   const agentModesByHost = updates.agentModesByHost !== undefined
     ? normalizeKiroAgentModesByHost(updates.agentModesByHost)
     : { ...current.agentModesByHost };
@@ -216,6 +268,7 @@ export function updateKiroProviderSettings(
   );
 
   const next: PersistedKiroProviderSettings = {
+    agentCatalogsByHost,
     agentModesByHost,
     catalogsByHost,
     cliPath,
@@ -244,7 +297,7 @@ export function updateKiroProviderSettings(
   };
 
   setProviderConfig(settings, 'kiro', next as unknown as Record<string, unknown>);
-  return { ...next, currentAgentModes, currentCatalog };
+  return { ...next, currentAgentCatalog, currentAgentModes, currentCatalog };
 }
 
 export function updateKiroVisibleModels(
@@ -319,6 +372,31 @@ export function clearCurrentKiroCatalog(settings: Record<string, unknown>): bool
   return true;
 }
 
+export function getCurrentKiroAgentCatalog(
+  settings: Record<string, unknown>,
+): KiroAgentCatalogSnapshot | null {
+  return getKiroProviderSettings(settings).currentAgentCatalog;
+}
+
+/** Persists the pre-fetched agent catalog for the current host. */
+export function updateCurrentKiroAgentCatalog(
+  settings: Record<string, unknown>,
+  snapshot: KiroAgentCatalogSnapshot,
+): KiroAgentCatalogSnapshot | null {
+  const normalized = normalizeKiroAgentCatalogSnapshot(snapshot);
+  if (!normalized) {
+    return null;
+  }
+  const current = getKiroProviderSettings(settings);
+  updateKiroProviderSettings(settings, {
+    agentCatalogsByHost: {
+      ...current.agentCatalogsByHost,
+      [getHostnameKey()]: normalized,
+    },
+  });
+  return normalized;
+}
+
 export function getCurrentKiroAgentModes(
   settings: Record<string, unknown>,
 ): KiroAgentModeSnapshot | null {
@@ -346,9 +424,11 @@ export function updateCurrentKiroAgentModes(
 
 /**
  * Resolves the agent mode id to drive `session/set_mode` with. Precedence: the user's
- * explicit `selectedAgentMode` (when it still exists in the live modes), then the session's
+ * explicit `selectedAgentMode` (when it still exists in the known ids), then the session's
  * advertised `currentModeId`, then null (leave the session on its native default). Never
- * returns an id absent from `availableModeIds`, since Kiro rejects unknown ids with an error.
+ * returns an id absent from the known-id set, since Kiro rejects unknown ids with an error.
+ * The known-id set is the union of the pre-fetched agent catalog and the session snapshot,
+ * so validation covers ids that are available before a session exists.
  */
 export function resolveKiroSelectedAgentMode(
   settings: Record<string, unknown>,
@@ -356,17 +436,32 @@ export function resolveKiroSelectedAgentMode(
 ): string | null {
   const kiroSettings = getKiroProviderSettings(settings);
   const snapshot = kiroSettings.currentAgentModes;
-  const known = availableModeIds
-    ?? new Set((snapshot?.modes ?? []).map(mode => mode.id));
+  const known = availableModeIds ?? collectKnownKiroAgentIds(kiroSettings);
   const selected = kiroSettings.selectedAgentMode;
   if (selected && known.has(selected)) {
     return selected;
   }
-  const current = snapshot?.currentModeId ?? null;
+  const current = snapshot?.currentModeId
+    ?? kiroSettings.currentAgentCatalog?.currentAgentId
+    ?? null;
   if (current && known.has(current)) {
     return current;
   }
   return null;
+}
+
+/** Union of pre-fetched catalog agent ids and session-advertised mode ids. */
+export function collectKnownKiroAgentIds(
+  kiroSettings: KiroProviderSettings,
+): Set<string> {
+  const known = new Set<string>();
+  for (const agent of kiroSettings.currentAgentCatalog?.agents ?? []) {
+    known.add(agent.id);
+  }
+  for (const mode of kiroSettings.currentAgentModes?.modes ?? []) {
+    known.add(mode.id);
+  }
+  return known;
 }
 
 export function normalizeKiroSelectedAgentMode(value: unknown): string | null {
@@ -519,6 +614,24 @@ function normalizeKiroCatalogsByHost(
   for (const [hostKey, snapshot] of Object.entries(value)) {
     const normalizedHostKey = hostKey.trim();
     const normalizedSnapshot = normalizeKiroCatalogSnapshot(snapshot);
+    if (normalizedHostKey && normalizedSnapshot) {
+      normalized[normalizedHostKey] = normalizedSnapshot;
+    }
+  }
+  return normalized;
+}
+
+function normalizeKiroAgentCatalogsByHost(
+  value: unknown,
+): Record<string, KiroAgentCatalogSnapshot> {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const normalized: Record<string, KiroAgentCatalogSnapshot> = {};
+  for (const [hostKey, snapshot] of Object.entries(value)) {
+    const normalizedHostKey = hostKey.trim();
+    const normalizedSnapshot = normalizeKiroAgentCatalogSnapshot(snapshot);
     if (normalizedHostKey && normalizedSnapshot) {
       normalized[normalizedHostKey] = normalizedSnapshot;
     }

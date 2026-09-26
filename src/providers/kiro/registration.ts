@@ -33,7 +33,12 @@ export const kiroProviderRegistration: ProviderModule = {
   setEnabled: (settings, enabled) => updateKiroProviderSettings(settings, { enabled }),
   settingsReconciler: kiroSettingsReconciler,
   settingsStorage: {
-    hostScopedFields: ['cliPathsByHost', 'catalogsByHost', 'agentModesByHost'],
+    hostScopedFields: [
+      'cliPathsByHost',
+      'catalogsByHost',
+      'agentCatalogsByHost',
+      'agentModesByHost',
+    ],
     normalizeStored(target, stored) {
       const storedConfig = getProviderConfig(stored, 'kiro');
       updateKiroProviderSettings(target, getKiroProviderSettings(stored));

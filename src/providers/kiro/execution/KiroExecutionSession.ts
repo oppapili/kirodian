@@ -1128,10 +1128,15 @@ RewindableExecutionSession {
   }
 
   /**
-   * Persists the agent modes advertised by a `session/new` or `session/load` response so the
-   * toolbar's Agent selector can render them synchronously from settings. Best-effort: a
-   * snapshot with no modes leaves the prior snapshot untouched, and persistence failures never
-   * disrupt the turn.
+   * Persists the agent modes advertised by a `session/new` or `session/load` response.
+   *
+   * DEMOTED: the Agent selector's primary option source is now the pre-fetched
+   * `kiro-cli agent list` catalog (KiroAgentCatalogCoordinator -> currentAgentCatalog),
+   * which renders before the first prompt establishes a session. This snapshot is kept only
+   * to confirm the session's current mode and to supplement/validate the set of sendable ids
+   * (resolveKiroSelectedAgentMode unions catalog + session ids). Best-effort: a snapshot with
+   * no modes leaves the prior snapshot untouched, and persistence failures never disrupt the
+   * turn.
    */
   private publishSessionModes(
     response: Pick<
