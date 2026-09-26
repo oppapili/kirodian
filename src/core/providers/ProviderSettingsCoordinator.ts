@@ -125,26 +125,11 @@ function normalizeModelDependentSettings(
 }
 
 export class ProviderSettingsCoordinator {
-  static applyModelSelection(
-    settings: Record<string, unknown>,
-    providerId: ProviderId,
-    model: string,
-  ): void {
-    const uiConfig = ProviderRegistry.getChatUIConfig(providerId);
-    settings.model = model;
-    uiConfig.applyModelDefaults(model, settings);
-    normalizeModelDependentSettings(uiConfig, settings, model);
-  }
-
   static applyTitleGenerationModelSelection(
     settings: Record<string, unknown>,
     model: string,
   ): void {
     settings.titleGenerationModel = model;
-    for (const providerId of ProviderRegistry.getRegisteredProviderIds()) {
-      ProviderRegistry.getChatUIConfig(providerId)
-        .applyTitleGenerationModelSelection?.(model, settings);
-    }
   }
 
   static projectModelSelection(
@@ -180,35 +165,12 @@ export class ProviderSettingsCoordinator {
       return false;
     }
 
-    for (const providerId of ProviderRegistry.getRegisteredProviderIds()) {
-      if (!ProviderRegistry.isEnabled(providerId, settings)) {
-        continue;
-      }
-
-      const uiConfig = ProviderRegistry.getChatUIConfig(providerId);
-      if (!uiConfig.ownsModel(currentModel, settings)) {
-        continue;
-      }
-
-      const normalizedModel = normalizeProviderModel(uiConfig, settings, currentModel);
-      const currentRuntimeModel = toProviderRuntimeModelId(providerId, currentModel);
-      const isValid = normalizedModel !== undefined
-        && uiConfig.getModelOptions(settings).some((option) =>
-          option.value === normalizedModel
-          && toProviderRuntimeModelId(providerId, option.value) === currentRuntimeModel
-        );
-      if (!isValid) {
-        continue;
-      }
-
-      if (normalizedModel !== currentModel) {
-        settings.titleGenerationModel = normalizedModel;
-        return true;
-      }
-      return false;
-    }
-
-    settings.titleGenerationModel = '';
+    const selection = ProviderRegistry.resolveTitleGenerationSelection(settings);
+    if (!selection) return false;
+    const { providerId, model: normalizedModel } = selection;
+    if (normalizedModel === currentModel
+      || toProviderRuntimeModelId(providerId, normalizedModel) !== toProviderRuntimeModelId(providerId, currentModel)) return false;
+    settings.titleGenerationModel = normalizedModel;
     return true;
   }
 
@@ -364,9 +326,7 @@ export class ProviderSettingsCoordinator {
       ? currentModel
       : (validProviderDefaultModel ?? modelOptions[0]?.value ?? currentModel);
     const savedModelValue = normalizeProviderModel(uiConfig, settings, savedModel?.[providerId]);
-    const isSavedModelValid = savedModelValue !== undefined
-      && modelOptions.some(option => option.value === savedModelValue);
-    const model = (isSavedModelValid ? savedModelValue : undefined) ?? fallbackModel;
+    const model = savedModelValue ?? fallbackModel;
     const canReuseCurrentProjection = canReuseCurrentModel && model === currentModel;
 
     if (model) {
@@ -432,9 +392,9 @@ export class ProviderSettingsCoordinator {
     const allowedPermissionModes = new Set([
       permissionToggle.inactiveValue,
       permissionToggle.activeValue,
-      ...(permissionToggle.planValue ? [permissionToggle.planValue] : []),
     ]);
-    const currentPermissionMode = normalizeToggleValue(settings.permissionMode, allowedPermissionModes);
+    const currentPermissionMode = normalizeToggleValue(settings.permissionMode, allowedPermissionModes)
+      ?? (settings.permissionMode !== undefined ? permissionToggle.inactiveValue : undefined);
     const derivedPermissionMode = normalizeToggleValue(
       uiConfig.resolvePermissionMode?.(settings),
       allowedPermissionModes,
@@ -442,7 +402,7 @@ export class ProviderSettingsCoordinator {
     const savedPermissionModeValue = normalizeToggleValue(
       savedPermissionMode?.[providerId],
       allowedPermissionModes,
-    );
+    ) ?? (savedPermissionMode?.[providerId] !== undefined ? permissionToggle.inactiveValue : undefined);
 
     const projectedPermissionMode = savedPermissionModeValue
       ?? derivedPermissionMode
@@ -452,18 +412,6 @@ export class ProviderSettingsCoordinator {
     if (projectedPermissionMode !== undefined) {
       settings.permissionMode = projectedPermissionMode;
     }
-  }
-
-  /** Each provider's reconciler only processes its own conversations. */
-  static reconcileAllProviders(
-    settings: Record<string, unknown>,
-    conversations: Conversation[],
-  ): SettingsReconciliationResult {
-    return this.reconcileProviders(
-      settings,
-      conversations,
-      ProviderRegistry.getRegisteredProviderIds(),
-    );
   }
 
   static reconcileProviders(

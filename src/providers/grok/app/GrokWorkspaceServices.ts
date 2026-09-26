@@ -3,26 +3,22 @@ import type { ProviderHost } from '../../../core/providers/ProviderHost';
 import { ProviderWorkspaceRegistry } from '../../../core/providers/ProviderWorkspaceRegistry';
 import type {
   ProviderTabWarmupPolicy,
-  ProviderTransitionOwnerContext,
   ProviderWorkspaceRegistration,
   ProviderWorkspaceServices,
 } from '../../../core/providers/types';
 import { GrokCommandCatalog } from '../commands/GrokCommandCatalog';
-import { GrokCliResolver } from '../runtime/GrokCliResolver';
+import { GrokCLIResolver } from '../runtime/GrokCLIResolver';
 import { GrokModelCatalogCoordinator } from '../runtime/GrokModelCatalogCoordinator';
 import { GrokModelCatalogService } from '../runtime/GrokModelCatalogService';
+import { createGrokModels } from '../runtime/GrokModels';
 import { grokSettingsTabRenderer } from '../ui/GrokSettingsTab';
 import { GrokCommandLoader } from './GrokCommandLoader';
 import { GrokCommandMetadataProbe } from './GrokCommandMetadataProbe';
 
 export interface GrokWorkspaceServices extends ProviderWorkspaceServices {
-  cliResolver: GrokCliResolver;
+  cliResolver: GrokCLIResolver;
   commandCatalog: ProviderCommandCatalog;
   modelCatalogCoordinator: GrokModelCatalogCoordinator;
-  refreshModelCatalog(
-    context?: ProviderTransitionOwnerContext,
-  ): ReturnType<GrokModelCatalogCoordinator['refreshModelCatalog']>;
-  prepareSettings(): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -47,9 +43,11 @@ export async function createGrokWorkspaceServices(
   );
   const commandMetadataProbe = options.commandMetadataProbe
     ?? new GrokCommandMetadataProbe(plugin);
+  const modelCatalog = createGrokModels(plugin, modelCatalogCoordinator);
   const unregisterTransitionHook =
     plugin.executionLifecycleRegistry.registerTransitionHook('grok', {
       beforeTransition: async () => {
+        modelCatalog.beginTransition();
         modelCatalogCoordinator.beginEnvironmentTransition();
         commandMetadataProbe.beginEnvironmentTransition();
         await Promise.all([
@@ -66,26 +64,24 @@ export async function createGrokWorkspaceServices(
         } finally {
           modelCatalogCoordinator.endEnvironmentTransition();
           commandMetadataProbe.endEnvironmentTransition();
+          modelCatalog.endTransition();
         }
       },
     });
 
   return {
-    cliResolver: new GrokCliResolver(),
+    cliResolver: new GrokCLIResolver(),
     commandCatalog: new GrokCommandCatalog(),
     modelCatalogCoordinator,
     commandLoader: new GrokCommandLoader(commandMetadataProbe),
     settingsTabRenderer: grokSettingsTabRenderer,
     tabWarmupPolicy: grokTabWarmupPolicy,
-    refreshModelCatalog: context => modelCatalogCoordinator.refreshModelCatalog(context),
-    async prepareSettings() {
-      await modelCatalogCoordinator.ensureFresh('settings');
-    },
+    modelCatalog,
     async dispose() {
       unregisterTransitionHook();
-      modelCatalogCoordinator.dispose();
       await Promise.all([
-        modelCatalogCoordinator.quiesceForEnvironmentChange(),
+        modelCatalog.dispose(),
+        modelCatalogCoordinator.dispose(),
         commandMetadataProbe.dispose(),
       ]);
     },

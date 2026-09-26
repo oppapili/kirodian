@@ -21,7 +21,7 @@ import {
 } from '../../../core/tools/toolNames';
 import type { AskUserAnswers } from '../../../core/types';
 import type { SDKToolUseResult } from '../../../core/types/diff';
-import type { AcpToolRawNameProvenance } from '../../acp/AcpToolStreamAdapter';
+import type { ACPToolRawNameProvenance } from '../../acp/ACPToolStreamAdapter';
 import { KIRO_SUBAGENT_LIFECYCLE_TOOL_NAMES } from './kiroLifecycleToolNames';
 
 const KIRO_TOOL_NAME_MAP: Readonly<Record<string, string>> = {
@@ -70,7 +70,7 @@ export interface KiroNormalizedToolUseResult extends SDKToolUseResult {
 }
 
 export interface KiroRawToolNameResolution {
-  provenance: AcpToolRawNameProvenance;
+  provenance: ACPToolRawNameProvenance;
   rawName: string;
 }
 

@@ -7,12 +7,11 @@ import { CODEX_PROVIDER_CAPABILITIES } from './capabilities';
 import { codexSettingsReconciler } from './env/CodexSettingsReconciler';
 import { CodexExecutionBackend } from './execution/CodexExecutionBackend';
 import { CodexConversationHistoryService } from './history/CodexConversationHistoryService';
-import { toCodexRuntimeModelId } from './modelSelection';
+import { findCodexModel } from './models';
 import { codexSubagentLifecycleAdapter } from './normalization/codexSubagentNormalization';
 import {
-  getCodexProviderSettings,
-  normalizeCodexStoredConfig,
-  updateCodexProviderSettings,
+  getCodexProviderSettings, getVisibleCodexModelIds,
+  normalizeCodexStoredConfig, projectCodexModelSettings, updateCodexProviderSettings
 } from './settings';
 import { codexChatUIConfig } from './ui/CodexChatUIConfig';
 
@@ -27,6 +26,12 @@ export const codexProviderRegistration: ProviderModule = {
   chatUIConfig: codexChatUIConfig,
   settingsReconciler: codexSettingsReconciler,
   settingsStorage: {
+    projectPersistedConfig: projectCodexModelSettings,
+    needsReasoningMetadata(settings) {
+      const current = getCodexProviderSettings(settings);
+      return getVisibleCodexModelIds(current.visibleModels, current.discoveredModels)
+        .some(id => !findCodexModel(current.discoveredModels, id)?.supportedReasoningEfforts.length);
+    },
     hostScopedFields: ['cliPathsByHost', 'installationMethodsByHost', 'wslDistroOverridesByHost'],
     legacyTopLevelFields: [
       'codexSafeMode',
@@ -38,21 +43,14 @@ export const codexProviderRegistration: ProviderModule = {
     ],
     normalizeStored(target, stored) {
       const normalization = normalizeCodexStoredConfig(stored);
+      normalization.config.visibleModels = getVisibleCodexModelIds(normalization.config.visibleModels, normalization.config.discoveredModels);
       target.providerConfigs ??= {};
       (target.providerConfigs as Record<string, unknown>).codex = normalization.config;
       return normalization.changed;
     },
   },
   createExecutionBackend: (plugin) => new CodexExecutionBackend(plugin),
-  resolveTitleGenerationModel: (plugin) => {
-    const settings = plugin.settings as unknown as Record<string, unknown>;
-    const titleModel = typeof settings.titleGenerationModel === 'string'
-      ? settings.titleGenerationModel
-      : '';
-    return codexChatUIConfig.ownsModel(titleModel, settings)
-      ? toCodexRuntimeModelId(titleModel)
-      : undefined;
-  },
+
   historyService: new CodexConversationHistoryService(),
   taskResultInterpreter: NOOP_TASK_RESULT_INTERPRETER,
   subagentAdapter: codexSubagentLifecycleAdapter,

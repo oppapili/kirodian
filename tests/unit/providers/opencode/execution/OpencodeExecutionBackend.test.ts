@@ -1,3 +1,8 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import * as path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+
 import type {
   ProviderExecutionEvent,
   ProviderExecutionRequest,
@@ -16,19 +21,19 @@ const mockConnectionInitialize = jest.fn();
 const mockConnectionDispose = jest.fn();
 const mockPrepareLaunchArtifacts = jest.fn();
 
-const mockAcpSubprocess = jest.fn().mockImplementation(() => ({
+const mockACPSubprocess = jest.fn().mockImplementation(() => ({
   stdin: {},
   stdout: {},
   onClose: jest.fn().mockReturnValue(jest.fn()),
   shutdown: mockProcessShutdown,
   start: mockProcessStart,
 }));
-const mockAcpJsonRpcTransport = jest.fn().mockImplementation(() => ({
+const mockACPJSONRPCTransport = jest.fn().mockImplementation(() => ({
   dispose: mockTransportDispose,
   onClose: mockTransportOnClose.mockReturnValue(jest.fn()),
   start: mockTransportStart,
 }));
-const mockAcpClientConnection = jest.fn().mockImplementation(() => ({
+const mockACPClientConnection = jest.fn().mockImplementation(() => ({
   dispose: mockConnectionDispose,
   initialize: mockConnectionInitialize,
 }));
@@ -37,9 +42,9 @@ jest.mock('@/providers/acp', () => {
   const actual = jest.requireActual('@/providers/acp');
   return {
     ...actual,
-    AcpClientConnection: mockAcpClientConnection,
-    AcpJsonRpcTransport: mockAcpJsonRpcTransport,
-    AcpSubprocess: mockAcpSubprocess,
+    ACPClientConnection: mockACPClientConnection,
+    ACPJSONRPCTransport: mockACPJSONRPCTransport,
+    ACPSubprocess: mockACPSubprocess,
   };
 });
 
@@ -55,15 +60,16 @@ jest.mock('@/providers/opencode/runtime/OpencodeLaunchArtifacts', () => {
   };
 });
 
-import type { AcpSessionUpdate } from '@/providers/acp';
+import type { ACPSessionUpdate } from '@/providers/acp';
 import type { OpencodeCommandCatalog } from '@/providers/opencode/commands/OpencodeCommandCatalog';
 import {
-  type OpencodeAcpSessionKernel,
-  type OpencodeAcpSessionKernelOptions,
+  type OpencodeACPSessionKernel,
+  type OpencodeACPSessionKernelOptions,
   type OpencodeNativeSessionInfo,
   OpencodeSessionMissingError,
-} from '@/providers/opencode/execution/OpencodeAcpSessionKernel';
+} from '@/providers/opencode/execution/OpencodeACPSessionKernel';
 import { OpencodeExecutionBackend } from '@/providers/opencode/execution/OpencodeExecutionBackend';
+import { OpencodeServerService } from '@/providers/opencode/http/OpencodeServerService';
 
 interface Deferred<T> {
   readonly promise: Promise<T>;
@@ -78,7 +84,7 @@ function createDeferred<T>(): Deferred<T> {
   return { promise, resolve };
 }
 
-class FakeKernel implements OpencodeAcpSessionKernel {
+class FakeKernel implements OpencodeACPSessionKernel {
   readonly connectCalls: unknown[] = [];
   readonly openedResumeIds: Array<string | undefined> = [];
   readonly configCalls: Array<Record<string, unknown>> = [];
@@ -89,7 +95,7 @@ class FakeKernel implements OpencodeAcpSessionKernel {
   openSessionError: unknown = null;
   onOpenSession: (() => void) | null = null;
   onSetConfigOption: (() => void) | null = null;
-  promptResult = { userMessageId: 'native-user' };
+  promptResult: Awaited<ReturnType<OpencodeACPSessionKernel['prompt']>> = { userMessageId: 'native-user' };
   private resolvePrompt: ((value: typeof this.promptResult) => void) | null = null;
   private deferredOpenSession: Deferred<OpencodeNativeSessionInfo> | null = null;
   private deferredDisposal: Deferred<void> | null = null;
@@ -130,7 +136,7 @@ class FakeKernel implements OpencodeAcpSessionKernel {
     },
   };
 
-  constructor(readonly options: OpencodeAcpSessionKernelOptions) {}
+  constructor(readonly options: OpencodeACPSessionKernelOptions) {}
 
   async connect(options: unknown): Promise<void> {
     this.connectCalls.push(options);
@@ -186,7 +192,7 @@ class FakeKernel implements OpencodeAcpSessionKernel {
     return deferred;
   }
 
-  notify(update: AcpSessionUpdate, sessionId = this.sessionInfo.sessionId): void {
+  notify(update: ACPSessionUpdate, sessionId = this.sessionInfo.sessionId): void {
     this.options.onNotification({ sessionId, update });
   }
 
@@ -205,6 +211,7 @@ function createPlugin(): any {
     getResolvedProviderCliPath: jest.fn(async () => '/bin/opencode'),
     manifest: { version: 'test' },
     mutateSettings: jest.fn(async (mutation) => mutation(plugin.settings)),
+    mutateSettingsConditionally: jest.fn(async (mutation) => mutation(plugin.settings)),
     notifyProviderChatOptionsChanged: jest.fn(),
     settings: {
       effortLevel: 'high',
@@ -212,6 +219,7 @@ function createPlugin(): any {
       permissionMode: 'normal',
       providerConfigs: {
         opencode: {
+          enabled: true,
           availableModes: [
             { id: 'claudian-yolo', name: 'YOLO' },
             { id: 'claudian-safe', name: 'Safe' },
@@ -235,7 +243,6 @@ function createConfig(overrides: Partial<ProviderSessionConfig> = {}): ProviderS
       decision: 'allow' as const,
     })),
     askUserQuestion: jest.fn(),
-    requestPlanDecision: jest.fn(),
     dismissInteraction: jest.fn(),
   };
   return {
@@ -294,6 +301,7 @@ function createHarness(config = createConfig()) {
   } as unknown as OpencodeCommandCatalog;
   const backend = new OpencodeExecutionBackend(plugin, {
     commandCatalog,
+    serverService: new OpencodeServerService(),
     createKernel: (options) => {
       const kernel = new FakeKernel(options);
       kernels.push(kernel);
@@ -305,6 +313,18 @@ function createHarness(config = createConfig()) {
 }
 
 describe('OpencodeExecutionBackend', () => {
+  it('rejects an unavailable selected model before native startup with a configuration error', async () => {
+    const { session, kernels } = createHarness();
+    const selected = plugin.settings.providerConfigs.opencode.visibleModels;
+    plugin.settings.providerConfigs.opencode.visibleModels = [];
+    const events = await collect(session.execute(createRequest()).events);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'execution_error', category: 'configuration' }));
+    expect(events.some(event => event.type === 'turn_started' && event.accepted)).toBe(false);
+    expect(kernels).toEqual([]);
+    plugin.settings.providerConfigs.opencode.visibleModels = selected;
+    await session.dispose();
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     mockProcessShutdown.mockResolvedValue(undefined);
@@ -318,11 +338,36 @@ describe('OpencodeExecutionBackend', () => {
     });
   });
 
+  it('combines final prompt usage with the current turn context window', async () => {
+    const harness = createHarness();
+    try {
+      const eventsPromise = collect(harness.session.execute(createRequest()).events);
+      await waitForCondition(() => harness.kernels.length > 0);
+      const kernel = harness.kernels[0];
+      await waitForPrompt(kernel);
+      kernel.options.onNotification({
+        sessionId: 'native-session',
+        update: { sessionUpdate: 'usage_update', size: 1000, used: 100 },
+      });
+      await new Promise(resolve => setImmediate(resolve));
+      kernel.promptResult = { usage: {
+        inputTokens: 12, outputTokens: 3, totalTokens: 15, cachedReadTokens: 4,
+      } };
+      kernel.completePrompt();
+      const events = await eventsPromise;
+      expect(events.filter(event => event.type === 'usage_updated').at(-1)).toMatchObject({
+        usage: { inputTokens: 12, cacheReadInputTokens: 4, contextWindow: 1000, contextTokens: 100 },
+      });
+    } finally {
+      await harness.session.dispose();
+    }
+  });
+
   it('does not start a process when a turn is cancelled during CLI resolution', async () => {
     const cliPath = createDeferred<string | null>();
     const host = createPlugin();
     host.getResolvedProviderCliPath = jest.fn(() => cliPath.promise);
-    const session = new OpencodeExecutionBackend(host).createSession(createConfig());
+    const session = new OpencodeExecutionBackend(host, { serverService: new OpencodeServerService() }).createSession(createConfig());
     const run = session.execute(createRequest());
     const events = collect(run.events);
     await waitForCondition(() => host.getResolvedProviderCliPath.mock.calls.length === 1);
@@ -333,7 +378,7 @@ describe('OpencodeExecutionBackend', () => {
     await expect(events).resolves.toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'cancelled' }),
     ]));
-    expect(mockAcpSubprocess).not.toHaveBeenCalled();
+    expect(mockACPSubprocess).not.toHaveBeenCalled();
     expect(mockProcessStart).not.toHaveBeenCalled();
     await session.dispose();
   });
@@ -348,7 +393,7 @@ describe('OpencodeExecutionBackend', () => {
     }>();
     mockPrepareLaunchArtifacts.mockReturnValueOnce(artifacts.promise);
     const host = createPlugin();
-    const session = new OpencodeExecutionBackend(host).createSession(createConfig());
+    const session = new OpencodeExecutionBackend(host, { serverService: new OpencodeServerService() }).createSession(createConfig());
     const run = session.execute(createRequest());
     const events = collect(run.events);
     await waitForCondition(() => mockPrepareLaunchArtifacts.mock.calls.length === 1);
@@ -366,7 +411,7 @@ describe('OpencodeExecutionBackend', () => {
     await expect(events).resolves.toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'cancelled' }),
     ]));
-    expect(mockAcpSubprocess).not.toHaveBeenCalled();
+    expect(mockACPSubprocess).not.toHaveBeenCalled();
     expect(mockProcessStart).not.toHaveBeenCalled();
   });
 
@@ -374,7 +419,7 @@ describe('OpencodeExecutionBackend', () => {
     const initialize = createDeferred<Record<string, never>>();
     mockConnectionInitialize.mockReturnValueOnce(initialize.promise);
     const host = createPlugin();
-    const session = new OpencodeExecutionBackend(host).createSession(createConfig());
+    const session = new OpencodeExecutionBackend(host, { serverService: new OpencodeServerService() }).createSession(createConfig());
     const run = session.execute(createRequest());
     const events = collect(run.events);
     await waitForCondition(() => mockConnectionInitialize.mock.calls.length === 1);
@@ -405,11 +450,11 @@ describe('OpencodeExecutionBackend', () => {
           throw failure;
         });
       } else if (failureBoundary === 'transport-construction') {
-        mockAcpJsonRpcTransport.mockImplementationOnce(() => {
+        mockACPJSONRPCTransport.mockImplementationOnce(() => {
           throw failure;
         });
       } else if (failureBoundary === 'connection-construction') {
-        mockAcpClientConnection.mockImplementationOnce(() => {
+        mockACPClientConnection.mockImplementationOnce(() => {
           throw failure;
         });
       } else {
@@ -419,7 +464,7 @@ describe('OpencodeExecutionBackend', () => {
       }
 
       const host = createPlugin();
-      const session = new OpencodeExecutionBackend(host).createSession(createConfig());
+      const session = new OpencodeExecutionBackend(host, { serverService: new OpencodeServerService() }).createSession(createConfig());
       const events = await collect(session.execute(createRequest()).events);
 
       expect(events).toEqual(expect.arrayContaining([
@@ -435,6 +480,20 @@ describe('OpencodeExecutionBackend', () => {
       await session.dispose();
     },
   );
+
+  it('persists the native generation and reports provider cancellation', async () => {
+    const harness = createHarness();
+    const run = harness.session.execute(createRequest());
+    const kernel = harness.kernels[0];
+    kernel.sessionInfo = { ...kernel.sessionInfo, nativeVersion: 2 };
+    kernel.promptResult = { stopReason: 'cancelled' };
+    await waitForPrompt(kernel);
+    kernel.completePrompt();
+    const events = await collect(run.events);
+    expect(harness.session.getSnapshot()).toMatchObject({ providerState: { nativeVersion: 2 } });
+    expect(events).toContainEqual(expect.objectContaining({ type: 'cancelled', reason: 'provider-cancelled' }));
+    await harness.session.dispose();
+  });
 
   it('is cheap and binds the persisted database/session only when execution starts', async () => {
     const harness = createHarness(createConfig({
@@ -501,6 +560,33 @@ describe('OpencodeExecutionBackend', () => {
 
     harness.kernels[0].completePrompt();
     await collect(run.events);
+  });
+
+  it('publishes finalized statistics from the current native session on completion', async () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'opencode-throughput-'));
+    const databasePath = path.join(root, 'opencode.db');
+    const db = new DatabaseSync(databasePath);
+    db.exec(`CREATE TABLE session_v2(id TEXT);
+      CREATE TABLE session_message(id TEXT, session_id TEXT, seq INTEGER, type TEXT, time_created INTEGER, data TEXT);`);
+    const insert = db.prepare('INSERT INTO session_message VALUES(?, ?, ?, ?, ?, ?)');
+    insert.run('native-user', 'native-session', 1, 'user', 1000, JSON.stringify({ text: 'Work', time: { created: 1000 } }));
+    insert.run('answer', 'native-session', 2, 'assistant', 1200, JSON.stringify({
+      content: [{ type: 'text', text: 'Done' }], time: { created: 1200, completed: 3500 },
+      finish: 'stop', tokens: { output: 100, reasoning: 25 },
+    }));
+    db.close();
+    const harness = createHarness();
+    try {
+      const run = harness.session.execute(createRequest());
+      harness.kernels[0].sessionInfo = { ...harness.kernels[0].sessionInfo, databasePath };
+      await waitForPrompt(harness.kernels[0]);
+      harness.kernels[0].completePrompt();
+      expect((await collect(run.events)).at(-1)).toMatchObject({ type: 'turn_completed',
+        turnStats: { outputTokens: 125, durationMs: 2500 } });
+    } finally {
+      await harness.session.dispose();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('encodes path-only Linked content without changing the Vault-root kernel CWD', async () => {
@@ -1016,7 +1102,7 @@ describe('OpencodeExecutionBackend', () => {
     ]));
   });
 
-  it('publishes provider mode changes through the session event channel', async () => {
+  it('publishes normalized permission changes through the session event channel', async () => {
     const harness = createHarness();
     const modes: unknown[] = [];
     harness.session.onEvent((event) => modes.push(event));
@@ -1035,9 +1121,9 @@ describe('OpencodeExecutionBackend', () => {
 
     expect(modes).toEqual([
       expect.objectContaining({
-        mode: 'normal',
+        permissionMode: 'normal',
         scope: expect.objectContaining({ kind: 'session', sequence: 1 }),
-        type: 'mode_changed',
+        type: 'permission_mode_changed',
       }),
     ]);
   });
@@ -1277,4 +1363,26 @@ describe('OpencodeExecutionBackend', () => {
       }),
     ]);
   });
+});
+
+it('keeps native completion when cancellation arrives during stats acquisition', async () => {
+  const harness = createHarness();
+  try {
+    const run = harness.session.execute(createRequest());
+    const eventsPromise = (async () => {
+      const events: ProviderExecutionEvent[] = [];
+      for await (const event of run.events) {
+        events.push(event);
+        // With no streamed output, acceptance is published by the completed prompt response.
+        if (event.type === 'turn_started') run.cancel();
+      }
+      return events;
+    })();
+    await waitForCondition(() => harness.kernels.length > 0);
+    await waitForPrompt(harness.kernels[0]);
+    harness.kernels[0].completePrompt();
+    expect((await eventsPromise).at(-1)?.type).toBe('turn_completed');
+  } finally {
+    await harness.session.dispose();
+  }
 });

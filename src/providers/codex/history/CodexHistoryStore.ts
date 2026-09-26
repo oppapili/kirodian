@@ -11,6 +11,7 @@ import type {
   ImageAttachment,
   ToolCallInfo,
 } from '../../../core/types';
+import { createTurnStats, isTokenCount } from '../../../core/types';
 import { extractUserDisplayContent } from '../../../utils/context';
 import {
   buildImageAttachmentFromBase64,
@@ -29,9 +30,9 @@ import {
   decodeCodexExecEnvelope,
   extractCodexExecCellId,
   isCodexToolOutputError,
-  normalizeCodexMcpToolInput,
-  normalizeCodexMcpToolName,
-  normalizeCodexMcpToolState,
+  normalizeCodexMCPToolInput,
+  normalizeCodexMCPToolName,
+  normalizeCodexMCPToolState,
   normalizeCodexToolCall,
   normalizeCodexToolInput,
   normalizeCodexToolName,
@@ -111,7 +112,7 @@ interface PersistedWebSearchCallPayload {
   call_id?: string;
 }
 
-interface PersistedMcpToolCallPayload {
+interface PersistedMCPToolCallPayload {
   type: 'mcp_tool_call';
   server?: string;
   tool?: string;
@@ -164,6 +165,8 @@ interface CodexTurnState {
   startedAt: number;
   completedAt?: number;
   completed?: boolean;
+  outputTokens?: number;
+  durationMs?: number;
   lastEventAt: number;
   userTimestamp?: number;
   userChunks: string[];
@@ -178,7 +181,7 @@ type PersistedPayload =
   | PersistedToolCallPayload
   | PersistedToolCallOutputPayload
   | PersistedWebSearchCallPayload
-  | PersistedMcpToolCallPayload
+  | PersistedMCPToolCallPayload
   | PersistedCompactionPayload
   | PersistedEventPayload
   | undefined;
@@ -410,6 +413,7 @@ interface TurnAccumulator {
   contentBlocks: ContentBlock[];
   interrupted: boolean;
   timestamp: number;
+  completedAt?: number;
 }
 
 function newTurn(timestamp = 0): TurnAccumulator {
@@ -437,6 +441,7 @@ function flushTurn(turn: TurnAccumulator, messages: ChatMessage[], msgIndex: num
     role: 'assistant',
     content: turn.assistantText,
     timestamp: turn.timestamp || Date.now(),
+    completedAt: turn.completedAt,
     toolCalls: turn.toolCalls.length > 0 ? turn.toolCalls : undefined,
     contentBlocks: turn.contentBlocks.length > 0 ? turn.contentBlocks : undefined,
   };
@@ -1110,8 +1115,8 @@ function processPersistedWebSearchCall(
   });
 }
 
-function processPersistedMcpToolCall(
-  payload: PersistedMcpToolCallPayload,
+function processPersistedMCPToolCall(
+  payload: PersistedMCPToolCallPayload,
   timestamp: number,
   ctx: PersistedParseContext,
 ): void {
@@ -1123,12 +1128,12 @@ function processPersistedMcpToolCall(
 
   if (bubble.toolIndexesById.has(callId)) return;
 
-  const normalizedInput = normalizeCodexMcpToolInput(payload.arguments);
-  const normalizedState = normalizeCodexMcpToolState(payload.status, payload.result, payload.error);
+  const normalizedInput = normalizeCodexMCPToolInput(payload.arguments);
+  const normalizedState = normalizeCodexMCPToolState(payload.status, payload.result, payload.error);
 
   const toolCall: ToolCallInfo = {
     id: callId,
-    name: normalizeCodexMcpToolName(payload.server, payload.tool),
+    name: normalizeCodexMCPToolName(payload.server, payload.tool),
     input: normalizedInput,
     status: normalizedState.status,
     ...(normalizedState.result ? { result: normalizedState.result } : {}),
@@ -1215,7 +1220,7 @@ function processPersistedPayload(
       break;
 
     case 'mcp_tool_call':
-      processPersistedMcpToolCall(payload as PersistedMcpToolCallPayload, timestamp, ctx);
+      processPersistedMCPToolCall(payload as PersistedMCPToolCallPayload, timestamp, ctx);
       break;
 
     case 'compaction':
@@ -1259,6 +1264,8 @@ function processEventMsg(
         if (turn) {
           turn.completedAt = timestamp;
           turn.completed = true;
+          const duration = (payload as Record<string, unknown>).duration_ms;
+          if (typeof duration === 'number') turn.durationMs = duration;
           closeAssistantBubble(turn);
           const serverTurnId = extractServerTurnId(payload);
           if (serverTurnId && !turn.serverTurnId) turn.serverTurnId = serverTurnId;
@@ -1430,10 +1437,12 @@ function flushBubbleTurnMessages(
     lastMsg.durationSeconds = Math.round(durationMs / 1000);
   }
 
-  if (turn.serverTurnId && turn.completed && assistantMessages.length > 0) {
+  if (turn.completed && assistantMessages.length > 0) {
     const lastNonInterrupt = [...assistantMessages].reverse().find(m => !m.isInterrupt);
     if (lastNonInterrupt) {
-      lastNonInterrupt.assistantMessageId = turn.serverTurnId;
+      lastNonInterrupt.completedAt = turn.completedAt || undefined;
+      lastNonInterrupt.turnStats = createTurnStats(turn.outputTokens, turn.durationMs);
+      if (turn.serverTurnId) lastNonInterrupt.assistantMessageId = turn.serverTurnId;
     }
   }
 
@@ -1620,17 +1629,6 @@ async function defaultPathExists(value: string): Promise<boolean> {
   }
 }
 
-export function parseCodexSessionFile(filePath: string): ChatMessage[] {
-  let content: string;
-  try {
-    content = fs.readFileSync(filePath, 'utf-8');
-  } catch {
-    return [];
-  }
-
-  return parseCodexSessionContent(content);
-}
-
 export async function parseCodexSessionFileAsync(
   filePath: string,
   timeoutMs = 10_000,
@@ -1743,6 +1741,7 @@ function parseLegacySession(records: ParsedSessionRecord[]): ChatMessage[] {
           break;
 
         case 'turn.completed':
+          turn.completedAt = parsed.timestamp || undefined;
           msgIndex = flushTurn(turn, messages, msgIndex);
           turn = newTurn();
           break;
@@ -1769,9 +1768,24 @@ function parseLegacySession(records: ParsedSessionRecord[]): ChatMessage[] {
 
 function parseModernSessionTurns(records: ParsedSessionRecord[]): CodexParsedTurn[] {
   const ctx = createPersistedParseContext();
+  let threadId: string | undefined;
+  const turnOutputTokens = new Map<string, number | undefined>();
 
   for (const [lineIndex, parsed] of records.entries()) {
     const timestamp = parsed.timestamp;
+
+    const payload = parsed.payload as Record<string, unknown> | undefined;
+    if (parsed.type === 'session_meta') {
+      // A fork's own header precedes inherited parent metadata.
+      threadId ??= typeof payload?.id === 'string' ? payload.id : undefined;
+    }
+    if (parsed.type === 'token_usage_record' && threadId && payload?.thread_id === threadId) {
+      if (typeof payload.turn_id === 'string') {
+        const usage = payload.turn_token_usage as { output_tokens?: unknown } | undefined;
+        turnOutputTokens.set(payload.turn_id, isTokenCount(usage?.output_tokens) ? usage.output_tokens : undefined);
+      }
+      continue;
+    }
 
     // Legacy event records can appear in mixed sessions
     if (parsed.type === 'event' && parsed.event) {
@@ -1795,6 +1809,9 @@ function parseModernSessionTurns(records: ParsedSessionRecord[]): CodexParsedTur
     }
   }
 
+  for (const turn of ctx.turns.values()) {
+    if (turn.serverTurnId) turn.outputTokens = turnOutputTokens.get(turn.serverTurnId);
+  }
   return flushBubbleTurnsGrouped(ctx.turns, ctx.turnOrder);
 }
 
@@ -2018,7 +2035,11 @@ function processLegacyEventInModernContext(
     case 'turn.completed': {
       if (ctx.currentTurnId) {
         const turn = ctx.turns.get(ctx.currentTurnId);
-        if (turn) closeAssistantBubble(turn);
+        if (turn) {
+          turn.completed = true;
+          turn.completedAt = timestamp;
+          closeAssistantBubble(turn);
+        }
       }
       ctx.currentTurnId = null;
       break;

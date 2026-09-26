@@ -1,6 +1,8 @@
 import { Notice } from 'obsidian';
 import * as path from 'path';
 
+import type { ComposerInputElement } from '@/shared/composer-dropdown/types';
+
 import type { ImageAttachment, ImageMediaType } from '../../../core/types';
 import { ComposerContextTray } from './ComposerContextTray';
 import { ImagePreviewModal } from './ImagePreviewModal';
@@ -16,7 +18,6 @@ const IMAGE_EXTENSIONS: Record<string, ImageMediaType> = {
 };
 
 export interface ImageContextCallbacks {
-  onImagesChanged?: () => void;
   onUserImagesChanged?: () => void;
 }
 
@@ -25,7 +26,7 @@ export class ImageContextManager {
   private containerEl: HTMLElement;
   private contextTray: ComposerContextTray;
   private ownedContextTray: ComposerContextTray | null = null;
-  private inputEl: HTMLTextAreaElement;
+  private inputEl: ComposerInputElement;
   private dropOverlay: HTMLElement | null = null;
   private dropZoneEl: HTMLElement | null = null;
   private attachedImages: Map<string, ImageAttachment> = new Map();
@@ -39,12 +40,12 @@ export class ImageContextManager {
     void this.handleDrop(event);
   };
   private readonly pasteHandler = (event: ClipboardEvent): void => {
-    void this.handlePaste(event);
+    void this.#handlePaste(event);
   };
 
   constructor(
     containerEl: HTMLElement,
-    inputEl: HTMLTextAreaElement,
+    inputEl: ComposerInputElement,
     callbacks: ImageContextCallbacks,
     previewContainerEl?: HTMLElement,
     contextTray?: ComposerContextTray,
@@ -61,8 +62,8 @@ export class ImageContextManager {
     }
 
     try {
-      this.setupDragAndDrop();
-      this.setupPasteHandler();
+      this.#setupDragAndDrop();
+      this.#setupPasteHandler();
     } catch (error) {
       this.destroy();
       throw error;
@@ -87,7 +88,6 @@ export class ImageContextManager {
   clearImages() {
     this.attachedImages.clear();
     this.updateImagePreview();
-    this.callbacks.onImagesChanged?.();
   }
 
   /** Sets images directly (used for queued messages). */
@@ -97,13 +97,12 @@ export class ImageContextManager {
       this.attachedImages.set(image.id, image);
     }
     this.updateImagePreview();
-    this.callbacks.onImagesChanged?.();
   }
 
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    this.inputEl.removeEventListener('paste', this.pasteHandler);
+    this.inputEl.removeEventListener('paste', this.pasteHandler, true);
     if (this.dropZoneEl) {
       this.dropZoneEl.removeEventListener('dragenter', this.dragEnterHandler);
       this.dropZoneEl.removeEventListener('dragover', this.dragOverHandler);
@@ -120,7 +119,7 @@ export class ImageContextManager {
     this.ownedContextTray = null;
   }
 
-  private setupDragAndDrop() {
+  #setupDragAndDrop() {
     const inputWrapper = this.containerEl.querySelector('.claudian-input-wrapper') as HTMLElement;
     if (!inputWrapper) return;
     this.dropZoneEl = inputWrapper;
@@ -206,11 +205,11 @@ export class ImageContextManager {
     }
   }
 
-  private setupPasteHandler() {
-    this.inputEl.addEventListener('paste', this.pasteHandler);
+  #setupPasteHandler() {
+    this.inputEl.addEventListener('paste', this.pasteHandler, true);
   }
 
-  private async handlePaste(e: ClipboardEvent): Promise<void> {
+  async #handlePaste(e: ClipboardEvent): Promise<void> {
     if (this.destroyed) return;
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -270,7 +269,6 @@ export class ImageContextManager {
 
       this.attachedImages.set(attachment.id, attachment);
       this.updateImagePreview();
-      this.callbacks.onImagesChanged?.();
       this.callbacks.onUserImagesChanged?.();
       return true;
     } catch (error) {
@@ -307,7 +305,6 @@ export class ImageContextManager {
       onRemove: () => {
         this.attachedImages.delete(id);
         this.updateImagePreview();
-        this.callbacks.onImagesChanged?.();
         this.callbacks.onUserImagesChanged?.();
       },
     })));

@@ -40,12 +40,12 @@ function createController() {
         askUserQuestion: jest.fn(),
         dismissInteraction: jest.fn(),
         requestApproval: jest.fn(),
-        requestPlanDecision: jest.fn(),
       },
       lifecycleRegistry: new ProviderExecutionLifecycleRegistry(),
+      nativePersistence: 'provider-default',
       vaultWorkingDirectory: '/vault',
     },
-    'instruction',
+    'inline-edit',
     { kind: 'passive' },
   );
   return { backend, controller };

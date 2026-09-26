@@ -11,7 +11,6 @@ import {
   findGrokModel,
   getGrokAvailableReasoningEfforts,
   isGrokModelSelectionId,
-  resolveGrokContextWindow,
   resolveGrokDefaultReasoningEffort,
 } from '../models';
 import {
@@ -25,8 +24,6 @@ const GROK_PERMISSION_MODE_TOGGLE: ProviderPermissionModeToggleConfig = {
   inactiveLabel: 'Safe',
   activeValue: 'yolo',
   activeLabel: 'YOLO',
-  planValue: 'plan',
-  planLabel: 'PLAN',
 };
 
 export const grokChatUIConfig: ProviderChatUIConfig = {
@@ -47,14 +44,12 @@ export const grokChatUIConfig: ProviderChatUIConfig = {
 
   getDefaultModel(settings): string | null {
     const grokSettings = getGrokProviderSettings(settings);
-    const firstVisibleModelId = getOrderedGrokVisibleModelIds(grokSettings)[0];
+    const firstVisibleModelId = getOrderedGrokVisibleModelIds(grokSettings).find(id => grokSettings.currentCatalog?.models.some(model => model.rawId === id));
     return firstVisibleModelId ? encodeGrokModelId(firstVisibleModelId) : null;
   },
 
   ownsModel(model, settings): boolean {
-    return isGrokModelSelectionId(model)
-      && this.getModelOptions(settings)
-        .some(option => option.value === model.trim());
+    return isGrokModelSelectionId(model);
   },
 
   isAdaptiveReasoningModel(model, settings): boolean {
@@ -87,15 +82,6 @@ export const grokChatUIConfig: ProviderChatUIConfig = {
     return resolveGrokDefaultReasoningEffort(
       selectedModel ? { ...selectedModel, reasoningEfforts: [...efforts] } : null,
       grokSettings.preferredReasoningByModel[rawId],
-    );
-  },
-
-  getContextWindowSize(model, customLimits = {}, settings = {}): number {
-    const rawId = resolveSelectedGrokRawModelId(model, settings);
-    return resolveGrokContextWindow(
-      rawId ? encodeGrokModelId(rawId) : model,
-      getGrokProviderSettings(settings).currentCatalog?.models ?? [],
-      customLimits,
     );
   },
 
@@ -165,23 +151,12 @@ export const grokChatUIConfig: ProviderChatUIConfig = {
   },
 
   resolvePermissionMode(settings): string {
-    if (settings.permissionMode === 'plan') return 'plan';
     return settings.permissionMode === 'yolo' ? 'yolo' : 'normal';
   },
 
   applyPermissionMode(value, settings): void {
     if (isRecord(settings)) {
-      const currentMode = settings.permissionMode;
-      if (value === 'plan') {
-        if (currentMode === 'normal' || currentMode === 'yolo') {
-          updateGrokProviderSettings(settings, { planBasePermissionMode: currentMode });
-        }
-        settings.permissionMode = 'plan';
-        return;
-      }
-      const baseMode = value === 'yolo' ? 'yolo' : 'normal';
-      updateGrokProviderSettings(settings, { planBasePermissionMode: baseMode });
-      settings.permissionMode = baseMode;
+      settings.permissionMode = value === 'yolo' ? 'yolo' : 'normal';
     }
   },
 
@@ -207,6 +182,7 @@ function pushModelOption(
   }
   seen.add(value);
   const model = catalogById.get(rawId);
+  if (!model) return;
   options.push({
     value,
     label: aliases[rawId] ?? model?.displayName ?? rawId,
@@ -218,13 +194,6 @@ function normalizeSelection(model: string): string {
   const normalized = model.trim();
   const rawId = decodeGrokModelId(normalized);
   return rawId ? encodeGrokModelId(rawId) : model;
-}
-
-function resolveSelectedGrokRawModelId(
-  model: string,
-  settings: Record<string, unknown>,
-): string | null {
-  return decodeGrokModelId(model);
 }
 
 function getExplicitlySelectedGrokModel(

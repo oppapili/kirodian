@@ -3,13 +3,38 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
+import type * as environmentModule from '@/utils/env';
+
 import {
   loadOpencodeSessionMessages,
+  loadOpencodeSessionModel,
   mapOpencodeMessages,
+  mapOpencodeV2NativeMessages,
   OPENCODE_MESSAGE_ROW_SQL,
 } from '../../../../src/providers/opencode/history/OpencodeHistoryStore';
 
+// Exercise real SQLite subprocesses without discovering the runner's other Node installations.
+jest.mock('@/utils/env', () => ({
+  ...jest.requireActual<typeof environmentModule>('@/utils/env'),
+  findNodeExecutables: () => [process.execPath],
+}));
+
 describe('mapOpencodeMessages', () => {
+  it('preserves Windows paths as literal code in hydration diagnostics', () => {
+    const [message] = mapOpencodeMessages([
+      { info: { id: 'msg-bad', data_valid: 0 }, parts: [] },
+    ], { databasePath: String.raw`C:\Users\cylix\.local\share\opencode\opencode.db` });
+    expect(message.content).toBe([
+      '```text',
+      'Failed to hydrate OpenCode session.',
+      'provider: OpenCode',
+      String.raw`databasePath: C:\Users\cylix\.local\share\opencode\opencode.db`,
+      'messageId: msg-bad',
+      'reason: OpenCode message metadata is not valid JSON.',
+      '```',
+    ].join('\n'));
+  });
+
   it('maps stored OpenCode messages into Claudian chat messages', () => {
     const messages = mapOpencodeMessages([
       {
@@ -77,6 +102,7 @@ describe('mapOpencodeMessages', () => {
           { content: 'Done.', type: 'text' },
         ],
         durationSeconds: 2,
+        completedAt: 4_000,
         id: 'msg-assistant',
         role: 'assistant',
         timestamp: 2_000,
@@ -214,6 +240,7 @@ describe('mapOpencodeMessages', () => {
           { toolId: 'tool-question', type: 'tool_use' },
         ],
         durationSeconds: 2,
+        completedAt: 4_000,
         id: 'msg-assistant',
         role: 'assistant',
         timestamp: 2_000,
@@ -330,6 +357,7 @@ describe('mapOpencodeMessages', () => {
           { content: 'Apple is trading at $272.41.', type: 'text' },
         ],
         durationSeconds: 5,
+        completedAt: 7_000,
         id: 'msg-assistant-1',
         role: 'assistant',
         timestamp: 2_000,
@@ -375,10 +403,12 @@ describe('mapOpencodeMessages', () => {
     expect(messages).toEqual([
       expect.objectContaining({
         content: [
+          '```text',
           'Failed to hydrate OpenCode session.',
           'provider: OpenCode',
           'messageId: msg-bad',
           'reason: OpenCode message metadata is not valid JSON.',
+          '```',
         ].join('\n'),
         id: 'opencode-hydration-error-message-msg-bad',
         role: 'assistant',
@@ -388,6 +418,7 @@ describe('mapOpencodeMessages', () => {
         content: 'Still visible.',
         contentBlocks: [{ content: 'Still visible.', type: 'text' }],
         durationSeconds: 1,
+        completedAt: 3_000,
         id: 'msg-assistant',
         role: 'assistant',
         timestamp: 2_000,
@@ -406,6 +437,18 @@ describe('loadOpencodeSessionMessages', () => {
   afterEach(() => {
     rmSync(tmpRoot, { force: true, recursive: true });
   });
+
+  // Both history queries exercise native fallback failures, whose process deadlines are 10 seconds.
+  it('shows the underlying SQLite failure as a history diagnostic', async () => {
+    const dbPath = path.join(tmpRoot, 'empty.db');
+    new DatabaseSync(dbPath).close();
+    const messages = await loadOpencodeSessionMessages('ses-empty', { databasePath: dbPath });
+    expect(messages).toEqual([expect.objectContaining({
+      id: 'opencode-hydration-error-session-ses-empty',
+      content: expect.stringContaining('no such table: message'),
+    })]);
+    await expect(loadOpencodeSessionModel('ses-empty', { databasePath: dbPath })).resolves.toBeNull();
+  }, 30_000);
 
   it('loads conversation content without selecting raw message metadata', async () => {
     expect(OPENCODE_MESSAGE_ROW_SQL).toContain("json_extract(data, '$.role')");
@@ -485,6 +528,7 @@ describe('loadOpencodeSessionMessages', () => {
           content: 'Session restored.',
           contentBlocks: [{ content: 'Session restored.', type: 'text' }],
           durationSeconds: 2,
+        completedAt: 4_000,
           id: 'msg-assistant',
           role: 'assistant',
           timestamp: 2_000,
@@ -494,4 +538,49 @@ describe('loadOpencodeSessionMessages', () => {
       db.close();
     }
   });
+});
+
+
+it.each([1, 2])('restores OpenCode v%s output plus reasoning across tool steps', (version) => {
+  const native = [
+    { id: 'u', role: 'user', time: { created: 1000 } },
+    { id: 'a', role: 'assistant', parentID: 'u', time: { created: 1200, completed: 2000 },
+      finish: 'tool-calls', tokens: { output: 20, reasoning: 80 } },
+    { id: 'final', role: 'assistant', parentID: 'u', time: { created: 2500, completed: 3500 },
+      finish: 'stop', tokens: { output: 10, reasoning: 15 } },
+  ];
+  const messages = version === 1
+    ? mapOpencodeMessages(native.map(info => ({ info, parts: [{ type: 'text', text: 'Text' }] })))
+    : mapOpencodeV2NativeMessages(native.map(({ role, ...data }) => ({ ...data, type: role, text: 'Work', content: [{ type: 'text', text: 'Text' }] })));
+  expect(messages.at(-1)?.turnStats).toEqual({ outputTokens: 125, durationMs: 2500 });
+});
+
+it('omits OpenCode throughput if any step lacks usage', () => {
+  const messages = mapOpencodeMessages([
+    { info: { id: 'u', role: 'user', time: { created: 1000 } }, parts: [{ type: 'text', text: 'Work' }] },
+    { info: { id: 'a', role: 'assistant', parentID: 'u', time: { created: 1200, completed: 2000 } }, parts: [] },
+    { info: { id: 'final', role: 'assistant', parentID: 'u', time: { created: 2500, completed: 3500 },
+      finish: 'stop', tokens: { output: 10, reasoning: 15 } }, parts: [{ type: 'text', text: 'Done' }] },
+  ]);
+  expect(messages.at(-1)?.turnStats).toBeUndefined();
+});
+
+
+it('reconstructs throughput through the v1 SQLite projection without reading raw metadata', async () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'opencode-v1-throughput-'));
+  const databasePath = path.join(root, 'opencode.db');
+  const db = new DatabaseSync(databasePath);
+  db.exec(`CREATE TABLE message(id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
+    CREATE TABLE part(id TEXT, session_id TEXT, message_id TEXT, data TEXT);`);
+  const insert = db.prepare('INSERT INTO message VALUES(?, ?, ?, ?)');
+  insert.run('u', 'session', 1000, JSON.stringify({ role: 'user', time: { created: 1000 } }));
+  insert.run('a', 'session', 1200, JSON.stringify({ role: 'assistant', parentID: 'u', finish: 'stop',
+    time: { created: 1200, completed: 3500 }, tokens: { output: 100, reasoning: 25 } }));
+  insert.run('child-answer', 'child', 1200, JSON.stringify({ role: 'assistant', parentID: 'u', finish: 'stop',
+    time: { created: 1200, completed: 3500 }, tokens: { output: 900, reasoning: 0 } }));
+  db.close();
+  try {
+    const messages = await loadOpencodeSessionMessages('session', { databasePath });
+    expect(messages.at(-1)?.turnStats).toEqual({ outputTokens: 125, durationMs: 2500 });
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

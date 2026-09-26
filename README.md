@@ -14,8 +14,8 @@
 > **Versioning** — Kirodian uses its own [SemVer](https://semver.org/) line, independent of Claudian's. Each release states the upstream Claudian version it is based on:
 >
 > ```text
-> Kirodian v0.1.0
-> Based on Claudian v2.2.6
+> Kirodian v0.2.0
+> Based on Claudian v2.3.4
 > ```
 >
 > The rest of this README is inherited from Claudian and describes the shared plugin.
@@ -30,17 +30,15 @@ Open the chat sidebar from the ribbon icon or command palette. Select text and u
 
 **Slash Commands & Skills** — Type `/` or `$` for reusable prompt templates or Skills from user- and vault-level scopes.
 
-**`@mention`** - Type `@` to mention anything you want the agent to work with, including vault files, subagents, and files in external directories.
+**`@mention`** — Type `@` to reference vault files and folders.
 
-**Plan Mode** — Toggle via `Shift+Tab`. The agent explores and designs before implementing, then presents a plan for approval.
-
-**Instruction Mode (`/instruction`)** — Refined custom instructions added from the chat input.
+**Side Chat (`/side` or `/btw`)** — Explore a separate, temporary conversation with follow-ups and tools while keeping the main chat unchanged.
 
 **MCP Servers** — Connect external tools through each coding agent's native CLI-managed MCP configuration.
 
 **Tabs & Session Management** — Use multiple tabs in single-panel mode or a persistent session manager beside the chat in dual-pane mode.
 
-**Collab Mode** (Experimental) — Collaborate on shared projects with other Claudian users. [Learn more](https://claudian.md/docs/collab-mode/).
+**Collaboration** — Collab is now a standalone plugin. See [Claudian Collab](https://github.com/YishenTu/claudian-collab).
 
 ## Requirements
 
@@ -53,7 +51,8 @@ Open the chat sidebar from the ribbon icon or command palette. Select text and u
 - A compatible subscription or API provider, such as [OpenRouter](https://openrouter.ai/docs/guides/guides/claude-code-integration), [Kimi](https://platform.kimi.ai/docs/guide/claude-code-kimi), [GLM](https://docs.z.ai/devpack/tool/claude), or [DeepSeek](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code) etc.
 - Obsidian v1.13.0+
 - Desktop only (macOS, Linux, Windows)
-- Collab Mode requires [Git](https://git-scm.com/install/)
+
+Claudian now supports OpenCode v2, OpenCode v1 support will end on October 30, 2026. See the [OpenCode v2 migration guide](https://opencode.ai/v2/docs/migrate-v1).
 
 ## Installation
 
@@ -96,8 +95,7 @@ npm run build
 ## Privacy & Data Use
 
 - **Sent to API**: Your input, attached files, images, and tool call outputs. Depending on the selected provider, data is sent to Anthropic (Claude), OpenAI (Codex), xAI (Grok), or the providers configured in OpenCode or Pi. The destination can be configured through provider settings and environment variables.
-- **Collab LAN traffic**: When you explicitly Host or synchronize a Collab Project, Project Git data and authenticated coordination metadata travel directly between invited teammates' devices on the local network. Collab Mode itself does not send Project data to a Claudian cloud service or any third party.
-- **No telemetry or unsolicited background activity**: Claudian does not run telemetry beacons. UI polling timers read local Obsidian/editor selection state only. Network activity is limited to explicit provider runtime work, configured MCP endpoints, provider SDK/CLI calls needed to answer your requests, and explicitly started Collab LAN work.
+- **No telemetry or unsolicited background activity**: Claudian does not run telemetry beacons. UI polling timers read local Obsidian/editor selection state only. Network activity is limited to explicit provider runtime work, configured MCP endpoints, provider SDK/CLI calls needed to answer your requests, and their configured services.
 
 ## Troubleshooting
 
@@ -144,9 +142,9 @@ For provider-specific installation and configuration guidance, refer to the prov
 ```
 src/
 ├── main.ts                      # Plugin entry point
-├── app/                         # Application services, storage, and lazy Collab infrastructure
-├── core/                        # Provider-neutral runtime, registry, and type contracts
-│   ├── runtime/                 # ChatRuntime interface and approval types
+├── app/                         # Application services, and storage
+├── core/                        # Provider-neutral execution, registry, and type contracts
+│   ├── execution/               # Provider execution, session lifecycle, and interaction contracts
 │   ├── providers/               # Provider registry and workspace services
 │   ├── auxiliary/               # Shared provider auxiliary services
 │   ├── bootstrap/               # Plugin bootstrap wiring
@@ -161,7 +159,6 @@ src/
 │   └── acp/                     # Agent Client Protocol shared transport
 ├── features/
 │   ├── chat/                    # Sidebar chat: tabs, controllers, renderers
-│   ├── collab/                  # Collab sidebar, review, conflict, and access UI
 │   ├── inline-edit/             # Inline edit modal and provider-backed edit services
 │   └── settings/                # Settings shell with provider tabs
 ├── shared/                      # Reusable UI components and modals

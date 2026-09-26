@@ -6,19 +6,19 @@ import type {
 import type { ProviderHost } from '../../../core/providers/ProviderHost';
 import type { SlashCommand } from '../../../core/types';
 import type {
-  AcpLoadSessionRequest,
-  AcpLoadSessionResponse,
-  AcpNewSessionRequest,
-  AcpNewSessionResponse,
-  AcpPromptRequest,
-  AcpPromptResponse,
-  AcpRequestPermissionRequest,
-  AcpRequestPermissionResponse,
-  AcpSessionModelState,
-  AcpSessionNotification,
-  AcpSetSessionModelRequest,
-  AcpSetSessionModelResponse,
-  AcpSetSessionModeRequest,
+  ACPLoadSessionRequest,
+  ACPLoadSessionResponse,
+  ACPNewSessionRequest,
+  ACPNewSessionResponse,
+  ACPPromptRequest,
+  ACPPromptResponse,
+  ACPRequestPermissionRequest,
+  ACPRequestPermissionResponse,
+  ACPSessionModelState,
+  ACPSessionNotification,
+  ACPSetSessionModelRequest,
+  ACPSetSessionModelResponse,
+  ACPSetSessionModeRequest,
 } from '../../acp';
 import type { KiroCommandCatalog } from '../commands/KiroCommandCatalog';
 import { loadKiroPromptIndexAfterAssistant } from '../history/KiroHistoryStore';
@@ -43,23 +43,23 @@ export interface KiroExecutionNativeConnection {
   initialize(): Promise<void>;
   isAlive?(): boolean;
   interject?(request: {
-    content: AcpPromptRequest['prompt'];
+    content: ACPPromptRequest['prompt'];
     interjectionId: string;
     sessionId: string;
     text: string;
   }, signal?: AbortSignal): Promise<void>;
-  loadSession(request: AcpLoadSessionRequest): Promise<AcpLoadSessionResponse>;
+  loadSession(request: ACPLoadSessionRequest): Promise<ACPLoadSessionResponse>;
   listCommands(cwd: string, signal?: AbortSignal): Promise<SlashCommand[]>;
-  newSession(request: AcpNewSessionRequest): Promise<AcpNewSessionResponse>;
+  newSession(request: ACPNewSessionRequest): Promise<ACPNewSessionResponse>;
   onNotification(
     listener: (
-      notification: AcpSessionNotification,
+      notification: ACPSessionNotification,
       source: 'extension' | 'standard',
     ) => void,
   ): () => void;
   onModeChanged?(listener: (mode: 'normal' | 'yolo') => void): () => void;
-  onModelsChanged?(listener: (models: AcpSessionModelState) => void): () => void;
-  prompt(request: AcpPromptRequest): Promise<AcpPromptResponse>;
+  onModelsChanged?(listener: (models: ACPSessionModelState) => void): () => void;
+  prompt(request: ACPPromptRequest): Promise<ACPPromptResponse>;
   rewind?(request: {
     force: boolean;
     mode: 'all' | 'conversation_only' | 'files_only';
@@ -72,8 +72,8 @@ export interface KiroExecutionNativeConnection {
     revertedFiles: string[];
     success: boolean;
   }>;
-  setMode(request: AcpSetSessionModeRequest): Promise<unknown>;
-  setModel(request: AcpSetSessionModelRequest): Promise<AcpSetSessionModelResponse>;
+  setMode(request: ACPSetSessionModeRequest): Promise<unknown>;
+  setModel(request: ACPSetSessionModelRequest): Promise<ACPSetSessionModelResponse>;
   shutdown(): Promise<void>;
 }
 
@@ -82,9 +82,9 @@ export interface KiroExecutionNativeCreateOptions {
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
   readonly requestPermission: (
-    request: AcpRequestPermissionRequest,
+    request: ACPRequestPermissionRequest,
     signal?: AbortSignal,
-  ) => Promise<AcpRequestPermissionResponse>;
+  ) => Promise<ACPRequestPermissionResponse>;
   readonly requestExtension: (
     method: string,
     params: unknown,

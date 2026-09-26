@@ -24,10 +24,6 @@ export class ProviderInitializationBoundary {
   private initAttempts: Partial<Record<ProviderId, ProviderInitializationAttempt>> = {};
   private generation = 0;
 
-  getRegisteredProviderIds(): ProviderId[] {
-    return Object.keys(this.registrations);
-  }
-
   setServices(
     providerId: ProviderId,
     services: ProviderWorkspaceServices | undefined,
@@ -65,7 +61,7 @@ export class ProviderInitializationBoundary {
     const generation = this.generation;
     const promise = plugin.runProviderExecutionTransition(
       [providerId],
-      (transitionScope) => this.runInitialize(
+      (transitionScope) => this.#runInitialize(
         plugin,
         providerId,
         generation,
@@ -104,7 +100,7 @@ export class ProviderInitializationBoundary {
     await Promise.allSettled(promises);
   }
 
-  private async runInitialize(
+  async #runInitialize(
     plugin: ProviderHost,
     providerId: ProviderId,
     generation: number,

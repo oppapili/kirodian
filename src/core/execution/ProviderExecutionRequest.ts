@@ -23,7 +23,6 @@ export interface ProviderExecutionContext {
   readonly editorSelection?: EditorSelectionContext | null;
   readonly browserSelection?: BrowserSelectionContext | null;
   readonly canvasSelection?: CanvasSelectionContext | null;
-  readonly externalContextPaths?: readonly string[];
 }
 
 export type ProviderSystemInstructions =
@@ -39,11 +38,10 @@ export type ProviderSystemInstructions =
 export interface ProviderExecutionConfiguration {
   readonly systemInstructions: ProviderSystemInstructions;
   readonly model?: string;
-  readonly reasoning?: string;
+  /** Explicit choices cannot be replaced by saved defaults. Null omits the native override; undefined permits auxiliary defaults. */
+  readonly reasoning?: string | null;
   readonly permissionMode?: string;
-  readonly mode?: string;
   readonly serviceTier?: string;
-  readonly externalWorkspaceRoots?: readonly string[];
 }
 
 export type ProviderToolPolicy =
