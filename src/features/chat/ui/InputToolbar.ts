@@ -811,12 +811,16 @@ export function createInputToolbar(
   permissionToggle: PermissionToggle;
   serviceTierToggle: ServiceTierToggle;
 } {
+  // DOM order defines the visual left-to-right toolbar layout. The mode (agent)
+  // selector sits immediately after the model selector; the permission toggle is
+  // appended last and is the ONLY element with `margin-left: auto`, so it always
+  // pins to the right edge regardless of how many other controls are shown.
   const modelSelector = new ModelSelector(parentEl, callbacks);
+  const modeSelector = new ModeSelector(parentEl, callbacks);
   const thinkingBudgetSelector = new ThinkingBudgetSelector(parentEl, callbacks);
   const serviceTierToggle = new ServiceTierToggle(parentEl, callbacks);
   const contextUsageMeter = new ContextUsageMeter(parentEl);
   const permissionToggle = new PermissionToggle(parentEl, callbacks);
-  const modeSelector = new ModeSelector(parentEl, callbacks);
   const layoutController = new InputToolbarLayoutController(parentEl);
 
   return {
