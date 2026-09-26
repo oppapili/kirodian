@@ -182,9 +182,11 @@ export function parseKiroAgentListDirectories(output: string): KiroAgentDirector
 
 /**
  * Reads the live agent catalog by running `kiro-cli agent list` through the same
- * spawn seam as the model catalog. Best-effort: a non-zero exit, a timeout, or a
- * parse yielding no agents returns an empty completed result so the selector hides
- * gracefully rather than throwing into the session.
+ * spawn seam as the model catalog. Best-effort: a hard termination (timeout / kill)
+ * or a parse yielding no agents returns an empty completed result so the selector
+ * hides gracefully rather than throwing into the session. A non-zero exit code does
+ * NOT discard the output — `agent list` can exit non-zero on a partial error while
+ * still printing the full listing, so stdout is parsed regardless of exit code.
  */
 export class KiroAgentCatalogService implements KiroAgentCatalogServiceLike {
   private readonly runner: KiroCatalogCommandRunner;
@@ -217,7 +219,8 @@ export class KiroAgentCatalogService implements KiroAgentCatalogServiceLike {
         signal,
         timeoutMs: this.options.agentCommandTimeoutMs ?? AGENT_COMMAND_TIMEOUT_MS,
       });
-      if (commandResult.termination || commandResult.exitCode !== 0) {
+      // A hard termination (timeout / killed) yields no usable output.
+      if (commandResult.termination) {
         return {
           agents: [],
           currentAgentId: null,
@@ -226,6 +229,10 @@ export class KiroAgentCatalogService implements KiroAgentCatalogServiceLike {
         };
       }
 
+      // `kiro-cli agent list` can exit non-zero for a PARTIAL failure (e.g. an
+      // `Error: File URI not found` while resolving an unrelated agent's prompt)
+      // yet still print the full listing on stdout. So we do not gate on exitCode:
+      // parse stdout regardless, and only fall back to empty when nothing parsed.
       const agents = parseKiroAgentListOutput(commandResult.stdout);
       const currentAgentId = agents.find(agent => agent.isCurrent)?.id ?? null;
       const directories = parseKiroAgentListDirectories(commandResult.stdout);
