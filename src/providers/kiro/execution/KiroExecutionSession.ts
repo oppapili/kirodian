@@ -64,7 +64,12 @@ import { waitForKiroCancelDelivery } from '../runtime/KiroCancelDelivery';
 import type { KiroModelCatalogCoordinator } from '../runtime/KiroModelCatalogCoordinator';
 import { buildKiroRuntimeEnv } from '../runtime/KiroRuntimeEnvironment';
 import { KiroSessionNotificationMirrorDeduplicator } from '../runtime/KiroSessionNotificationMirrorDeduplicator';
-import { getKiroProviderSettings, resolveKiroSelectedAgentMode, updateCurrentKiroAgentModes } from '../settings';
+import {
+  getCurrentKiroAgentModes,
+  getKiroProviderSettings,
+  reconcileKiroSessionAgentModes,
+  resolveKiroSelectedAgentMode,
+} from '../settings';
 import { parseKiroProviderState } from '../types';
 import type {
   KiroExecutionNativeConnection,
@@ -1128,10 +1133,12 @@ RewindableExecutionSession {
   }
 
   /**
-   * Persists the agent modes advertised by a `session/new` or `session/load` response so the
-   * toolbar's Agent selector can render them synchronously from settings. Best-effort: a
-   * snapshot with no modes leaves the prior snapshot untouched, and persistence failures never
-   * disrupt the turn.
+   * Reconciles the agent modes advertised by a `session/new` or `session/load` response against
+   * the CLI-prefetched catalog. The prefetch (see issue #2) is the selector's option source, so
+   * this is a SUPPLEMENT: it refreshes the live `currentModeId` and appends any session-only mode,
+   * but never replaces the prefetched list (and populates it only when no prefetch exists yet).
+   * Best-effort: a snapshot with no modes, or no net change, leaves the prior snapshot untouched,
+   * and persistence failures never disrupt the turn.
    */
   private publishSessionModes(
     response: Pick<
@@ -1143,7 +1150,10 @@ RewindableExecutionSession {
     if (modes.length === 0) return;
     let changed = false;
     void this.plugin.mutateSettingsConditionally(settings => {
-      changed = updateCurrentKiroAgentModes(settings, { currentModeId, modes }) !== null;
+      const before = getCurrentKiroAgentModes(settings);
+      const reconciled = reconcileKiroSessionAgentModes(settings, { currentModeId, modes });
+      changed = reconciled !== null
+        && JSON.stringify(reconciled) !== JSON.stringify(before);
       return changed;
     }).then(() => {
       if (changed) this.plugin.notifyProviderChatOptionsChanged('kiro');

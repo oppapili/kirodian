@@ -8,6 +8,8 @@ import type {
   ProviderWorkspaceServices,
 } from '../../../core/providers/types';
 import { KiroCommandCatalog } from '../commands/KiroCommandCatalog';
+import { KiroAgentCatalogCoordinator } from '../runtime/KiroAgentCatalogCoordinator';
+import { KiroAgentCatalogService } from '../runtime/KiroAgentCatalogService';
 import { KiroCLIResolver } from '../runtime/KiroCLIResolver';
 import { KiroModelCatalogCoordinator } from '../runtime/KiroModelCatalogCoordinator';
 import { KiroModelCatalogService } from '../runtime/KiroModelCatalogService';
@@ -20,9 +22,13 @@ export interface KiroWorkspaceServices extends ProviderWorkspaceServices {
   cliResolver: KiroCLIResolver;
   commandCatalog: ProviderCommandCatalog;
   modelCatalogCoordinator: KiroModelCatalogCoordinator;
+  agentCatalogCoordinator: KiroAgentCatalogCoordinator;
   refreshModelCatalog(
     context?: ProviderTransitionOwnerContext,
   ): ReturnType<KiroModelCatalogCoordinator['refreshModelCatalog']>;
+  refreshAgentCatalog(
+    context?: ProviderTransitionOwnerContext,
+  ): ReturnType<KiroAgentCatalogCoordinator['refresh']>;
   prepareSettings(): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -45,6 +51,10 @@ export async function createKiroWorkspaceServices(
   const modelCatalogCoordinator = new KiroModelCatalogCoordinator(
     plugin,
     modelCatalogService,
+  );
+  const agentCatalogCoordinator = new KiroAgentCatalogCoordinator(
+    plugin,
+    new KiroAgentCatalogService(plugin),
   );
   const commandMetadataProbe = options.commandMetadataProbe
     ?? new KiroCommandMetadataProbe(plugin);
@@ -71,6 +81,9 @@ export async function createKiroWorkspaceServices(
           commandMetadataProbe.endEnvironmentTransition();
           modelCatalog.endTransition();
         }
+        // Re-prefetch agents against the new environment so the selector tracks a
+        // CLI-path or env change without waiting for the first prompt. Best-effort.
+        void agentCatalogCoordinator.refresh().catch(() => {});
       },
     });
 
@@ -78,17 +91,23 @@ export async function createKiroWorkspaceServices(
     cliResolver: new KiroCLIResolver(),
     commandCatalog: new KiroCommandCatalog(),
     modelCatalogCoordinator,
+    agentCatalogCoordinator,
     commandLoader: new KiroCommandLoader(commandMetadataProbe),
     settingsTabRenderer: kiroSettingsTabRenderer,
     tabWarmupPolicy: kiroTabWarmupPolicy,
     modelCatalog,
     refreshModelCatalog: context => modelCatalogCoordinator.refreshModelCatalog(context),
+    refreshAgentCatalog: context => agentCatalogCoordinator.refresh(context),
     async prepareSettings() {
-      await modelCatalogCoordinator.ensureFresh('settings');
+      await Promise.all([
+        modelCatalogCoordinator.ensureFresh('settings'),
+        agentCatalogCoordinator.refresh(),
+      ]);
     },
     async dispose() {
       unregisterTransitionHook();
       modelCatalogCoordinator.dispose();
+      agentCatalogCoordinator.dispose();
       await Promise.all([
         modelCatalog.dispose(),
         modelCatalogCoordinator.quiesceForEnvironmentChange(),

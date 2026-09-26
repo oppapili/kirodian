@@ -345,6 +345,47 @@ export function updateCurrentKiroAgentModes(
 }
 
 /**
+ * Reconciles a live session's advertised modes against the CLI-prefetched catalog, treating
+ * the session as a SUPPLEMENT rather than the option source (the prefetch is the primary
+ * source; see issue #2). When a prefetched catalog already exists, its mode list is preserved
+ * as the selector's options and only the `currentModeId` is refreshed from the session, with
+ * any session-only mode appended so a live mode absent from the CLI list is still selectable.
+ * When no catalog exists yet (prefetch unavailable), the session modes populate it as a
+ * fallback, matching the pre-prefetch behaviour. Returns the persisted snapshot, or null when
+ * the session advertised nothing usable and no change was made.
+ */
+export function reconcileKiroSessionAgentModes(
+  settings: Record<string, unknown>,
+  session: KiroAgentModeSnapshot,
+): KiroAgentModeSnapshot | null {
+  const normalizedSession = normalizeKiroAgentModeSnapshot(session);
+  if (!normalizedSession || normalizedSession.modes.length === 0) {
+    return null;
+  }
+  const existing = getCurrentKiroAgentModes(settings);
+  if (!existing || existing.modes.length === 0) {
+    return updateCurrentKiroAgentModes(settings, normalizedSession);
+  }
+
+  const knownIds = new Set(existing.modes.map(mode => mode.id));
+  const supplementalModes = normalizedSession.modes.filter(mode => !knownIds.has(mode.id));
+  const currentModeId = normalizedSession.currentModeId ?? existing.currentModeId;
+  const reconciled: KiroAgentModeSnapshot = {
+    currentModeId,
+    modes: supplementalModes.length > 0
+      ? [...existing.modes, ...supplementalModes]
+      : existing.modes,
+  };
+  if (
+    reconciled.currentModeId === existing.currentModeId
+    && supplementalModes.length === 0
+  ) {
+    return existing;
+  }
+  return updateCurrentKiroAgentModes(settings, reconciled);
+}
+
+/**
  * Resolves the agent mode id to drive `session/set_mode` with. Precedence: the user's
  * explicit `selectedAgentMode` (when it still exists in the live modes), then the session's
  * advertised `currentModeId`, then null (leave the session on its native default). Never

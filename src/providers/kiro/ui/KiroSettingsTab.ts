@@ -141,6 +141,11 @@ export const kiroSettingsTabRenderer: ProviderSettingsTabRenderer = {
       () => modelWarning.refresh(),
     );
 
+    // Pre-fetch the agent catalog alongside the models so the toolbar's Agent
+    // selector populates (and persists host-scoped) without waiting for the first
+    // prompt to establish a session. Best-effort: failures leave the prior snapshot.
+    void workspace.refreshAgentCatalog().catch(() => {});
+
     new Setting(container).setName(t('settings.agentSkills.sectionTitle')).setHeading();
     context.renderAgentSkillSettings(container, KIRO_PROVIDER_ID);
 
