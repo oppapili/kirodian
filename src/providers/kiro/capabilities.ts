@@ -12,9 +12,9 @@ export const KIRO_PROVIDER_CAPABILITIES: Readonly<ProviderCapabilities> = Object
   supportsEphemeralSessions: false,
   supportsFork: false,
   supportsImageAttachments: true,
-  supportsInstructionMode: true,
   supportsNativeHistory: true,
   supportsProviderCommands: true,
+  supportsResponseThroughput: false,
   supportsRewind: false,
   supportsTurnSteer: false,
 });
