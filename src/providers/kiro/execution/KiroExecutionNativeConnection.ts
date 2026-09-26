@@ -1,9 +1,9 @@
 import type { SlashCommand } from '../../../core/types';
 import {
-  AcpClientConnection,
-  AcpJsonRpcTransport,
-  AcpSubprocess,
-  normalizeAcpAvailableCommands,
+  ACPClientConnection,
+  ACPJSONRPCTransport,
+  ACPSubprocess,
+  normalizeACPAvailableCommands,
 } from '../../acp';
 import {
   KIRO_COMMANDS_AVAILABLE_NOTIFICATION_METHODS,
@@ -21,27 +21,27 @@ import type {
 // round-trip the agent does not support.
 export class KiroExecutionNativeConnectionImpl
 implements KiroExecutionNativeConnection {
-  private readonly connection: AcpClientConnection;
+  private readonly connection: ACPClientConnection;
   private latestCommands: SlashCommand[] = [];
   private readonly listeners = new Set<Parameters<KiroExecutionNativeConnection['onNotification']>[0]>();
-  private readonly process: AcpSubprocess;
-  private readonly transport: AcpJsonRpcTransport;
+  private readonly process: ACPSubprocess;
+  private readonly transport: ACPJSONRPCTransport;
   private readonly unsubscribers: Array<() => void> = [];
 
   constructor(options: KiroExecutionNativeCreateOptions) {
-    this.process = new AcpSubprocess({
+    this.process = new ACPSubprocess({
       args: ['acp'],
       command: options.command,
       cwd: options.cwd,
       env: options.env,
     });
     this.process.start();
-    this.transport = new AcpJsonRpcTransport({
+    this.transport = new ACPJSONRPCTransport({
       input: this.process.stdout,
       onClose: listener => this.process.onClose(listener),
       output: this.process.stdin,
     });
-    this.connection = new AcpClientConnection({
+    this.connection = new ACPClientConnection({
       clientInfo: { name: 'claudian', version: options.version },
       delegate: {
         onSessionNotification: notification => this.notify(notification, 'standard'),
@@ -53,7 +53,7 @@ implements KiroExecutionNativeConnection {
     for (const method of KIRO_COMMANDS_AVAILABLE_NOTIFICATION_METHODS) {
       this.unsubscribers.push(this.transport.onNotification(method, params => {
         const commands = parseKiroAvailableCommandsNotification(params);
-        if (commands) this.latestCommands = normalizeAcpAvailableCommands(commands);
+        if (commands) this.latestCommands = normalizeACPAvailableCommands(commands);
       }));
     }
   }

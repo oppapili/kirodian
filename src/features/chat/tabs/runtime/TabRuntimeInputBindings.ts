@@ -1,4 +1,5 @@
 import {
+  cancelSelectedDestinationTurn,
   sendTabInputMessageFromEnterKey,
   sendTabInputMessageFromExplicitEnterShortcut,
 } from '../TabInputEvents';
@@ -20,33 +21,9 @@ export function buildTabRuntimeInputBindings(
   const { dom, state } = shell;
   const { plugin } = options;
 
-  let wasBangBashActive = ui.bangBashModeManager?.isActive() ?? false;
-  const syncBangBashSuppression = (): void => {
-    const isActive = ui.bangBashModeManager?.isActive() ?? false;
-    if (isActive === wasBangBashActive) return;
-    wasBangBashActive = isActive;
-
-    ui.composerDropdown.setEnabled(!isActive);
-  };
-
   const keydownHandler = (event: KeyboardEvent) => {
+    if ((event.target as HTMLElement | null)?.closest?.('button, a')) return;
     const tab = runtimeRef.requirePublished();
-    if (ui.bangBashModeManager?.isActive()) {
-      ui.bangBashModeManager.handleKeydown(event);
-      syncBangBashSuppression();
-      return;
-    }
-
-    if (ui.bangBashModeManager?.handleTriggerKey(event)) {
-      syncBangBashSuppression();
-      return;
-    }
-
-    if (ui.instructionModeManager.isActive()) {
-      ui.instructionModeManager.handleKeydown(event);
-      return;
-    }
-
     if (sendTabInputMessageFromExplicitEnterShortcut(tab, event)) {
       return;
     }
@@ -59,35 +36,28 @@ export function buildTabRuntimeInputBindings(
       return;
     }
 
-    if (event.key === 'Escape' && !event.isComposing && state.isStreaming) {
-      event.preventDefault();
-      controllers.inputController.cancelStreaming();
-      return;
+    if (event.key === 'Escape' && !event.isComposing) {
+      if (cancelSelectedDestinationTurn(tab)) {
+        event.preventDefault();
+        return;
+      }
     }
 
     if (sendTabInputMessageFromEnterKey(tab, plugin.settings, event)) {
       return;
     }
   };
-  dom.inputEl.addEventListener('keydown', keydownHandler);
+  dom.inputEl.addEventListener('keydown', keydownHandler, true);
   options.registerCleanup(
     'tab input keydown binding',
-    () => dom.inputEl.removeEventListener('keydown', keydownHandler),
+    () => dom.inputEl.removeEventListener('keydown', keydownHandler, true),
   );
 
   const inputHandler = () => {
-    commitProvisionalTab(runtimeRef.requirePublished());
-    ui.instructionModeManager.handleInputChange();
-    if (
-      !ui.bangBashModeManager?.isActive()
-      && !ui.instructionModeManager.isActive()
-    ) {
-      ui.composerDropdown.handleInputChange();
-    } else {
-      ui.composerDropdown.hide();
-    }
-    ui.bangBashModeManager?.handleInputChange();
-    syncBangBashSuppression();
+    const tab = runtimeRef.requirePublished();
+    commitProvisionalTab(tab);
+    controllers.sideChatController.handleComposerInput();
+    ui.composerDropdown.handleInputChange();
   };
   dom.inputEl.addEventListener('input', inputHandler);
   options.registerCleanup(

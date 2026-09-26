@@ -1,10 +1,10 @@
 import { setIcon } from 'obsidian';
 
-import type { ComposerDropdownItem } from './types';
+import type { ComposerDropdownItem, ComposerInputElement } from './types';
 
 export interface ComposerDropdownViewOptions {
   readonly fixed?: boolean;
-  readonly inputEl: HTMLInputElement | HTMLTextAreaElement;
+  readonly inputEl: ComposerInputElement;
   readonly onHover: (index: number) => void;
   readonly onSelect: (index: number) => void;
 }
@@ -39,7 +39,7 @@ export class ComposerDropdownView {
   }
 
   render(items: readonly ComposerDropdownItem[], selectedIndex: number): void {
-    const dropdown = this.ensureDropdown();
+    const dropdown = this.#ensureDropdown();
     dropdown.empty();
     this.itemEls = [];
 
@@ -88,7 +88,7 @@ export class ComposerDropdownView {
     dropdown.addClass('is-visible');
     this.options.inputEl.setAttribute?.('aria-expanded', 'true');
     this.updateSelection(selectedIndex);
-    this.positionFixed();
+    this.#positionFixed();
   }
 
   updateSelection(selectedIndex: number): void {
@@ -104,7 +104,7 @@ export class ComposerDropdownView {
     }
   }
 
-  private ensureDropdown(): HTMLElement {
+  #ensureDropdown(): HTMLElement {
     if (this.dropdownEl) return this.dropdownEl;
     this.dropdownEl = this.containerEl.createDiv({
       cls: [
@@ -118,7 +118,7 @@ export class ComposerDropdownView {
     return this.dropdownEl;
   }
 
-  private positionFixed(): void {
+  #positionFixed(): void {
     if (!this.dropdownEl || !this.options.fixed) return;
     const inputRect = this.options.inputEl.getBoundingClientRect();
     const viewportHeight = this.options.inputEl.ownerDocument.defaultView?.innerHeight

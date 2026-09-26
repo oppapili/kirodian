@@ -41,9 +41,7 @@ describe('built-in ProviderModule catalog', () => {
     Object.assign(getProviderConfig(malformedSettings, 'claude'), {
       customModels: {},
       defaultModel: {},
-      enableBangBash: 1,
       enableChrome: 'true',
-      lastModel: [],
       loadUserSettings: 'false',
       safeMode: 'unknown',
     });
@@ -88,19 +86,17 @@ describe('built-in ProviderModule catalog', () => {
       expect(config.environmentVariables).toEqual(expect.any(String));
     }
 
+    expect(getProviderConfig(normalizedSettings, 'claude')).not.toHaveProperty('defaultModel');
     expect(getProviderConfig(normalizedSettings, 'claude')).toMatchObject({
-      customModels: expect.any(String),
-      defaultModel: expect.any(String),
-      enableBangBash: false,
+      discoveredModels: [],
       enableChrome: false,
-      lastModel: expect.any(String),
       loadUserSettings: true,
       safeMode: 'default',
     });
+    expect(getProviderConfig(normalizedSettings, 'codex')).not.toHaveProperty('customModels');
     expect(getProviderConfig(normalizedSettings, 'codex')).toMatchObject({
       catalogFingerprint: expect.any(String),
       catalogTimestamp: 0,
-      customModels: expect.any(String),
       reasoningSummary: 'detailed',
       safeMode: 'read-only',
     });
@@ -112,7 +108,7 @@ describe('built-in ProviderModule catalog', () => {
     });
   });
 
-  it('keeps ephemeral OpenCode plan-mode normalization provider-owned', () => {
+  it('normalizes obsolete OpenCode modes through provider storage', () => {
     const opencodeModule = BUILT_IN_PROVIDER_MODULES.find(module => module.id === 'opencode');
     const normalizedSettings: Record<string, unknown> = {};
 

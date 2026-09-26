@@ -1,6 +1,6 @@
 import {
+  DEFAULT_REASONING_VALUE,
   formatReasoningValueLabel,
-  resolvePreferredReasoningDefault,
   STANDARD_REASONING_VALUES,
 } from '../../core/providers/reasoning';
 
@@ -145,7 +145,10 @@ export function resolveKiroDefaultReasoningEffort(
     return declaredDefault;
   }
 
-  return resolvePreferredReasoningDefault(availableValues, 'high');
+  if (availableValues.includes(DEFAULT_REASONING_VALUE)) {
+    return DEFAULT_REASONING_VALUE;
+  }
+  return availableValues[0] ?? DEFAULT_REASONING_VALUE;
 }
 
 export function resolveKiroContextWindow(

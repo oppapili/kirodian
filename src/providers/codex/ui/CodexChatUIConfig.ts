@@ -18,14 +18,13 @@ import {
   getCodexDefaultReasoningEffort,
   getCodexFastServiceTier,
   getCodexReasoningEffortOptions,
-  getDefaultCodexModel,
   isCodexModelAvailable,
-  resolveCodexModelServiceTier,
+  resolveCodexModelServiceTier
 } from '../models';
 import {
-  isCodexModelSelectionId,
+  encodeCodexModelSelectionId, isCodexModelSelectionId,
   looksLikeCodexModel,
-  toCodexRuntimeModelId,
+  toCodexRuntimeModelId
 } from '../modelSelection';
 import {
   applyCodexModelDefaults,
@@ -42,13 +41,10 @@ const CODEX_PERMISSION_MODE_TOGGLE: ProviderPermissionModeToggleConfig = {
   inactiveLabel: 'Safe',
   activeValue: 'yolo',
   activeLabel: 'YOLO',
-  planValue: 'plan',
-  planLabel: 'Plan',
 };
 
 const DEFAULT_SERVICE_TIER_LABEL = 'Standard';
 
-const DEFAULT_CONTEXT_WINDOW = 200_000;
 
 function getVisibleDiscoveredModels(settings: Record<string, unknown>) {
   const codexSettings = getCodexProviderSettings(settings);
@@ -73,7 +69,7 @@ export const codexChatUIConfig: ProviderChatUIConfig = {
       codexSettings.visibleModels,
       codexSettings.discoveredModels,
     ).find(modelId => getVisibleDiscoveredModels(settings).some(model => model.model === modelId));
-    return firstVisibleModel ?? getCodexModelOptions(settings)[0]?.value ?? null;
+    return firstVisibleModel ? encodeCodexModelSelectionId(firstVisibleModel) : getCodexModelOptions(settings)[0]?.value ?? null;
   },
 
   ownsModel(model: string, settings: Record<string, unknown>): boolean {
@@ -82,13 +78,8 @@ export const codexChatUIConfig: ProviderChatUIConfig = {
     }
 
     const runtimeModel = toCodexRuntimeModelId(model);
-    if (getCodexModelOptions(settings).some((option: ProviderUIOption) =>
-      option.value === model || toCodexRuntimeModelId(option.value) === runtimeModel
-    )) {
-      return true;
-    }
-
-    return looksLikeCodexModel(runtimeModel);
+    return getCodexProviderSettings(settings).discoveredModels.some(candidate => candidate.model === runtimeModel)
+      || looksLikeCodexModel(runtimeModel);
   },
 
   isAdaptiveReasoningModel(_model: string, _settings: Record<string, unknown>): boolean {
@@ -105,7 +96,9 @@ export const codexChatUIConfig: ProviderChatUIConfig = {
       return [...EFFORT_LEVELS];
     }
 
-    return getCodexReasoningEffortOptions(model, codexSettings.enableUltraEffort).map(option => ({
+    const options = getCodexReasoningEffortOptions(model, codexSettings.enableUltraEffort);
+    if (options.every(option => option.value === 'none')) return [];
+    return options.map(option => ({
       value: option.value,
       label: formatReasoningValueLabel(option.value),
       ...(option.description ? { description: option.description } : {}),
@@ -122,10 +115,6 @@ export const codexChatUIConfig: ProviderChatUIConfig = {
       ? getCodexDefaultReasoningEffort(model, codexSettings.enableUltraEffort)
         ?? DEFAULT_REASONING_VALUE
       : DEFAULT_REASONING_VALUE;
-  },
-
-  getContextWindowSize(): number {
-    return DEFAULT_CONTEXT_WINDOW;
   },
 
   isDefaultModel(model: string): boolean {
@@ -149,21 +138,12 @@ export const codexChatUIConfig: ProviderChatUIConfig = {
       return option.value;
     }
 
-    const codexSettings = getCodexProviderSettings(settings);
-    const discoveredModels = codexSettings.discoveredModels;
-    if (discoveredModels.length === 0) {
-      return model;
-    }
-
-    return getDefaultCodexModel(getVisibleDiscoveredModels(settings))?.model ?? model;
+    return this.ownsModel(model, settings) && !looksLikeCodexModel(runtimeModel)
+      ? encodeCodexModelSelectionId(runtimeModel) : model;
   },
 
-  getCustomModelIds(envVars: Record<string, string>): Set<string> {
-    const ids = new Set<string>();
-    if (envVars.OPENAI_MODEL && !looksLikeCodexModel(envVars.OPENAI_MODEL)) {
-      ids.add(envVars.OPENAI_MODEL);
-    }
-    return ids;
+  getCustomModelIds(): Set<string> {
+    return new Set();
   },
 
   getPermissionModeToggle(): ProviderPermissionModeToggleConfig {

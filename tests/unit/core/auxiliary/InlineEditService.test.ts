@@ -15,9 +15,9 @@ function createService() {
       askUserQuestion: jest.fn(),
       dismissInteraction: jest.fn(),
       requestApproval: jest.fn(),
-      requestPlanDecision: jest.fn(),
     },
     lifecycleRegistry,
+    nativePersistence: 'provider-default',
     vaultWorkingDirectory: '/vault',
   });
   return { backend, lifecycleRegistry, service };

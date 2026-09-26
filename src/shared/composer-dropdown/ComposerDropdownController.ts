@@ -25,7 +25,6 @@ export class ComposerDropdownController {
   private activeMatch: ComposerTriggerMatch | null = null;
   private activeSource: ComposerDropdownSource | null = null;
   private destroyed = false;
-  private enabled = true;
   private generation = 0;
   private inputLoadTimer: number | null = null;
   private items: readonly ComposerDropdownItem[] = [];
@@ -40,12 +39,12 @@ export class ComposerDropdownController {
     this.view = new ComposerDropdownView(containerEl, {
       fixed: options.fixed,
       inputEl,
-      onHover: index => this.setSelectedIndex(index),
-      onSelect: index => this.selectIndex(index),
+      onHover: index => this.#setSelectedIndex(index),
+      onSelect: index => this.#selectIndex(index),
     });
     for (const source of sources) {
       const unsubscribe = source.subscribeInvalidation?.(() => {
-        if (this.activeSource?.id === source.id) this.rematchInput();
+        if (this.activeSource?.id === source.id) this.#rematchInput();
       });
       if (unsubscribe) this.sourceUnsubscribers.push(unsubscribe);
     }
@@ -58,22 +57,22 @@ export class ComposerDropdownController {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    this.invalidateActiveLoad();
+    this.#invalidateActiveLoad();
     for (const unsubscribe of this.sourceUnsubscribers.splice(0)) unsubscribe();
     this.view.destroy();
   }
 
   handleInputChange(): void {
-    this.rematchAndLoad(true);
+    this.#rematchAndLoad(true);
   }
 
-  private rematchAndLoad(inputDriven: boolean): void {
-    if (!this.enabled || this.destroyed) {
+  #rematchAndLoad(inputDriven: boolean): void {
+    if (this.destroyed) {
       this.hide();
       return;
     }
     const cursor = this.inputEl.selectionStart ?? 0;
-    const folderMatch = this.matchActiveFolder(this.inputEl.value, cursor);
+    const folderMatch = this.#matchActiveFolder(this.inputEl.value, cursor);
     let sourceMatch: { match: ComposerTriggerMatch; source: ComposerDropdownSource } | undefined;
     if (folderMatch && this.activeSource) {
       sourceMatch = { match: folderMatch, source: this.activeSource };
@@ -85,38 +84,38 @@ export class ComposerDropdownController {
         }
       }
     }
-    if (!sourceMatch?.match) {
+    if (!sourceMatch) {
       this.hide();
       return;
     }
-
-    if (this.activeSource?.id !== sourceMatch.source.id) this.activeFolder = null;
-    this.activeSource = sourceMatch.source;
-    this.activeMatch = sourceMatch.match;
-    this.requestActiveLoad(inputDriven);
+    const { match, source } = sourceMatch;
+    if (this.activeSource?.id !== source.id) this.activeFolder = null;
+    this.activeSource = source;
+    this.activeMatch = match;
+    this.#requestActiveLoad(inputDriven);
   }
 
   handleKeydown(event: KeyboardEvent): boolean {
-    if (!this.enabled || !this.view.isVisible() || event.isComposing) return false;
+    if (!this.view.isVisible() || event.isComposing) return false;
     switch (event.key) {
       case 'ArrowDown':
         event.preventDefault();
-        this.moveSelection(1);
+        this.#moveSelection(1);
         return true;
       case 'ArrowUp':
         event.preventDefault();
-        this.moveSelection(-1);
+        this.#moveSelection(-1);
         return true;
       case 'Enter':
       case 'Tab':
         if (this.selectedIndex < 0) return false;
         event.preventDefault();
-        this.selectIndex(this.selectedIndex);
+        this.#selectIndex(this.selectedIndex);
         return true;
       case 'Escape':
         event.preventDefault();
         if (this.activeFolder) {
-          this.returnToRoot();
+          this.#returnToRoot();
         } else {
           this.hide();
         }
@@ -127,7 +126,7 @@ export class ComposerDropdownController {
   }
 
   hide(): void {
-    this.invalidateActiveLoad();
+    this.#invalidateActiveLoad();
     this.activeFolder = null;
     this.activeMatch = null;
     this.activeSource = null;
@@ -140,19 +139,14 @@ export class ComposerDropdownController {
     return this.view.isVisible();
   }
 
-  setEnabled(enabled: boolean): void {
-    this.enabled = enabled;
-    if (!enabled) this.hide();
-  }
-
-  private currentFolderQuery(match: ComposerTriggerMatch): string | null {
+  #currentFolderQuery(match: ComposerTriggerMatch): string | null {
     const prefix = this.activeFolder?.item.inputPrefix;
     if (!prefix) return match.query;
     if (!match.query.toLocaleLowerCase().startsWith(prefix.toLocaleLowerCase())) return null;
     return match.query.slice(prefix.length);
   }
 
-  private matchActiveFolder(input: string, cursor: number): ComposerTriggerMatch | null {
+  #matchActiveFolder(input: string, cursor: number): ComposerTriggerMatch | null {
     const prefix = this.activeFolder?.item.inputPrefix;
     const match = this.activeMatch;
     if (!prefix || !match || cursor < match.start) return null;
@@ -166,22 +160,22 @@ export class ComposerDropdownController {
     };
   }
 
-  private rematchInput(): void {
+  #rematchInput(): void {
     if (!this.activeSource || !this.activeMatch || this.destroyed) return;
-    this.rematchAndLoad(false);
+    this.#rematchAndLoad(false);
   }
 
-  private requestActiveLoad(inputDriven: boolean): void {
+  #requestActiveLoad(inputDriven: boolean): void {
     const source = this.activeSource;
     const match = this.activeMatch;
-    if (!source || !match || this.destroyed || !this.enabled) return;
+    if (!source || !match || this.destroyed) return;
 
-    const folderQuery = this.currentFolderQuery(match);
+    const folderQuery = this.#currentFolderQuery(match);
     if (this.activeFolder && folderQuery === null) {
       this.activeFolder = null;
     }
 
-    const generation = this.invalidateActiveLoad();
+    const generation = this.#invalidateActiveLoad();
     this.items = [{ id: 'loading', kind: 'status', label: 'Loading…', state: 'loading' }];
     this.selectedIndex = -1;
     this.view.render(this.items, this.selectedIndex);
@@ -204,7 +198,6 @@ export class ComposerDropdownController {
       !source
       || !match
       || this.destroyed
-      || !this.enabled
       || generation !== this.generation
     ) return;
 
@@ -213,13 +206,13 @@ export class ComposerDropdownController {
 
     try {
       const items = await (this.activeFolder
-        ? this.activeFolder.item.load(this.currentFolderQuery(match) ?? '', controller.signal)
+        ? this.activeFolder.item.load(this.#currentFolderQuery(match) ?? '', controller.signal)
         : source.load(match, controller.signal));
       if (this.destroyed || controller.signal.aborted || generation !== this.generation) return;
       this.items = items.length > 0
         ? items
         : [{ id: 'empty', kind: 'status', label: 'No matches', state: 'empty' }];
-      this.selectedIndex = this.findSelectable(0, 1, true);
+      this.selectedIndex = this.#findSelectable(0, 1, true);
       this.view.render(this.items, this.selectedIndex);
     } catch {
       if (this.destroyed || controller.signal.aborted || generation !== this.generation) return;
@@ -235,7 +228,7 @@ export class ComposerDropdownController {
     }
   }
 
-  private invalidateActiveLoad(): number {
+  #invalidateActiveLoad(): number {
     this.generation++;
     if (this.inputLoadTimer !== null) {
       window.clearTimeout(this.inputLoadTimer);
@@ -246,14 +239,14 @@ export class ComposerDropdownController {
     return this.generation;
   }
 
-  private moveSelection(delta: number): void {
+  #moveSelection(delta: number): void {
     if (this.items.length === 0) return;
     const start = this.selectedIndex < 0 ? (delta > 0 ? 0 : this.items.length - 1) : this.selectedIndex + delta;
-    const next = this.findSelectable(start, delta, false);
-    if (next >= 0) this.setSelectedIndex(next);
+    const next = this.#findSelectable(start, delta, false);
+    if (next >= 0) this.#setSelectedIndex(next);
   }
 
-  private findSelectable(start: number, delta: number, clamp: boolean): number {
+  #findSelectable(start: number, delta: number, clamp: boolean): number {
     if (this.items.length === 0) return -1;
     let index = clamp ? Math.max(0, Math.min(this.items.length - 1, start)) : start;
     for (let seen = 0; seen < this.items.length; seen++) {
@@ -266,7 +259,7 @@ export class ComposerDropdownController {
     return -1;
   }
 
-  private returnToRoot(): void {
+  #returnToRoot(): void {
     const folder = this.activeFolder;
     const match = this.activeMatch;
     this.activeFolder = null;
@@ -278,10 +271,10 @@ export class ComposerDropdownController {
         query: '',
       };
     }
-    this.requestActiveLoad(false);
+    this.#requestActiveLoad(false);
   }
 
-  private selectIndex(index: number): void {
+  #selectIndex(index: number): void {
     const item = this.items[index];
     const source = this.activeSource;
     const match = this.activeMatch;
@@ -297,7 +290,7 @@ export class ComposerDropdownController {
           query: item.inputPrefix,
         };
       }
-      this.requestActiveLoad(false);
+      this.#requestActiveLoad(false);
       return;
     }
 
@@ -309,22 +302,25 @@ export class ComposerDropdownController {
     if (action.kind === 'replace') {
       this.replaceRange(match, action.text);
       this.hide();
-      action.onApplied?.();
       this.inputEl.focus();
     }
   }
 
   private replaceRange(match: ComposerTriggerMatch, replacement: string): void {
-    let after = this.inputEl.value.slice(match.end);
-    if (/\s$/.test(replacement) && /^\s/.test(after)) after = after.slice(1);
+    const duplicateSpace = /\s$/.test(replacement) && /^\s/.test(this.inputEl.value.slice(match.end));
+    const end = match.end + (duplicateSpace ? 1 : 0);
+    if (this.inputEl.replaceText) {
+      this.inputEl.replaceText(match.start, end, replacement);
+      return;
+    }
     const before = this.inputEl.value.slice(0, match.start);
-    this.inputEl.value = before + replacement + after;
+    this.inputEl.value = before + replacement + this.inputEl.value.slice(end);
     const cursor = before.length + replacement.length;
     this.inputEl.selectionStart = cursor;
     this.inputEl.selectionEnd = cursor;
   }
 
-  private setSelectedIndex(index: number): void {
+  #setSelectedIndex(index: number): void {
     const item = this.items[index];
     if (!item || item.kind === 'status' || item.disabled) return;
     this.selectedIndex = index;

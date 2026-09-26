@@ -3,8 +3,8 @@ import type { Component } from 'obsidian';
 import type { ProviderId } from '@/core/providers/types';
 import type { Conversation } from '@/core/types';
 import type { TabAttention, TabReviewOutcome } from '@/features/chat/state/types';
-import type { FeatureHost } from '@/features/FeatureHost';
 
+import type { ChatFeatureHost } from '../ChatFeatureHost';
 import type {
   PublishedTabRuntimeRef,
   TabRuntimeCleanup,
@@ -36,12 +36,13 @@ import type {
 } from './types';
 
 export interface TabRuntimeFactoryOptions {
-  plugin: FeatureHost;
+  plugin: ChatFeatureHost;
   containerEl: HTMLElement;
   component: Component;
   conversation?: Conversation;
   tabId?: TabId;
   draftModel?: string | null;
+  providerId?: ProviderId | null;
   lifecycleState?: Extract<
     AssembledTabRuntime['lifecycleState'],
     'provisional' | 'cold'
@@ -103,12 +104,12 @@ class RuntimeResourceOwner implements TabRuntimeResourceOwner {
   dispose(): Promise<readonly TabRuntimeCleanupFailure[]> {
     if (!this.disposal) {
       this.sealed = true;
-      this.disposal = this.disposeEntries();
+      this.disposal = this.#disposeEntries();
     }
     return this.disposal;
   }
 
-  private async disposeEntries(): Promise<readonly TabRuntimeCleanupFailure[]> {
+  async #disposeEntries(): Promise<readonly TabRuntimeCleanupFailure[]> {
     const failures: TabRuntimeCleanupFailure[] = [];
     const entries = this.entries.splice(0).reverse();
     for (const entry of entries) {
@@ -245,7 +246,7 @@ function assembleTabRuntime(
   registerTabRuntimeResourceOwner(runtime, options.resourceOwner);
   runtimeRef.publish(runtime);
 
-  refreshTabProviderUI(runtime, options.plugin);
+  refreshTabProviderUI(runtime);
   applyProviderUIGating(runtime, options.plugin);
   return runtime;
 }

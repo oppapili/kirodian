@@ -21,6 +21,7 @@ export {
   isCanonicalUserMessage,
   type SessionMetadata,
   type StreamChunk,
+  type TurnStats,
   type UsageInfo,
   VIEW_TYPE_CLAUDIAN,
 } from './chat';
@@ -33,8 +34,7 @@ export {
   type ClaudianSettings,
   type EnvironmentScope,
   type EnvSnippet,
-  type HostnameCliPaths,
-  type InstructionRefineResult,
+  type HostnameCLIPaths,
   type KeyboardNavigationSettings,
   type LegacyLinkedContentSettingsInput,
   type PermissionMode,
@@ -58,24 +58,10 @@ export {
   type AskUserQuestionItem,
   type AskUserQuestionOption,
   type AsyncSubagentStatus,
-  type ExitPlanModeCallback,
-  type ExitPlanModeDecision,
-  type ExitPlanModePresentationOptions,
   type SubagentInfo,
   type SubagentMode,
   type ToolCallInfo,
   type ToolDiffData,
   type ToolProviderPayload,
 } from './tools';
-
-// Agent types
-export {
-  type AgentDefinition,
-  type AgentFrontmatter,
-} from './agent';
-
-// Plugin types
-export {
-  type PluginInfo,
-  type PluginScope,
-} from './plugins';
+export { createTurnStats, isTokenCount } from './turnStats';

@@ -1,9 +1,8 @@
-import type { App, WorkspaceLeaf } from 'obsidian';
+import type { App } from 'obsidian';
 
 import type { SharedAppStorage } from '../core/bootstrap/storage';
-import type { CollabComposerReferencePort } from '../core/collab';
 import type { ProviderHost } from '../core/providers/ProviderHost';
-import type { AppTabManagerState, ProviderId } from '../core/providers/types';
+import type { ProviderId } from '../core/providers/types';
 import type {
   ClaudianSettings,
   Conversation,
@@ -11,34 +10,22 @@ import type {
   ConversationMutablePatch,
   StoredChatModelSelection,
 } from '../core/types';
-import type { ChatExecutionPersistence } from './chat/execution/ChatExecutionCoordinator';
-import type { WarmExecutionPool } from './chat/execution/WarmExecutionPool';
-import type { AssembledTabRuntime, TabId, TabManagerViewHost } from './chat/tabs/types';
 
-export interface TabWorkspaceStateDeliveryRegistration {
-  readonly declarationsReady: boolean;
-  readonly waitUntilDeclarationsReady: Promise<void>;
+/** What features outside chat may read about the active chat tab. */
+export interface FeatureActiveTab {
+  readonly conversationId: string | null;
+  readonly draftModel: string | null;
+  readonly providerId: ProviderId | null;
 }
 
-export interface FeatureTabManagerHost {
-  canCreateTab(): boolean;
-  getAllTabs(): AssembledTabRuntime[];
-  getTab(tabId: TabId): AssembledTabRuntime | null;
-  isTabWorking(tabId: TabId): boolean;
-  switchToTab(tabId: TabId): Promise<void>;
-  closeTab(tabId: TabId, force?: boolean): Promise<boolean>;
-  primeProviderExecution(providerIds?: ProviderId | ProviderId[]): void;
-  invalidateProviderResources(providerIds: ProviderId | ProviderId[], generation: number): void;
-}
-
-export interface FeatureViewHost extends TabManagerViewHost {
-  getActiveTab(): AssembledTabRuntime | null;
-  getTabManager(): FeatureTabManagerHost | null;
+/** Chat view capabilities available to every feature. Chat narrows this in `ChatFeatureHost`. */
+export interface FeatureViewHost {
+  getActiveTab(): FeatureActiveTab | null;
   notifyConversationListChanged(): void;
   refreshModelSelector(providerId?: ProviderId): void;
   refreshTabControls(): void;
   refreshDualPaneLayout(): void;
-  refreshCollabAvailability(): void;
+  refreshMessageTimestamps(): void;
   updateHiddenProviderCommands(): void;
   invalidateProviderResources(providerIds: ProviderId[], generation: number): void;
 }
@@ -52,43 +39,21 @@ export interface ChatModelSelectionPort {
   ): Promise<boolean>;
 }
 
-export interface CollabSidebarSurfaceController {
-  /** Starts lazy construction and initialization without making the surface active. */
-  preload?(): void;
-  setActive(active: boolean): void;
-  destroy(): void;
+/** Lets settings re-apply the warm agent process limit without owning the pool. */
+export interface WarmExecutionLimitPort {
+  reconcileLimit(): Promise<boolean>;
 }
-
-export interface CollabSidebarSurfaceFactory {
-  create(
-    hostEl: HTMLElement,
-    leaf: WorkspaceLeaf,
-  ): CollabSidebarSurfaceController;
-}
-
-export type CollabGitInstallationStatus = 'available' | 'unavailable';
 
 /** Application capabilities consumed by user-facing features. */
 export interface FeatureHost {
   readonly app: App;
   readonly chatModelSelection: ChatModelSelectionPort;
-  readonly executionPersistence: ChatExecutionPersistence;
   readonly providerHost: ProviderHost;
   readonly settings: ClaudianSettings;
   readonly storage: SharedAppStorage;
-  readonly warmExecutionPool: WarmExecutionPool;
-  readonly collabSurfaceFactory?: CollabSidebarSurfaceFactory;
-  readonly collabComposerReferences?: CollabComposerReferencePort;
+  readonly warmExecutionPool: WarmExecutionLimitPort;
 
   getMainAgentDynamicSystemPromptSections?(): Promise<readonly string[]>;
-
-  checkCollabGitInstallation(rescan?: boolean): Promise<CollabGitInstallationStatus>;
-  isCollabEnabled(): boolean;
-  setCollabEnabled(enabled: boolean): Promise<void>;
-  setCollabProjectsFolder(raw: string): Promise<
-    { readonly ok: true; readonly value: string }
-    | { readonly message: string; readonly ok: false }
-  >;
 
   mutateSettings(
     mutation: (settings: ClaudianSettings) => void | Promise<void>,
@@ -126,16 +91,7 @@ export interface FeatureHost {
   getConversationSync(id: string): Conversation | null;
   getConversationList(): ConversationMeta[];
   ensureConversationMetadataLoaded(conversationIds: readonly string[]): Promise<void>;
-  registerTabWorkspaceStateDelivery(
-    view: FeatureViewHost,
-    hasViewScopedState: boolean,
-  ): TabWorkspaceStateDeliveryRegistration;
-  claimLegacyTabManagerState(): Promise<AppTabManagerState | null>;
-  completeLegacyTabManagerStateMigration(): Promise<void>;
 
   getView(): FeatureViewHost | null;
   getAllViews(): FeatureViewHost[];
-  findConversationAcrossViews(
-    conversationId: string,
-  ): { view: FeatureViewHost; tabId: TabId } | null;
 }

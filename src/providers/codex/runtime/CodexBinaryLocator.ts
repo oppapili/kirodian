@@ -2,13 +2,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { findCliBinaryPath, resolveConfiguredCliPath } from '../../../utils/cliBinaryLocator';
+import { findCLIBinaryPath, resolveConfiguredCLIPath } from '../../../utils/cliBinaryLocator';
 import { parseEnvironmentVariables } from '../../../utils/env';
 import { expandHomePath, stripSurroundingQuotes } from '../../../utils/path';
 import type { CodexInstallationMethod } from '../settings';
 import type { CodexExecutionTarget } from './codexLaunchTypes';
 
-export function isWindowsStyleCliReference(value: string | null | undefined): boolean {
+export function isWindowsStyleCLIReference(value: string | null | undefined): boolean {
   const trimmed = (value ?? '').trim();
   if (!trimmed) {
     return false;
@@ -39,7 +39,7 @@ export function findCodexBinaryPath(
     return preferredBinary;
   }
 
-  return findCliBinaryPath('codex', additionalPath, platform);
+  return findCLIBinaryPath('codex', additionalPath, platform);
 }
 
 function getCodexBinaryNames(platform: NodeJS.Platform): string[] {
@@ -86,7 +86,54 @@ function getPreferredCodexBinaryDirs(platform: NodeJS.Platform): string[] {
     ];
   }
 
-  return [];
+  return getPreferredWindowsCodexBinaryDirs();
+}
+
+function getPreferredWindowsCodexBinaryDirs(): string[] {
+  const preferredDirs: string[] = [];
+  const configuredInstallDir = process.env.CODEX_INSTALL_DIR?.trim();
+  if (configuredInstallDir) {
+    preferredDirs.push(expandHomePath(stripSurroundingQuotes(configuredInstallDir)));
+  }
+
+  const localAppData = process.env.LOCALAPPDATA;
+  if (localAppData) {
+    preferredDirs.push(path.join(localAppData, 'Programs', 'OpenAI', 'Codex', 'bin'));
+    preferredDirs.push(...getCompleteCodexDesktopRuntimeDirs(
+      path.join(localAppData, 'OpenAI', 'Codex', 'bin'),
+    ));
+  }
+
+  return [...new Set(preferredDirs)].filter(isCompleteWindowsCodexRuntimeDir);
+}
+
+function getCompleteCodexDesktopRuntimeDirs(runtimeRoot: string): string[] {
+  try {
+    return fs.readdirSync(runtimeRoot, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => path.join(runtimeRoot, entry.name))
+      .filter(isCompleteWindowsCodexRuntimeDir)
+      // Executable timestamps are a freshness heuristic, not an app-owned active-version marker.
+      .map(dir => ({ dir, mtime: getCodexBinaryMtime(dir) }))
+      .sort((left, right) => right.mtime - left.mtime
+        || (left.dir < right.dir ? -1 : left.dir > right.dir ? 1 : 0))
+      .map(candidate => candidate.dir);
+  } catch {
+    return [];
+  }
+}
+
+function isCompleteWindowsCodexRuntimeDir(dir: string): boolean {
+  return isExistingFile(path.join(dir, 'codex.exe'))
+    && isExistingFile(path.join(dir, 'codex-code-mode-host.exe'));
+}
+
+function getCodexBinaryMtime(dir: string): number {
+  try {
+    return fs.statSync(path.join(dir, 'codex.exe')).mtimeMs;
+  } catch {
+    return 0;
+  }
 }
 
 function getHomeDir(): string {
@@ -118,7 +165,7 @@ function parsePathEntriesForPlatform(pathValue: string | undefined, platform: No
     .map(segment => expandHomePath(segment));
 }
 
-export function resolveCodexCliPath(
+export function resolveCodexCLIPath(
   hostnamePath: string | undefined,
   legacyPath: string | undefined,
   envText: string,
@@ -136,16 +183,16 @@ export function resolveCodexCliPath(
   if (isWslTarget) {
     const configuredCommand = [hostnamePath, legacyPath]
       .map(value => stripSurroundingQuotes((value ?? '').trim()))
-      .find(value => value.length > 0 && !isWindowsStyleCliReference(value));
+      .find(value => value.length > 0 && !isWindowsStyleCLIReference(value));
     return configuredCommand || 'codex';
   }
 
-  const configuredHostnamePath = resolveConfiguredCliPath(hostnamePath);
+  const configuredHostnamePath = resolveConfiguredCLIPath(hostnamePath);
   if (configuredHostnamePath) {
     return configuredHostnamePath;
   }
 
-  const configuredLegacyPath = resolveConfiguredCliPath(legacyPath);
+  const configuredLegacyPath = resolveConfiguredCLIPath(legacyPath);
   if (configuredLegacyPath) {
     return configuredLegacyPath;
   }

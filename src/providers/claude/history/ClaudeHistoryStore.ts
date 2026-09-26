@@ -5,6 +5,7 @@ import type { ProviderHistoryPathContext } from '../../../core/providers/types';
 import type { ChatMessage, SubagentInfo, ToolCallInfo } from '../../../core/types';
 import { ClaudeTaskToolNormalizer } from '../normalization/ClaudeTaskToolNormalizer';
 import { isClaudeSubagentToolName } from '../subagentToolNames';
+import { ClaudeTurnStats } from './ClaudeTurnStats';
 import { buildAsyncSubagentInfo } from './sdkAsyncSubagent';
 import { filterActiveBranch } from './sdkBranchFilter';
 import type { SDKNativeMessage, SDKSessionLoadResult } from './sdkHistoryTypes';
@@ -12,24 +13,24 @@ import {
   collectAsyncSubagentResults,
   collectStructuredPatchResults,
   collectToolResults,
-  extractXmlTag,
+  extractXMLTag,
   hydrateFallbackAskUserAnswers,
   hydrateStructuredToolResults,
+  isCanonicalSDKUserMessage,
   isSystemInjectedMessage,
   mergeAssistantMessage,
   parseSDKMessageToChat,
+  parseTaskNotification,
 } from './sdkMessageParsing';
 import {
   encodeVaultPathForSDK,
   getSDKProjectsPath,
-  getSDKSessionAvailability,
   getSDKSessionPath,
   isValidSessionId,
   locateSDKSession,
   locateSDKSessions,
   readSDKSession,
   readSDKSessionFile,
-  sdkSessionExists,
 } from './sdkSessionPaths';
 import {
   isValidAgentId,
@@ -56,10 +57,9 @@ export type {
 export {
   collectAsyncSubagentResults,
   encodeVaultPathForSDK,
-  extractXmlTag,
+  extractXMLTag,
   filterActiveBranch,
   getSDKProjectsPath,
-  getSDKSessionAvailability,
   getSDKSessionPath,
   isValidSessionId,
   loadSubagentFinalResult,
@@ -69,7 +69,6 @@ export {
   parseSDKMessageToChat,
   readSDKSession,
   readSDKSessionFile,
-  sdkSessionExists,
 };
 export {
   extractAgentIdFromToolUseResult,
@@ -141,7 +140,7 @@ export async function loadSDKSessionMessages(
     return { messages: [], skippedLines: result.skippedLines, error: result.error };
   }
 
-  const filteredEntries = filterActiveBranch(result.messages, resumeAtMessageId);
+  const filteredEntries = filterActiveBranch(result.messages.filter(entry => !entry.isSidechain), resumeAtMessageId);
 
   const toolResults = collectToolResults(filteredEntries);
   const toolUseResults = collectStructuredPatchResults(filteredEntries);
@@ -150,6 +149,10 @@ export async function loadSDKSessionMessages(
 
   const chatMessages: ChatMessage[] = [];
   let pendingAssistant: ChatMessage | null = null;
+  let turnStartedAt: number | undefined;
+  let lastAssistantAt: number | undefined;
+  let requestedResponsePending = false;
+  let turnStats = new ClaudeTurnStats();
   const taskToolNormalizer = new ClaudeTaskToolNormalizer();
 
   const flushPendingAssistant = (includeDuration: boolean): void => {
@@ -157,16 +160,48 @@ export async function loadSDKSessionMessages(
       const nativeDuration = pendingAssistant.assistantMessageId
         ? nativeTurnDurations.get(pendingAssistant.assistantMessageId)
         : undefined;
-      if (includeDuration && nativeDuration !== undefined && nativeDuration > 0) {
-        pendingAssistant.durationSeconds = nativeDuration;
+      const inferredDuration = turnStartedAt !== undefined && lastAssistantAt !== undefined
+        && lastAssistantAt >= turnStartedAt
+        ? Math.floor((lastAssistantAt - turnStartedAt) / 1_000)
+        : undefined;
+      if (includeDuration) {
+        if (!pendingAssistant.isAutomaticResponse) {
+          pendingAssistant.durationSeconds = nativeDuration !== undefined ? Math.floor(nativeDuration / 1000) : inferredDuration;
+        }
+        pendingAssistant.completedAt = lastAssistantAt;
+        pendingAssistant.turnStats = turnStats.finish(turnStartedAt, lastAssistantAt);
       }
       chatMessages.push(pendingAssistant);
     }
     pendingAssistant = null;
+    lastAssistantAt = undefined;
+    turnStartedAt = undefined;
+    requestedResponsePending = false;
+    turnStats = new ClaudeTurnStats();
   };
 
-  // Merge consecutive assistant messages until an actual user message appears
+  // Preserve task notification boundaries without ending an unfinished requested response.
   for (const sdkMsg of filteredEntries) {
+    const notification = parseTaskNotification(sdkMsg);
+    if (notification !== null) {
+      if (pendingAssistant && requestedResponsePending) {
+        pendingAssistant.contentBlocks?.push({ type: 'task_notification', content: notification });
+        continue;
+      }
+      const requestedStartedAt: number | undefined = pendingAssistant ? undefined : turnStartedAt;
+      flushPendingAssistant(true);
+      turnStartedAt = requestedStartedAt;
+      requestedResponsePending = requestedStartedAt !== undefined;
+      pendingAssistant = {
+        id: sdkMsg.uuid ?? `task-notification-${chatMessages.length}`,
+        role: 'assistant',
+        isAutomaticResponse: requestedStartedAt === undefined,
+        content: '',
+        timestamp: parseNativeTimestamp(sdkMsg.timestamp) ?? 0,
+        contentBlocks: [{ type: 'task_notification', content: notification }],
+      };
+      continue;
+    }
     if (isSystemInjectedMessage(sdkMsg)) continue;
 
     // Skip synthetic assistant messages (e.g., "No response requested." after /compact)
@@ -182,13 +217,22 @@ export async function loadSDKSessionMessages(
       if (isCompactBoundary) {
         flushPendingAssistant(true);
         chatMessages.push(chatMsg);
-      } else if (pendingAssistant) {
-        mergeAssistantMessage(pendingAssistant, chatMsg);
       } else {
-        pendingAssistant = chatMsg;
+        if (pendingAssistant) {
+          mergeAssistantMessage(pendingAssistant, chatMsg);
+        } else {
+          pendingAssistant = chatMsg;
+        }
+        turnStats.add(sdkMsg);
+        lastAssistantAt = parseNativeTimestamp(sdkMsg.timestamp);
+        requestedResponsePending = turnStartedAt !== undefined
+          && sdkMsg.message?.stop_reason === 'tool_use';
       }
     } else {
       flushPendingAssistant(!chatMsg.isInterrupt);
+      if (isCanonicalSDKUserMessage(sdkMsg)) {
+        turnStartedAt = parseNativeTimestamp(sdkMsg.timestamp);
+      }
       chatMessages.push(chatMsg);
     }
   }
@@ -256,6 +300,12 @@ export async function loadSDKSessionMessages(
   return { messages: chatMessages, skippedLines: result.skippedLines };
 }
 
+function parseNativeTimestamp(value: string | undefined): number | undefined {
+  if (typeof value !== 'string' || !value) return undefined;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : undefined;
+}
+
 function collectNativeTurnDurations(
   entries: SDKNativeMessage[],
 ): Map<string, number> {
@@ -284,8 +334,7 @@ function collectNativeTurnDurations(
     );
     if (!assistantUuid) continue;
 
-    const durationSeconds = Math.floor(entry.durationMs / 1_000);
-    durations.set(assistantUuid, durationSeconds);
+    durations.set(assistantUuid, entry.durationMs);
   }
   return durations;
 }

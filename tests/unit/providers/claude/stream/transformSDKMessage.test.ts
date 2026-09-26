@@ -23,7 +23,6 @@ describe('transformSDKMessage', () => {
         {
           type: 'session_init',
           sessionId: 'test-session-123',
-          agents: undefined,
           permissionMode: 'default',
         },
       ]);
@@ -75,27 +74,6 @@ describe('transformSDKMessage', () => {
       expect(results).toEqual([
         { type: 'context_compacted' },
       ]);
-    });
-
-    it('captures agents from init message', () => {
-      const message = msg({
-        type: 'system',
-        subtype: 'init',
-        session_id: 'test-session-456',
-        agents: ['Explore', 'Plan', 'custom-agent'],
-        skills: ['commit', 'review-pr'],
-        slash_commands: ['clear', 'add-dir'],
-      });
-
-      const results = [...transformSDKMessage(message)];
-
-      expect(results).toHaveLength(1);
-      expect(results[0]).toEqual({
-        type: 'session_init',
-        sessionId: 'test-session-456',
-        agents: ['Explore', 'Plan', 'custom-agent'],
-        permissionMode: 'default',
-      });
     });
 
     it('captures permissionMode from init message', () => {
@@ -166,66 +144,6 @@ describe('transformSDKMessage', () => {
   });
 
   describe('assistant messages', () => {
-    it('yields text content block', () => {
-      const message = msg({
-        type: 'assistant',
-        message: {
-          content: [
-            { type: 'text', text: 'Hello, world!' },
-          ],
-        },
-      });
-
-      const results = [...transformSDKMessage(message)];
-
-      expect(results).toEqual([
-        { type: 'text', content: 'Hello, world!' },
-      ]);
-    });
-
-    it('yields thinking content block', () => {
-      const message = msg({
-        type: 'assistant',
-        message: {
-          content: [
-            { type: 'thinking', thinking: 'Let me think about this...' },
-          ],
-        },
-      });
-
-      const results = [...transformSDKMessage(message)];
-
-      expect(results).toEqual([
-        { type: 'thinking', content: 'Let me think about this...' },
-      ]);
-    });
-
-    it('yields tool_use content block with all fields', () => {
-      const message = msg({
-        type: 'assistant',
-        message: {
-          content: [
-            {
-              type: 'tool_use',
-              id: 'tool-123',
-              name: 'Read',
-              input: { file_path: '/test/file.ts' },
-            },
-          ],
-        },
-      });
-
-      const results = [...transformSDKMessage(message)];
-
-      expect(results).toEqual([
-        {
-          type: 'tool_use',
-          id: 'tool-123',
-          name: 'Read',
-          input: { file_path: '/test/file.ts' },
-        },
-      ]);
-    });
 
     it('generates fallback id for tool_use without id', () => {
       const message = msg({
@@ -246,24 +164,25 @@ describe('transformSDKMessage', () => {
       expect((results[0] as any).input).toEqual({});
     });
 
-    it('handles multiple content blocks', () => {
+    it('normalizes mixed assistant blocks in order without inventing usage', () => {
       const message = msg({
         type: 'assistant',
         message: {
           content: [
-            { type: 'thinking', thinking: 'Thinking...' },
-            { type: 'text', text: 'Here is my response' },
-            { type: 'tool_use', id: 'tool-1', name: 'Read', input: {} },
+            { type: 'thinking', thinking: 'Let me think about this...' },
+            { type: 'text', text: 'Hello, world!' },
+            { type: 'tool_use', id: 'tool-123', name: 'Read', input: { file_path: '/test/file.ts' } },
           ],
         },
       });
 
       const results = [...transformSDKMessage(message)];
 
-      expect(results).toHaveLength(3);
-      expect(results[0]).toEqual({ type: 'thinking', content: 'Thinking...' });
-      expect(results[1]).toEqual({ type: 'text', content: 'Here is my response' });
-      expect(results[2]).toMatchObject({ type: 'tool_use', id: 'tool-1', name: 'Read' });
+      expect(results).toEqual([
+        { type: 'thinking', content: 'Let me think about this...' },
+        { type: 'text', content: 'Hello, world!' },
+        { type: 'tool_use', id: 'tool-123', name: 'Read', input: { file_path: '/test/file.ts' } },
+      ]);
     });
 
     it('yields subagent_tool_use for assistant tool_use in subagent context', () => {
@@ -890,6 +809,7 @@ describe('transformSDKMessage', () => {
     it('handles missing event property', () => {
       const message = msg({
         type: 'stream_event',
+        event: undefined,
       });
 
       const results = [...transformSDKMessage(message)];
@@ -942,7 +862,7 @@ describe('transformSDKMessage', () => {
             inputTokens: 16,
             cacheCreationInputTokens: 0,
             cacheReadInputTokens: 0,
-            contextWindow: 200000,
+            contextWindow: 0,
             contextTokens: 16,
             percentage: 0,
           },
@@ -1015,7 +935,7 @@ describe('transformSDKMessage', () => {
             inputTokens: 10,
             cacheCreationInputTokens: 0,
             cacheReadInputTokens: 0,
-            contextWindow: 1000000,
+            contextWindow: 0,
             contextTokens: 10,
             percentage: 0,
           },
@@ -1023,7 +943,7 @@ describe('transformSDKMessage', () => {
       ]);
     });
 
-    it('uses an authoritative context window supplied by the SDK runtime', () => {
+    it('uses a context window reported by the SDK runtime', () => {
       const usageState = createTransformUsageState();
       const assistantMessage = msg({
         type: 'assistant',
@@ -1041,46 +961,7 @@ describe('transformSDKMessage', () => {
 
       expect([...transformSDKMessage(assistantMessage, {
         intendedModel: 'custom-model',
-        authoritativeContextWindow: 1_000_000,
-        usageState,
-      })]).toEqual([
-        { type: 'text', content: 'Hello' },
-        {
-          type: 'usage',
-          usage: {
-            model: 'custom-model',
-            inputTokens: 250000,
-            cacheCreationInputTokens: 0,
-            cacheReadInputTokens: 0,
-            contextWindow: 1_000_000,
-            contextWindowIsAuthoritative: true,
-            contextTokens: 250000,
-            percentage: 25,
-          },
-        },
-      ]);
-    });
-
-    it('prefers an explicit custom-model context limit over the SDK runtime window', () => {
-      const usageState = createTransformUsageState();
-      const assistantMessage = msg({
-        type: 'assistant',
-        parent_tool_use_id: null,
-        message: {
-          content: [{ type: 'text', text: 'Hello' }],
-          usage: {
-            input_tokens: 250000,
-            output_tokens: 4,
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 0,
-          },
-        },
-      });
-
-      expect([...transformSDKMessage(assistantMessage, {
-        intendedModel: 'custom-model',
-        customContextLimits: { 'custom-model': 1_000_000 },
-        authoritativeContextWindow: 200_000,
+        reportedContextWindow: 1_000_000,
         usageState,
       })]).toEqual([
         { type: 'text', content: 'Hello' },
@@ -1151,7 +1032,7 @@ describe('transformSDKMessage', () => {
             inputTokens: 10,
             cacheCreationInputTokens: 0,
             cacheReadInputTokens: 0,
-            contextWindow: 1000000,
+            contextWindow: 0,
             contextTokens: 10,
             percentage: 0,
           },
@@ -1582,8 +1463,8 @@ describe('transformSDKMessage', () => {
       expect(usage.cacheCreationInputTokens).toBe(300);
       expect(usage.cacheReadInputTokens).toBe(200);
       expect(usage.contextTokens).toBe(1500); // 1000 + 300 + 200
-      expect(usage.contextWindow).toBe(1000000);
-      expect(usage.percentage).toBe(0); // 1500 / 1000000 * 100 rounded
+      expect(usage.contextWindow).toBe(0);
+      expect(usage.percentage).toBe(0); // No reported window
     });
 
     it('yields usage from assistant message when usage state has no stream prompt usage', () => {
@@ -1614,7 +1495,7 @@ describe('transformSDKMessage', () => {
         inputTokens: 1000,
         cacheCreationInputTokens: 300,
         cacheReadInputTokens: 200,
-        contextWindow: 1000000,
+        contextWindow: 0,
         contextTokens: 1500,
         percentage: 0,
       });
@@ -1632,77 +1513,6 @@ describe('transformSDKMessage', () => {
             cache_creation_input_tokens: 500,
             cache_read_input_tokens: 100,
           },
-        },
-      });
-
-      const results = [...transformSDKMessage(message)];
-
-      const usageResults = results.filter(r => r.type === 'usage');
-      expect(usageResults).toHaveLength(0);
-    });
-
-    it('uses custom context limits when provided', () => {
-      const message = msg({
-        type: 'assistant',
-        parent_tool_use_id: null,
-        message: {
-          content: [{ type: 'text', text: 'Hello' }],
-          usage: {
-            input_tokens: 50000,
-            output_tokens: 10000,
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 0,
-          },
-        },
-      });
-
-      const results = [...transformSDKMessage(message, {
-        intendedModel: 'custom-model',
-        customContextLimits: { 'custom-model': 500000 },
-      })];
-
-      const usageResults = results.filter(r => r.type === 'usage');
-      expect(usageResults).toHaveLength(1);
-
-      const usage = (usageResults[0] as any).usage;
-      expect(usage.contextWindow).toBe(500000); // Custom context limit
-      expect(usage.percentage).toBe(10); // 50000 / 500000 * 100 = 10%
-    });
-
-    it('uses custom context limits over standard window', () => {
-      const message = msg({
-        type: 'assistant',
-        parent_tool_use_id: null,
-        message: {
-          content: [{ type: 'text', text: 'Hello' }],
-          usage: {
-            input_tokens: 100000,
-            output_tokens: 10000,
-            cache_creation_input_tokens: 0,
-            cache_read_input_tokens: 0,
-          },
-        },
-      });
-
-      const results = [...transformSDKMessage(message, {
-        intendedModel: 'sonnet',
-        customContextLimits: { 'sonnet': 256000 },
-      })];
-
-      const usageResults = results.filter(r => r.type === 'usage');
-      expect(usageResults).toHaveLength(1);
-
-      const usage = (usageResults[0] as any).usage;
-      expect(usage.contextWindow).toBe(256000); // Custom limit takes precedence
-      expect(usage.percentage).toBe(39); // 100000 / 256000 * 100 ≈ 39%
-    });
-
-    it('handles missing usage field gracefully', () => {
-      const message = msg({
-        type: 'assistant',
-        parent_tool_use_id: null,
-        message: {
-          content: [{ type: 'text', text: 'Hello' }],
         },
       });
 
@@ -1762,7 +1572,7 @@ describe('transformSDKMessage', () => {
             inputTokens: 0,
             cacheCreationInputTokens: 0,
             cacheReadInputTokens: 0,
-            contextWindow: 1000000,
+            contextWindow: 0,
             contextTokens: 0,
             percentage: 0,
           },
@@ -1823,17 +1633,6 @@ describe('transformSDKMessage', () => {
       expect(results).toEqual([
         { type: 'error', content: 'unknown' },
       ]);
-    });
-
-    it('yields nothing for assistant message without error field', () => {
-      const message = msg({
-        type: 'assistant',
-        message: { content: [] },
-      });
-
-      const results = [...transformSDKMessage(message)];
-
-      expect(results).toEqual([]);
     });
   });
 

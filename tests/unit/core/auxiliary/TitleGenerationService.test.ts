@@ -15,11 +15,11 @@ function createService() {
       askUserQuestion: jest.fn(),
       dismissInteraction: jest.fn(),
       requestApproval: jest.fn(),
-      requestPlanDecision: jest.fn(),
     },
     lifecycleRegistry,
     resolveLocale: () => 'ja',
     resolveModel: () => 'title-model',
+    nativePersistence: 'disabled-if-supported',
     vaultWorkingDirectory: '/vault',
   });
   return { backend, lifecycleRegistry, service };

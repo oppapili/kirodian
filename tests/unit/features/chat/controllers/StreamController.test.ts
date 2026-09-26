@@ -20,10 +20,6 @@ import {
 } from '@/features/chat/controllers/StreamController';
 import { ChatState } from '@/features/chat/state/ChatState';
 
-jest.mock('@/core/tools/todo', () => ({
-  parseTodoInput: jest.fn(),
-}));
-
 jest.mock('@/core/tools/toolInput', () => ({
   extractResolvedAnswers: jest.fn().mockReturnValue(undefined),
   extractResolvedAnswersFromResultText: jest.fn().mockReturnValue(undefined),
@@ -44,7 +40,6 @@ jest.mock('@/features/chat/rendering/SubagentRenderer', () => ({
 }));
 
 jest.mock('@/features/chat/rendering/ThinkingBlockRenderer', () => ({
-  appendThinkingContent: jest.fn(),
   createThinkingBlock: jest.fn().mockImplementation((_parentEl, options) => ({
     wrapperEl: {},
     contentEl: {},
@@ -119,12 +114,6 @@ type MockStreamControllerDeps = StreamControllerDeps;
 function createMockDeps(): MockStreamControllerDeps {
   const state = new ChatState();
   const messagesEl = createMockEl();
-  const fileContextManager = {
-    markFileBeingEdited: jest.fn(),
-    trackEditedFile: jest.fn(),
-    getAttachedFiles: jest.fn().mockReturnValue(new Set()),
-    hasFilesChanged: jest.fn().mockReturnValue(false),
-  };
 
   return {
     plugin: {
@@ -146,7 +135,6 @@ function createMockDeps(): MockStreamControllerDeps {
       renderCitationGroup: jest.fn(),
     } as any,
     subagentManager: {
-      isAsyncTask: jest.fn().mockReturnValue(false),
       isPendingAsyncTask: jest.fn().mockReturnValue(false),
       isLinkedAgentOutputTool: jest.fn().mockReturnValue(false),
       handleAgentOutputToolResult: jest.fn().mockReturnValue(undefined),
@@ -164,11 +152,9 @@ function createMockDeps(): MockStreamControllerDeps {
       updateSyncToolResult: jest.fn(),
       finalizeSyncSubagent: jest.fn().mockReturnValue(null),
       resetStreamingState: jest.fn(),
-      resetSpawnedCount: jest.fn(),
       subagentsSpawnedThisStream: 0,
     } as any,
     getMessagesEl: () => messagesEl,
-    getFileContextManager: () => fileContextManager as any,
     updateQueueIndicator: jest.fn(),
     getProviderId: () => 'claude',
     getProviderSessionId: () => 'session-1',
@@ -237,24 +223,13 @@ describe('StreamController - Text Content', () => {
   });
 
   afterEach(() => {
-    // Clean up any timers set by ChatState
-    deps.state.resetStreamingState();
+    deps.state.clearThinkingIndicatorTimeout();
+    deps.state.clearFlavorTimerInterval();
     restoreTestWindow();
     jest.useRealTimers();
   });
 
   describe('Text streaming', () => {
-    it('should append text content to message', async () => {
-      const msg = createTestMessage();
-
-      deps.state.currentTextEl = createMockEl();
-
-      await controller.handleStreamChunk({ type: 'text', content: 'Hello ' }, msg);
-      await controller.handleStreamChunk({ type: 'text', content: 'World' }, msg);
-
-      expect(msg.content).toBe('Hello World');
-    });
-
     it('should accumulate text across multiple chunks', async () => {
       const msg = createTestMessage();
       deps.state.currentTextEl = createMockEl();
@@ -344,6 +319,20 @@ describe('StreamController - Text Content', () => {
       );
     });
 
+    it.each(['```mermaid', '> ```Mermaid title="example"', '- ~~~MERMAID'])('defers %s until text finalization', async opener => {
+      deps.state.currentTextEl = createMockEl();
+      const content = `${opener}\ngraph TD\nA --> B`;
+      await controller.appendText(content);
+      jest.advanceTimersByTime(16);
+      await Promise.resolve();
+      expect(deps.renderer.renderContent).toHaveBeenLastCalledWith(
+        deps.state.currentTextEl, content, { deferDiagrams: true }
+      );
+      const target = deps.state.currentTextEl;
+      await controller.finalizeCurrentTextBlock(createTestMessage());
+      expect(deps.renderer.renderContent).toHaveBeenLastCalledWith(target, content);
+    });
+
     it('should defer math rendering during live text renders', async () => {
       deps.state.currentTextEl = createMockEl();
 
@@ -395,6 +384,9 @@ describe('StreamController - Text Content', () => {
       await controller.appendText('Hello');
       await controller.finalizeCurrentTextBlock(msg);
 
+      expect(deps.state.currentTextEl).toBeNull();
+      expect(deps.state.currentTextContent).toBe('');
+
       expect(deps.renderer.renderContent).toHaveBeenCalledWith(
         expect.anything(),
         'Hello'
@@ -429,23 +421,6 @@ describe('StreamController - Text Content', () => {
   });
 
   describe('Text block finalization', () => {
-    it('should add copy button when finalizing text block with content', async () => {
-      const msg = createTestMessage();
-      deps.state.currentTextEl = createMockEl();
-      deps.state.currentTextContent = 'Hello World';
-
-      await controller.finalizeCurrentTextBlock(msg);
-
-      expect(deps.renderer.addTextCopyButton).toHaveBeenCalledWith(
-        expect.anything(),
-        'Hello World'
-      );
-      expect(msg.contentBlocks).toContainEqual({
-        type: 'text',
-        content: 'Hello World',
-      });
-    });
-
     it('should not add copy button when no text element exists', async () => {
       const msg = createTestMessage();
       deps.state.currentTextEl = null;
@@ -470,43 +445,6 @@ describe('StreamController - Text Content', () => {
 
       expect(deps.renderer.addTextCopyButton).not.toHaveBeenCalled();
       expect(msg.contentBlocks).toEqual([]);
-    });
-
-    it('should reset text state after finalization', async () => {
-      const msg = createTestMessage();
-      deps.state.currentTextEl = createMockEl();
-      deps.state.currentTextContent = 'Test content';
-
-      await controller.finalizeCurrentTextBlock(msg);
-
-      expect(deps.state.currentTextEl).toBeNull();
-      expect(deps.state.currentTextContent).toBe('');
-    });
-  });
-
-  describe('Error and notice handling', () => {
-    it('should append error message on error chunk', async () => {
-      const msg = createTestMessage();
-      deps.state.currentTextEl = createMockEl();
-
-      await controller.handleStreamChunk(
-        { type: 'error', content: 'Something went wrong' },
-        msg
-      );
-
-      expect(deps.state.currentTextContent).toContain('Error');
-    });
-
-    it('should append warning notice on notice chunk', async () => {
-      const msg = createTestMessage();
-      deps.state.currentTextEl = createMockEl();
-
-      await controller.handleStreamChunk(
-        { type: 'notice', content: 'Tool was blocked', level: 'warning' },
-        msg
-      );
-
-      expect(deps.state.currentTextContent).toContain('Blocked');
     });
   });
 
@@ -616,18 +554,6 @@ describe('StreamController - Text Content', () => {
         isError: true,
         isBlocked: true,
       });
-    });
-  });
-
-  describe('Done chunk handling', () => {
-    it('should handle done chunk without error', async () => {
-      const msg = createTestMessage();
-      deps.state.currentTextEl = createMockEl();
-
-      // Should not throw
-      await expect(
-        controller.handleStreamChunk({ type: 'done' }, msg)
-      ).resolves.not.toThrow();
     });
   });
 
@@ -862,11 +788,9 @@ describe('StreamController - Text Content', () => {
       expect(msg.toolCalls![0].name).toBe(TOOL_SUBAGENT);
     });
 
-    it('should render TodoWrite inline and update panel', async () => {
-      const { parseTodoInput } = jest.requireMock('@/core/tools/todo');
+    it('should render TodoWrite inline', async () => {
       const { renderToolCall } = jest.requireMock('@/features/chat/rendering/ToolCallRenderer');
       const mockTodos = [{ content: 'Task 1', status: 'pending', activeForm: 'Working on task 1' }];
-      parseTodoInput.mockReturnValue(mockTodos);
 
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
@@ -885,9 +809,6 @@ describe('StreamController - Text Content', () => {
       expect(msg.contentBlocks).toHaveLength(1);
       expect(msg.contentBlocks![0]).toEqual({ type: 'tool_use', toolId: 'todo-1' });
       expect(deps.state.pendingTools.size).toBe(1);
-
-      // Should update currentTodos for panel immediately (side effect)
-      expect(deps.state.currentTodos).toEqual(mockTodos);
 
       // Flush pending tools by sending a different chunk type (text or done)
       await controller.handleStreamChunk({ type: 'done' }, msg);
@@ -1166,6 +1087,8 @@ describe('StreamController - Text Content', () => {
 
       await controller.handleStreamChunk({ type: 'notice', content: 'Command blocked', level: 'warning' }, msg);
 
+      expect(deps.state.currentTextContent).toContain('Blocked');
+
       expect(deps.state.pendingTools.size).toBe(0);
       expect(renderToolCall).toHaveBeenCalled();
     });
@@ -1182,6 +1105,8 @@ describe('StreamController - Text Content', () => {
       expect(deps.state.pendingTools.size).toBe(1);
 
       await controller.handleStreamChunk({ type: 'error', content: 'Something went wrong' }, msg);
+
+      expect(deps.state.currentTextContent).toContain('Error');
 
       expect(deps.state.pendingTools.size).toBe(0);
       expect(renderToolCall).toHaveBeenCalled();
@@ -1218,49 +1143,6 @@ describe('StreamController - Text Content', () => {
         expect.objectContaining({ run_in_background: false }),
         expect.anything()
       );
-    });
-
-    it('should re-parse TodoWrite on input updates when streaming completes', async () => {
-      const { parseTodoInput } = jest.requireMock('@/core/tools/todo');
-
-      const mockTodos = [
-        { content: 'Task 1', status: 'pending', activeForm: 'Working on task 1' },
-      ];
-
-      // First chunk: partial input, parsing fails
-      parseTodoInput.mockReturnValueOnce(null);
-
-      const msg = createTestMessage();
-      deps.state.currentContentEl = createMockEl();
-
-      await controller.handleStreamChunk(
-        {
-          type: 'tool_use',
-          id: 'todo-1',
-          name: TOOL_TODO_WRITE,
-          input: { todos: '[' }, // Incomplete JSON
-        },
-        msg
-      );
-
-      // No todos yet
-      expect(deps.state.currentTodos).toBeNull();
-
-      // Second chunk: complete input, parsing succeeds
-      parseTodoInput.mockReturnValueOnce(mockTodos);
-
-      await controller.handleStreamChunk(
-        {
-          type: 'tool_use',
-          id: 'todo-1',
-          name: TOOL_TODO_WRITE,
-          input: { todos: mockTodos },
-        },
-        msg
-      );
-
-      // Now todos should be updated
-      expect(deps.state.currentTodos).toEqual(mockTodos);
     });
 
     it('should clear pendingTools on resetStreamingState', async () => {
@@ -1316,15 +1198,6 @@ describe('StreamController - Text Content', () => {
 
       expect(deps.state.thinkingEl).not.toBeNull();
       expect(messagesEl.scrollTop).toBe(0);
-    });
-
-    it('should create timer interval when showing thinking indicator', () => {
-      deps.state.responseStartTime = performance.now();
-
-      controller.showThinkingIndicator();
-      jest.advanceTimersByTime(500); // Past the debounce delay
-
-      expect(deps.state.flavorTimerInterval).not.toBeNull();
     });
 
     it('should clear timer interval when hiding thinking indicator', () => {
@@ -1391,24 +1264,6 @@ describe('StreamController - Text Content', () => {
 
       expect(deps.state.flavorTimerInterval).toBeNull();
     });
-
-    it('should not create duplicate intervals on multiple showThinkingIndicator calls', () => {
-      deps.state.responseStartTime = performance.now();
-      const clearIntervalSpy = jest.spyOn(global, 'clearInterval');
-
-      controller.showThinkingIndicator();
-      jest.advanceTimersByTime(500);
-      const firstInterval = deps.state.flavorTimerInterval;
-
-      // Second call while indicator exists should not create a new interval
-      controller.showThinkingIndicator();
-      jest.advanceTimersByTime(500);
-
-      // Should still have the same interval (no new one created since element exists)
-      expect(deps.state.flavorTimerInterval).toBe(firstInterval);
-
-      clearIntervalSpy.mockRestore();
-    });
   });
 
   describe('Tool handling - continued', () => {
@@ -1443,6 +1298,9 @@ describe('StreamController - Text Content', () => {
       expect(calls[0][1].id).toBe('read-1');
       expect(calls[1][1].id).toBe('grep-1');
       expect(calls[2][1].id).toBe('glob-1');
+
+      await controller.handleStreamChunk({ type: 'done' }, msg);
+      expect(renderToolCall).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -1481,12 +1339,11 @@ describe('StreamController - Text Content', () => {
       expect(deps.state.usage).toEqual(usage);
     });
 
-    it('uses authoritative usage chunks directly', async () => {
+    it('uses reported usage chunks directly', async () => {
       const msg = createTestMessage();
       const usage = createMockUsage({
         model: TEST_CODEX_MODEL,
         contextWindow: 258400,
-        contextWindowIsAuthoritative: true,
         contextTokens: 129200,
         percentage: 50,
       });
@@ -1494,6 +1351,19 @@ describe('StreamController - Text Content', () => {
       await controller.handleStreamChunk({ type: 'usage', usage, sessionId: 'session-1' }, msg);
 
       expect(deps.state.usage).toEqual(usage);
+    });
+
+    it('retains the same-model reported window when a partial update omits it', async () => {
+      const msg = createTestMessage();
+      await controller.handleStreamChunk({ type: 'usage', usage: createMockUsage({
+        model: TEST_CODEX_MODEL, contextWindow: 200_000, contextTokens: 50_000, percentage: 25,
+      }), sessionId: 'session-1' }, msg);
+
+      await controller.handleStreamChunk({ type: 'usage', usage: createMockUsage({
+        model: TEST_CODEX_MODEL, contextWindow: 0, contextTokens: 100_000, percentage: 0,
+      }), sessionId: 'session-1' }, msg);
+
+      expect(deps.state.usage).toMatchObject({ contextWindow: 200_000, contextTokens: 100_000, percentage: 50 });
     });
 
     it('should not update usage when ignoreUsageUpdates is true', async () => {
@@ -1534,12 +1404,17 @@ describe('StreamController - Text Content', () => {
       jest.advanceTimersByTime(500);
 
       const thinkingEl = deps.state.thinkingEl;
+      const firstInterval = deps.state.flavorTimerInterval;
       expect(thinkingEl).not.toBeNull();
+      expect(firstInterval).not.toBeNull();
 
       controller.showThinkingIndicator();
 
       expect(deps.state.thinkingEl).toBe(thinkingEl);
       expect(deps.updateQueueIndicator).toHaveBeenCalled();
+
+      jest.advanceTimersByTime(500);
+      expect(deps.state.flavorTimerInterval).toBe(firstInterval);
     });
   });
 
@@ -1554,7 +1429,15 @@ describe('StreamController - Text Content', () => {
       deps.state.currentTextEl = createMockEl();
       await controller.handleStreamChunk({ type: 'text', content: 'Hello' }, msg);
 
+      jest.advanceTimersByTime(16);
+      await Promise.resolve();
       expect(messagesEl.scrollTop).toBe(0);
+
+      (deps.plugin.settings as any).enableAutoScroll = true;
+      await controller.handleStreamChunk({ type: 'text', content: ' again' }, msg);
+      jest.advanceTimersByTime(16);
+      await Promise.resolve();
+      expect(messagesEl.scrollTop).toBe(1000);
     });
 
     it('should not scroll when autoScrollEnabled state is false', async () => {
@@ -1567,7 +1450,15 @@ describe('StreamController - Text Content', () => {
       deps.state.currentTextEl = createMockEl();
       await controller.handleStreamChunk({ type: 'text', content: 'Hello' }, msg);
 
+      jest.advanceTimersByTime(16);
+      await Promise.resolve();
       expect(messagesEl.scrollTop).toBe(0);
+
+      deps.state.autoScrollEnabled = true;
+      await controller.handleStreamChunk({ type: 'text', content: ' again' }, msg);
+      jest.advanceTimersByTime(16);
+      await Promise.resolve();
+      expect(messagesEl.scrollTop).toBe(1000);
     });
   });
 
@@ -1791,29 +1682,20 @@ describe('StreamController - Text Content', () => {
       expect(deps.renderer.renderContent).toHaveBeenCalledWith(contentEl, 'Let me think');
     });
 
-    it('should defer math rendering during live thinking renders', async () => {
+    it('defers Mermaid in thinking and renders it at finalization', async () => {
       const { createThinkingBlock } = jest.requireMock('@/features/chat/rendering/ThinkingBlockRenderer');
-      const msg = createTestMessage();
       const contentEl = createMockEl();
       createThinkingBlock.mockReturnValueOnce({
-        wrapperEl: createMockEl(),
-        contentEl,
-        labelEl: createMockEl(),
-        content: '',
-        startTime: Date.now(),
-        isExpanded: true,
+        wrapperEl: createMockEl(), contentEl, labelEl: createMockEl(),
+        content: '', startTime: Date.now(), isExpanded: true,
       });
-
-      await controller.handleStreamChunk({ type: 'thinking', content: 'Reasoning $x^2$' }, msg);
-
+      const content = '> ```mermaid\n> graph TD\n> A --> B';
+      await controller.appendThinking(content);
       jest.advanceTimersByTime(16);
       await Promise.resolve();
-
-      expect(deps.renderer.renderContent).toHaveBeenCalledWith(
-        contentEl,
-        'Reasoning $x^2$',
-        { deferMath: true }
-      );
+      expect(deps.renderer.renderContent).toHaveBeenLastCalledWith(contentEl, content, { deferDiagrams: true });
+      await controller.finalizeCurrentThinkingBlock(createTestMessage());
+      expect(deps.renderer.renderContent).toHaveBeenLastCalledWith(contentEl, content);
     });
 
     it('should render original math once when finalizing a collapsed thinking block', async () => {
@@ -1859,6 +1741,13 @@ describe('StreamController - Text Content', () => {
       await controller.handleStreamChunk({ type: 'thinking', content: 'Reasoning $x^2$' }, msg);
       jest.advanceTimersByTime(16);
       await Promise.resolve();
+      expect(deps.renderer.renderContent).toHaveBeenCalledTimes(1);
+      expect(deps.renderer.renderContent).toHaveBeenCalledWith(
+        contentEl,
+        'Reasoning $x^2$',
+        { deferMath: true }
+      );
+
       await controller.finalizeCurrentThinkingBlock(msg);
 
       expect(deps.renderer.renderContent).toHaveBeenNthCalledWith(
@@ -2764,12 +2653,10 @@ describe('StreamController - Text Content', () => {
       expect(deps.state.writeEditStates.has('generic-migration')).toBe(false);
     });
 
-    it('rebuilds a rendered generic tool as TodoWrite and updates todo state once', async () => {
-      const { parseTodoInput } = jest.requireMock('@/core/tools/todo');
+    it('rebuilds a rendered generic tool as TodoWrite', async () => {
       const { renderToolCall } = jest.requireMock('@/features/chat/rendering/ToolCallRenderer');
       renderToolCall.mockReset();
       const todos = [{ content: 'Task', status: 'in_progress', activeForm: 'Working' }];
-      parseTodoInput.mockReturnValueOnce(todos);
       const parentEl = createMockEl();
       installOrderedMockParent(parentEl);
       deps.state.currentContentEl = parentEl;
@@ -2799,9 +2686,6 @@ describe('StreamController - Text Content', () => {
       expect(msg.toolCalls).toHaveLength(1);
       expect(msg.toolCalls![0]).toMatchObject({ name: TOOL_TODO_WRITE, input: { todos } });
       expect(msg.contentBlocks?.filter(block => block.type === 'tool_use')).toHaveLength(1);
-      expect(parseTodoInput).toHaveBeenCalledTimes(1);
-      expect(parseTodoInput).toHaveBeenCalledWith({ todos });
-      expect(deps.state.currentTodos).toEqual(todos);
       expect(initialEl.remove).toHaveBeenCalledTimes(1);
       expect(deps.state.toolCallElements.get('todo-migration')).toBe(todoEl);
     });
@@ -4238,6 +4122,7 @@ describe('StreamController - Text Content', () => {
       // Get timerSpan and set isConnected to true for proper timer operation
       const timerSpan = deps.state.thinkingEl!.children[1];
       Object.defineProperty(timerSpan, 'isConnected', { value: true, configurable: true });
+      timerSpan.setText('Existing timer text');
 
       // Clear responseStartTime to trigger early return in updateTimer
       deps.state.responseStartTime = null;
@@ -4245,13 +4130,14 @@ describe('StreamController - Text Content', () => {
       // Advance time to trigger timer callback - should not throw
       jest.advanceTimersByTime(1000);
 
+      expect(timerSpan.textContent).toBe('Existing timer text');
       // Timer should still be set (interval not cleared by the null check)
       expect(deps.state.flavorTimerInterval).not.toBeNull();
     });
   });
 });
 
-describe('StreamController - Plan Mode', () => {
+describe('StreamController - Tool completion', () => {
   let controller: StreamController;
   let deps: MockStreamControllerDeps;
 
@@ -4265,73 +4151,10 @@ describe('StreamController - Plan Mode', () => {
   });
 
   afterEach(() => {
-    deps.state.resetStreamingState();
+    deps.state.clearThinkingIndicatorTimeout();
+    deps.state.clearFlavorTimerInterval();
     restoreTestWindow();
     jest.useRealTimers();
-  });
-
-  describe('capturePlanFilePath', () => {
-    it('should capture plan file path from Write tool_use', async () => {
-      const msg = createTestMessage();
-
-      await controller.handleStreamChunk(
-        { type: 'tool_use', id: 'write-1', name: 'Write', input: { file_path: '/home/user/.claude/plans/plan.md' } },
-        msg
-      );
-
-      expect(deps.state.planFilePath).toBe('/home/user/.claude/plans/plan.md');
-    });
-
-    it('should capture plan file path with Windows backslashes', async () => {
-      const msg = createTestMessage();
-
-      await controller.handleStreamChunk(
-        { type: 'tool_use', id: 'write-1', name: 'Write', input: { file_path: 'C:\\.claude\\plans\\plan.md' } },
-        msg
-      );
-
-      expect(deps.state.planFilePath).toBe('C:\\.claude\\plans\\plan.md');
-    });
-
-    it('should not capture non-plan Write paths', async () => {
-      const msg = createTestMessage();
-
-      await controller.handleStreamChunk(
-        { type: 'tool_use', id: 'write-1', name: 'Write', input: { file_path: '/home/user/notes/todo.md' } },
-        msg
-      );
-
-      expect(deps.state.planFilePath).toBeNull();
-    });
-
-    it('should not capture plan path from non-Write tools', async () => {
-      const msg = createTestMessage();
-
-      await controller.handleStreamChunk(
-        { type: 'tool_use', id: 'read-1', name: 'Read', input: { file_path: '/home/user/.claude/plans/plan.md' } },
-        msg
-      );
-
-      expect(deps.state.planFilePath).toBeNull();
-    });
-
-    it('should capture plan file path on subsequent tool_use input update', async () => {
-      const msg = createTestMessage();
-      msg.toolCalls = [{
-        id: 'write-1',
-        name: 'Write',
-        input: { content: 'plan content' },
-        status: 'running',
-      }];
-
-      // Second tool_use chunk with same ID updates the input (file_path arrives later)
-      await controller.handleStreamChunk(
-        { type: 'tool_use', id: 'write-1', name: 'Write', input: { file_path: '/home/user/.claude/plans/plan.md' } },
-        msg
-      );
-
-      expect(deps.state.planFilePath).toBe('/home/user/.claude/plans/plan.md');
-    });
   });
 
   describe('tool completion outcomes', () => {

@@ -1,9 +1,11 @@
 import type { Component, WorkspaceLeaf } from 'obsidian';
 
+import type { ComposerInputElement } from '@/shared/composer-dropdown/types';
+
 import type { ProviderCommandDropdownConfig } from '../../../core/providers/commands/ProviderCommandCatalog';
 import type { ProviderCommandDiscoveryController } from '../../../core/providers/commands/ProviderCommandDiscoveryStore';
 import type { ProviderCommandEntry } from '../../../core/providers/commands/ProviderCommandEntry';
-import type { InstructionRefineService, ProviderId, TitleGenerationService } from '../../../core/providers/types';
+import type { ProviderId, TitleGenerationService } from '../../../core/providers/types';
 import type { MainChatComposerDropdown } from '../composer/MainChatComposerDropdown';
 import type { BrowserSelectionController } from '../controllers/BrowserSelectionController';
 import type { CanvasSelectionController } from '../controllers/CanvasSelectionController';
@@ -16,24 +18,21 @@ import type { ChatExecutionCoordinator } from '../execution/ChatExecutionCoordin
 import type { LinkedContentController } from '../linked-content';
 import type { MessageRenderer } from '../rendering/MessageRenderer';
 import type { SubagentManager } from '../services/SubagentManager';
+import type { SideChatController } from '../side-chat/SideChatController';
 import type { ChatState } from '../state/ChatState';
 import type { TabAttention, TabReviewOutcome } from '../state/types';
-import type { BangBashModeManager } from '../ui/BangBashModeManager';
 import type { ComposerContextTray } from '../ui/ComposerContextTray';
 import type { FileContextManager } from '../ui/FileContext';
 import type { ImageContextManager } from '../ui/ImageContext';
 import type {
   ContextUsageMeter,
-  ExternalContextSelector,
   ModelSelector,
   ModeSelector,
   PermissionToggle,
   ServiceTierToggle,
   ThinkingBudgetSelector,
 } from '../ui/InputToolbar';
-import type { InstructionModeManager } from '../ui/InstructionModeManager';
 import type { NavigationSidebar } from '../ui/NavigationSidebar';
-import type { StatusPanel } from '../ui/StatusPanel';
 import type { TabSession } from './TabSession';
 
 /**
@@ -53,12 +52,6 @@ export interface TabManagerViewHost extends Component {
 
   /** Handles /clear and /new when the active layout gives New different semantics. */
   handleNewConversationCommand?(): Promise<boolean>;
-
-  /** Starts approved plan content in a layout-owned new conversation when required. */
-  handleNewSessionPlan?(
-    planContent: string,
-    isSourceLive?: () => boolean,
-  ): Promise<boolean>;
 }
 
 /**
@@ -103,6 +96,8 @@ export interface TabControllers {
   readonly streamController: StreamController;
   readonly inputController: InputController;
   readonly navigationController: NavigationController;
+  /** Owner of this tab's single temporary side chat and composer destination. */
+  readonly sideChatController: SideChatController;
 }
 
 /**
@@ -110,7 +105,6 @@ export interface TabControllers {
  */
 export interface TabServices {
   readonly subagentManager: SubagentManager;
-  instructionRefineService: InstructionRefineService | null;
   readonly titleGenerationService: TitleGenerationService;
 }
 
@@ -125,14 +119,10 @@ export interface TabUIComponents {
   readonly modelSelector: ModelSelector;
   readonly modeSelector: ModeSelector;
   readonly thinkingBudgetSelector: ThinkingBudgetSelector;
-  readonly externalContextSelector: ExternalContextSelector;
   readonly permissionToggle: PermissionToggle;
   readonly serviceTierToggle: ServiceTierToggle;
   readonly composerDropdown: MainChatComposerDropdown;
-  readonly instructionModeManager: InstructionModeManager;
-  readonly bangBashModeManager: BangBashModeManager | null;
   readonly contextUsageMeter: ContextUsageMeter;
-  readonly statusPanel: StatusPanel;
   readonly navigationSidebar: NavigationSidebar;
 }
 
@@ -145,15 +135,12 @@ export interface TabDOMElements {
   readonly messagesEl: HTMLElement;
   welcomeEl: HTMLElement | null;
 
-  /** Container for status panel (fixed between messages and input). */
-  readonly statusPanelContainerEl: HTMLElement;
-
   /** Per-tab composer root. Inline prompts render here as siblings of the input container. */
   readonly inputComposerEl: HTMLElement;
   readonly inputContainerEl: HTMLElement;
   readonly queueIndicatorEl: HTMLElement;
   readonly inputWrapper: HTMLElement;
-  readonly inputEl: HTMLTextAreaElement;
+  readonly inputEl: ComposerInputElement;
 
   /** Nav row for tab badges and header icons (above input wrapper). */
   readonly navRowEl: HTMLElement;
@@ -214,7 +201,7 @@ export interface AssembledTabRuntime {
   draftModel: string | null;
 
   /** Active provider for this tab's current conversation/runtime. */
-  providerId: ProviderId;
+  providerId: ProviderId | null;
 
   /** Conversation ID bound to this tab (null for new/empty tabs). */
   conversationId: string | null;
@@ -308,7 +295,7 @@ export interface TabManagerCallbacks {
   onTabDraftChanged?: (tabId: TabId, draftModel: string | null) => void;
 
   /** Called when the active provider changes within a tab (blank tab model selection). */
-  onTabProviderChanged?: (tabId: TabId, providerId: ProviderId) => void;
+  onTabProviderChanged?: (tabId: TabId, providerId: ProviderId | null) => void;
 }
 
 /**

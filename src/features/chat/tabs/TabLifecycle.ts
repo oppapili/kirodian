@@ -1,6 +1,6 @@
 import { Notice } from 'obsidian';
 
-import type { FeatureHost } from '../../FeatureHost';
+import type { ChatFeatureHost } from '../ChatFeatureHost';
 import type {
   AssembledTabRuntime,
   TabRuntimeCleanupFailure,
@@ -43,6 +43,7 @@ export function commitProvisionalTab(tab: AssembledTabRuntime): void {
 export function activateTab(tab: AssembledTabRuntime): void {
   tab.dom.contentEl.removeClass('claudian-hidden');
   tab.controllers.streamController.setTabActive(true);
+  tab.controllers.sideChatController.setTabActive(true);
   tab.controllers.selectionController.start();
   tab.controllers.browserSelectionController.start();
   tab.controllers.canvasSelectionController.start();
@@ -51,6 +52,7 @@ export function activateTab(tab: AssembledTabRuntime): void {
 
 export function deactivateTab(tab: AssembledTabRuntime): void {
   tab.controllers.streamController.setTabActive(false);
+  tab.controllers.sideChatController.setTabActive(false);
   tab.dom.contentEl.addClass('claudian-hidden');
   tab.controllers.selectionController.stop();
   tab.controllers.browserSelectionController.stop();
@@ -179,7 +181,7 @@ async function destroyTabOnce(tab: AssembledTabRuntime): Promise<void> {
   }
 }
 
-export function getTabTitle(tab: AssembledTabRuntime, plugin: FeatureHost): string {
+export function getTabTitle(tab: AssembledTabRuntime, plugin: ChatFeatureHost): string {
   if (tab.conversationId) {
     const conversation = plugin.getConversationSync(tab.conversationId);
     if (conversation?.title) {

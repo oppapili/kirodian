@@ -4,7 +4,6 @@ import type {
   ChatRewindMode,
   ChatRewindPreview,
   ChatRewindResult,
-  ModeConfigurableExecutionSession,
   ProviderExecutionEvent,
   ProviderExecutionRequest,
   ProviderExecutionRun,
@@ -18,7 +17,7 @@ import type {
   SteerableExecutionSession,
 } from '../../../core/execution';
 import type { ProviderHost } from '../../../core/providers/ProviderHost';
-import type { ChatMessage } from '../../../core/types';
+import type { ChatMessage, PermissionMode } from '../../../core/types';
 import { appendBrowserContext } from '../../../utils/browser';
 import { appendCanvasContext } from '../../../utils/canvas';
 import { appendLinkedContent } from '../../../utils/context';
@@ -28,15 +27,15 @@ import {
   buildPromptWithHistoryContext,
 } from '../../../utils/session';
 import {
-  type AcpContentBlock,
-  AcpExecutionEventNormalizer,
-  AcpInteractionController,
-  type AcpPromptResponse,
-  type AcpSessionConfigOption,
-  type AcpSessionModelState,
-  type AcpSessionNotification,
-  AcpToolStreamAdapter,
-  buildAcpUsageInfo,
+  type ACPContentBlock,
+  ACPExecutionEventNormalizer,
+  ACPInteractionController,
+  type ACPPromptResponse,
+  type ACPSessionConfigOption,
+  type ACPSessionModelState,
+  type ACPSessionNotification,
+  ACPToolStreamAdapter,
+  buildACPUsageInfo,
 } from '../../acp';
 import type { KiroCommandCatalog } from '../commands/KiroCommandCatalog';
 import { computeKiroEnvironmentHash } from '../env/KiroSettingsReconciler';
@@ -167,7 +166,7 @@ interface ActiveExecution {
   readonly abortController: AbortController;
   accepted: boolean;
   readonly cancellationGeneration: number;
-  readonly normalizer: AcpExecutionEventNormalizer;
+  readonly normalizer: ACPExecutionEventNormalizer;
   readonly request: ProviderExecutionRequest;
   readonly run: KiroExecutionRunState;
   sequence: number;
@@ -190,7 +189,6 @@ export class KiroExecutionSession
 implements
 ProviderExecutionSession,
 SteerableExecutionSession,
-ModeConfigurableExecutionSession,
 RewindableExecutionSession {
   readonly providerId = 'kiro' as const;
   readonly sessionInstanceId = randomUUID();
@@ -205,7 +203,7 @@ RewindableExecutionSession {
   private nativeOwner: KiroNativeOwner | null = null;
   private nativeStartupFlight: Promise<KiroExecutionNativeConnection> | null = null;
   private quarantineGeneration = 0;
-  private readonly interactionController: AcpInteractionController;
+  private readonly interactionController: ACPInteractionController;
   private readonly interactionRouter: KiroExecutionInteractionRouter;
   private readonly listeners = new Set<(event: ProviderSessionEvent) => void>();
   private readonly mirrorDeduplicator = new KiroSessionNotificationMirrorDeduplicator();
@@ -231,7 +229,7 @@ RewindableExecutionSession {
         && providerState.nativeConversationContextEstablished !== false,
       );
     this.snapshot = this.createSnapshot('idle');
-    this.interactionController = new AcpInteractionController({
+    this.interactionController = new ACPInteractionController({
       getTurnId: () => this.active?.run.turnId ?? null,
       interactionPort: config.interactionPort,
       sessionInstanceId: this.sessionInstanceId,
@@ -257,8 +255,8 @@ RewindableExecutionSession {
       abortController: new AbortController(),
       accepted: false,
       cancellationGeneration: this.cancellationGeneration,
-      normalizer: new AcpExecutionEventNormalizer({
-        mapUsage: usage => buildAcpUsageInfo({ contextWindow: usage }),
+      normalizer: new ACPExecutionEventNormalizer({
+        mapUsage: usage => buildACPUsageInfo({ contextWindow: usage }),
         scope: {
           executionId: run.executionId,
           kind: 'requested',
@@ -350,11 +348,9 @@ RewindableExecutionSession {
     try {
       const native = await this.ensureNative();
       const sessionId = await this.ensureSession(native, undefined);
-      const normalized = mode === 'plan' ? 'plan' : 'default';
       const kiroModeId = mode === 'plan' ? 'kiro_planner' : 'kiro_default';
       await native.setMode({ modeId: kiroModeId, sessionId });
       this.updateSnapshot(this.active ? 'executing' : 'idle');
-      this.emitSessionMode(normalized);
       return true;
     } catch {
       return false;
@@ -550,7 +546,7 @@ RewindableExecutionSession {
       owner.modeUnsubscribe = native.onModeChanged?.(mode => {
         if (!this.isCurrentNativeOwner(owner)) return;
         this.updateSnapshot(this.active ? 'executing' : 'idle');
-        this.emitSessionMode(mode);
+        this.emitPermissionMode(mode);
       }) ?? (() => {});
       owner.modelsUnsubscribe = native.onModelsChanged?.(models => {
         if (!this.isCurrentNativeOwner(owner)) return;
@@ -739,7 +735,7 @@ RewindableExecutionSession {
       // ensureSession has published the live model catalog.
       const reasoningEffort = this.resolveReasoningEffort(
         rawModel,
-        request.configuration.reasoning,
+        request.configuration.reasoning ?? undefined,
       );
       const response = await native.setModel({
         ...(reasoningEffort
@@ -787,7 +783,7 @@ RewindableExecutionSession {
   }
 
   private handleNotification(
-    notification: AcpSessionNotification,
+    notification: ACPSessionNotification,
     source: 'extension' | 'standard',
   ): void {
     const active = this.active;
@@ -809,10 +805,7 @@ RewindableExecutionSession {
       if (owner) void this.publishModelsFromConfig(result.metadata.configOptions, owner);
       return;
     }
-    if (result.metadata?.type === 'current_mode') {
-      this.emitSessionMode(result.metadata.currentModeId === 'plan' ? 'plan' : 'default');
-      return;
-    }
+    if (result.metadata?.type === 'current_mode') return;
     if (!active.acceptingLiveOutput) return;
     this.accept(active);
     for (const event of result.events) {
@@ -823,7 +816,7 @@ RewindableExecutionSession {
     }
   }
 
-  private accept(active: ActiveExecution, response?: AcpPromptResponse): void {
+  private accept(active: ActiveExecution, response?: ACPPromptResponse): void {
     if (active.accepted) return;
     active.accepted = true;
     if (!this.nativeConversationContextEstablished) {
@@ -839,7 +832,7 @@ RewindableExecutionSession {
     });
   }
 
-  private finishCompleted(active: ActiveExecution, response: AcpPromptResponse): void {
+  private finishCompleted(active: ActiveExecution, response: ACPPromptResponse): void {
     this.updateSnapshot('idle');
     this.emitCurrentSnapshot();
     active.run.finish({
@@ -1127,7 +1120,7 @@ RewindableExecutionSession {
 
   private async publishModelUpdate(
     owner: KiroNativeOwner,
-    state: AcpSessionModelState,
+    state: ACPSessionModelState,
   ): Promise<void> {
     if (!this.isCurrentNativeOwner(owner)) return;
     const update = normalizeKiroModelUpdateMetadata(state);
@@ -1140,7 +1133,7 @@ RewindableExecutionSession {
   }
 
   private async publishModelsFromConfig(
-    options: readonly AcpSessionConfigOption[],
+    options: readonly ACPSessionConfigOption[],
     owner: KiroNativeOwner,
   ): Promise<void> {
     if (!this.isCurrentNativeOwner(owner)) return;
@@ -1244,16 +1237,16 @@ RewindableExecutionSession {
     }
   }
 
-  private emitSessionMode(mode: string): void {
+  private emitPermissionMode(permissionMode: PermissionMode): void {
     const event: ProviderSessionEvent = {
-      mode,
+      permissionMode,
       scope: {
         kind: 'session',
         sequence: this.revision,
         sessionInstanceId: this.sessionInstanceId,
       },
       snapshot: this.snapshot,
-      type: 'mode_changed',
+      type: 'permission_mode_changed',
     };
     for (const listener of this.listeners) {
       try {
@@ -1272,8 +1265,8 @@ class KiroExecutionCancellationError extends Error {
   }
 }
 
-function createKiroToolStreamAdapter(): AcpToolStreamAdapter {
-  return new AcpToolStreamAdapter({
+function createKiroToolStreamAdapter(): ACPToolStreamAdapter {
+  return new ACPToolStreamAdapter({
     normalizeToolInput(rawName, input) {
       return normalizeKiroToolCall({ rawInput: input, title: rawName }).input;
     },
@@ -1297,8 +1290,8 @@ function createKiroToolStreamAdapter(): AcpToolStreamAdapter {
 function buildPromptBlocks(
   request: ProviderExecutionRequest,
   replayConversationHistory = false,
-): AcpContentBlock[] {
-  const blocks: AcpContentBlock[] = [];
+): ACPContentBlock[] {
+  const blocks: ACPContentBlock[] = [];
   let text = request.input
     .filter(block => block.type === 'text')
     .map(block => block.text)
@@ -1375,18 +1368,16 @@ function buildKiroSystemPromptOverride(
 }
 
 // Kiro's ACP session exposes concrete mode ids (kiro_default, kiro_planner,
-// kiro_guide, plus custom agents). Map Claudian's abstract default/plan modes onto
-// the real Kiro mode ids; sending an unknown id like 'default' makes Kiro reply
-// with a JSON-RPC Internal error, so return null when there is no mapping.
-function resolveKiroNativeMode(
+// kiro_guide, plus custom agents). Map Claudian's permission mode onto the real
+// Kiro mode ids; sending an unknown id like 'default' makes Kiro reply with a
+// JSON-RPC Internal error, so return null when there is no mapping. Upstream #1285
+// removed the abstract plan/default `configuration.mode`, so resolution is driven
+// purely by `permissionMode`. The `'plan' -> kiro_planner` branch is retained as
+// the internal wiring for a future Kiro agent-mode selector (issue #2); the
+// permission toggle itself is now two-valued (normal/yolo) and never yields 'plan'.
+export function resolveKiroNativeMode(
   request: ProviderExecutionRequest,
 ): 'kiro_default' | 'kiro_planner' | null {
-  const explicitMode = request.configuration.mode;
-  if (explicitMode !== undefined) {
-    if (explicitMode === 'plan') return 'kiro_planner';
-    if (explicitMode === 'default' || explicitMode === 'normal') return 'kiro_default';
-    return null;
-  }
   const permissionMode = request.configuration.permissionMode;
   if (permissionMode === 'plan') return 'kiro_planner';
   if (permissionMode === 'normal' || permissionMode === 'yolo') return 'kiro_default';
