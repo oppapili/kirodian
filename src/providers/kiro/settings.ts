@@ -12,6 +12,7 @@ import {
   type KiroDiscoveredModel,
   normalizeKiroDiscoveredModels,
 } from './models';
+import type { KiroAgentDirectories } from './runtime/KiroAgentModelLock';
 
 export interface KiroCatalogSnapshot {
   models: KiroDiscoveredModel[];
@@ -24,6 +25,12 @@ export interface KiroCatalogSnapshot {
 export interface KiroAgentModeSnapshot {
   modes: KiroAgentMode[];
   currentModeId: string | null;
+  /**
+   * Agent-definition directories from the CLI-prefetched `agent list` headers, used to
+   * resolve a selected custom agent's `<dir>/<id>.json` (and its pinned `"model"`). Absent
+   * for a session-only snapshot, which never carries these paths.
+   */
+  directories?: KiroAgentDirectories;
 }
 
 export interface PersistedKiroProviderSettings {
@@ -369,6 +376,9 @@ export function reconcileKiroSessionAgentModes(
     modes: supplementalModes.length > 0
       ? [...existing.modes, ...supplementalModes]
       : existing.modes,
+    // The live session never carries the agent-definition dirs (only the CLI prefetch does),
+    // so preserve the catalog's directories across a session-supplement reconcile.
+    ...(existing.directories ? { directories: existing.directories } : {}),
   };
   if (
     reconciled.currentModeId === existing.currentModeId
@@ -451,7 +461,29 @@ function normalizeKiroAgentModeSnapshot(value: unknown): KiroAgentModeSnapshot |
     });
   }
   const currentModeId = readTrimmedString(value.currentModeId) || null;
-  return { currentModeId, modes };
+  const directories = normalizeKiroAgentDirectories(value.directories);
+  return {
+    currentModeId,
+    modes,
+    ...(directories ? { directories } : {}),
+  };
+}
+
+/**
+ * Normalizes the optional agent-definition directories on a snapshot. Returns `null` when
+ * neither a local nor a global directory is present, so the field stays absent rather than
+ * an empty object on a session-only snapshot.
+ */
+function normalizeKiroAgentDirectories(value: unknown): KiroAgentDirectories | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const localDir = readTrimmedString(value.localDir) || null;
+  const globalDir = readTrimmedString(value.globalDir) || null;
+  if (!localDir && !globalDir) {
+    return null;
+  }
+  return { globalDir, localDir };
 }
 
 export function normalizeKiroVisibleModels(

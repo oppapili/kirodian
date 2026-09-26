@@ -4,6 +4,7 @@ import { formatReasoningValueLabel } from '../../../core/providers/reasoning';
 import type {
   ProviderCapabilities,
   ProviderChatUIConfig,
+  ProviderModelSelectorLock,
   ProviderModeSelectorConfig,
   ProviderPermissionModeToggleConfig,
   ProviderReasoningOption,
@@ -65,6 +66,11 @@ export class ModelSelector {
     });
   }
 
+  #getModelSelectorLock(): ProviderModelSelectorLock | null {
+    return this.callbacks.getUIConfig().getModelSelectorLock?.(this.callbacks.getSettings())
+      ?? null;
+  }
+
   private render() {
     this.container.empty();
 
@@ -77,6 +83,45 @@ export class ModelSelector {
 
   updateDisplay() {
     if (!this.buttonEl) return;
+    const lock = this.#getModelSelectorLock();
+    if (lock) {
+      this.#renderLockedButton(lock);
+      return;
+    }
+    this.#renderUnlockedButton();
+  }
+
+  /**
+   * Renders the button for a locked selector: forces the displayed value to the lock's
+   * model, marks it disabled and non-interactive for assistive technology, and surfaces the
+   * lock reason as the accessible name and tooltip.
+   */
+  #renderLockedButton(lock: ProviderModelSelectorLock) {
+    if (!this.buttonEl) return;
+    const models = this.#getAvailableModels();
+    const lockedInfo = models.find(m => m.value === lock.lockedToModelId);
+    const icon = lockedInfo?.providerIcon
+      ?? this.callbacks.getUIConfig().getProviderIcon?.();
+
+    this.buttonEl.empty();
+    this.buttonEl.addClass('claudian-model-btn--locked');
+    if (icon) {
+      createProviderIconSvg(icon, {
+        className: 'claudian-model-provider-icon',
+        height: 12,
+        parent: this.buttonEl,
+        width: 12,
+      });
+    }
+    const labelEl = this.buttonEl.createSpan({ cls: 'claudian-model-label' });
+    labelEl.setText(lockedInfo?.label || lock.lockedToModelId);
+    this.buttonEl.title = lock.reason;
+    this.buttonEl.setAttribute('aria-disabled', 'true');
+    this.buttonEl.setAttribute('aria-label', lock.reason);
+  }
+
+  #renderUnlockedButton() {
+    if (!this.buttonEl) return;
     const currentModel = this.callbacks.getSettings().model;
     const models = this.#getAvailableModels();
     const modelInfo = models.find(m => m.value === currentModel);
@@ -86,6 +131,9 @@ export class ModelSelector {
       ?? this.callbacks.getUIConfig().getProviderIcon?.();
 
     this.buttonEl.empty();
+    this.buttonEl.removeClass('claudian-model-btn--locked');
+    this.buttonEl.removeAttribute('aria-disabled');
+    this.buttonEl.removeAttribute('aria-label');
 
     if (icon) {
       createProviderIconSvg(icon, {
@@ -103,6 +151,20 @@ export class ModelSelector {
   renderOptions() {
     if (!this.dropdownEl) return;
     this.dropdownEl.empty();
+
+    const lock = this.#getModelSelectorLock();
+    if (lock) {
+      // A locked selector offers no choices: render only the fixed value with the reason,
+      // so the dropdown carries an accessible explanation instead of clickable options.
+      this.dropdownEl.addClass('claudian-model-dropdown--locked');
+      this.dropdownEl.createDiv({
+        cls: 'claudian-model-locked-note',
+        text: lock.reason,
+        attr: { role: 'note' },
+      });
+      return;
+    }
+    this.dropdownEl.removeClass('claudian-model-dropdown--locked');
 
     const currentModel = this.callbacks.getSettings().model;
     const models = this.#getAvailableModels();

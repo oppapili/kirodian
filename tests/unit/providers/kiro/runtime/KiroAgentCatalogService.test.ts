@@ -1,4 +1,5 @@
 import {
+  parseKiroAgentListDirectories,
   parseKiroAgentListOutput,
   toKiroAgentModes,
 } from '@/providers/kiro/runtime/KiroAgentCatalogService';
@@ -178,5 +179,48 @@ describe('toKiroAgentModes', () => {
 
     expect(lite).toEqual({ id: 'kirocrew-lite', name: 'kirocrew-lite' });
     expect(lite && 'description' in lite).toBe(false);
+  });
+});
+
+describe('parseKiroAgentListDirectories', () => {
+  it('extracts the local and global agent directories from the header lines', () => {
+    const directories = parseKiroAgentListDirectories(REAL_OUTPUT);
+
+    expect(directories).toEqual({
+      localDir: '~/projects/kirodian/.kiro/agents',
+      globalDir: '~/.kiro/agents',
+    });
+  });
+
+  it('returns null for the local directory when the Workspace header is absent', () => {
+    const output = [
+      `${DIM}Global:    ${RESET}~/.kiro/agents`,
+      `* kiro_default                   ${DIM}(Built-in)${RESET}    Default agent`,
+    ].join('\n');
+
+    expect(parseKiroAgentListDirectories(output)).toEqual({
+      localDir: null,
+      globalDir: '~/.kiro/agents',
+    });
+  });
+
+  it('returns null for both directories when no header lines are present', () => {
+    const output = [
+      `* kiro_default                   ${DIM}(Built-in)${RESET}    Default agent`,
+    ].join('\n');
+
+    expect(parseKiroAgentListDirectories(output)).toEqual({
+      localDir: null,
+      globalDir: null,
+    });
+  });
+
+  it('captures a count-suffixed header value verbatim (a non-path, harmless downstream)', () => {
+    const output = ['Global: 3 agents'].join('\n');
+
+    expect(parseKiroAgentListDirectories(output)).toEqual({
+      localDir: null,
+      globalDir: '3 agents',
+    });
   });
 });

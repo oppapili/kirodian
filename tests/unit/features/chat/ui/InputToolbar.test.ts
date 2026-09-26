@@ -358,6 +358,90 @@ describe('ModelSelector', () => {
       ...callbacks.getSettings(), environmentVariables: callbacks.getEnvironmentVariables(),
     });
   });
+
+  describe('model selector lock', () => {
+    it('renders enabled and interactive when the provider returns no lock', () => {
+      // createMockUIConfig has no getModelSelectorLock, so the selector is unlocked.
+      selector.renderOptions();
+      selector.updateDisplay();
+
+      const btn = parentEl.querySelector('.claudian-model-btn');
+      expect(btn?.hasClass('claudian-model-btn--locked')).toBe(false);
+      expect(btn?.getAttribute('aria-disabled')).toBeFalsy();
+      const options = parentEl.querySelector('.claudian-model-dropdown')?.children ?? [];
+      expect(options.length).toBe(3);
+    });
+
+    function lockedCallbacks() {
+      const uiConfig = createMockUIConfig() as ReturnType<typeof createMockUIConfig>
+        & { getModelSelectorLock: jest.Mock };
+      uiConfig.getModelSelectorLock = jest.fn().mockReturnValue({
+        lockedToModelId: 'kiro/auto',
+        reason: 'Model is fixed to "auto" by agent "kirocrew"',
+      });
+      uiConfig.getModelOptions.mockReturnValue([
+        { value: 'kiro/auto', label: 'auto' },
+        { value: 'kiro/claude-opus-5', label: 'Opus 5' },
+      ]);
+      return createMockCallbacks({
+        getUIConfig: jest.fn().mockReturnValue(uiConfig),
+        getSettings: jest.fn().mockReturnValue({
+          model: 'kiro/claude-opus-5',
+          reasoning: 'high',
+          permissionMode: 'normal',
+        }),
+      });
+    }
+
+    it('disables the selector and forces the locked model as its value', () => {
+      const parentEl2 = createMockEl();
+      new ModelSelector(parentEl2, lockedCallbacks());
+
+      const btn = parentEl2.querySelector('.claudian-model-btn');
+      expect(btn?.hasClass('claudian-model-btn--locked')).toBe(true);
+      expect(btn?.getAttribute('aria-disabled')).toBe('true');
+      // The displayed label follows the locked id, not the settings.model.
+      expect(parentEl2.querySelector('.claudian-model-label')?.textContent).toBe('auto');
+    });
+
+    it('surfaces the lock reason as the accessible name and tooltip', () => {
+      const parentEl2 = createMockEl();
+      new ModelSelector(parentEl2, lockedCallbacks());
+
+      const btn = parentEl2.querySelector('.claudian-model-btn');
+      expect(btn?.title).toBe('Model is fixed to "auto" by agent "kirocrew"');
+      expect(btn?.getAttribute('aria-label')).toBe('Model is fixed to "auto" by agent "kirocrew"');
+      const note = parentEl2.querySelector('.claudian-model-locked-note');
+      expect(note?.textContent).toBe('Model is fixed to "auto" by agent "kirocrew"');
+    });
+
+    it('renders no clickable options when locked', () => {
+      const parentEl2 = createMockEl();
+      new ModelSelector(parentEl2, lockedCallbacks());
+
+      const options = parentEl2.querySelector('.claudian-model-dropdown')
+        ?.querySelectorAll('.claudian-model-option') ?? [];
+      expect(options.length).toBe(0);
+    });
+
+    it('falls back to the locked id when it is not among the options', () => {
+      const uiConfig = createMockUIConfig() as ReturnType<typeof createMockUIConfig>
+        & { getModelSelectorLock: jest.Mock };
+      uiConfig.getModelSelectorLock = jest.fn().mockReturnValue({
+        lockedToModelId: 'kiro/mystery',
+        reason: 'Model is fixed to "mystery" by agent "custom"',
+      });
+      uiConfig.getModelOptions.mockReturnValue([{ value: 'kiro/auto', label: 'auto' }]);
+      const callbacks2 = createMockCallbacks({
+        getUIConfig: jest.fn().mockReturnValue(uiConfig),
+        getSettings: jest.fn().mockReturnValue({ model: 'kiro/auto', permissionMode: 'normal' }),
+      });
+      const parentEl2 = createMockEl();
+      new ModelSelector(parentEl2, callbacks2);
+
+      expect(parentEl2.querySelector('.claudian-model-label')?.textContent).toBe('kiro/mystery');
+    });
+  });
 });
 
 describe('ModeSelector', () => {

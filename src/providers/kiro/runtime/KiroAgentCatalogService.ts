@@ -3,6 +3,7 @@ import type { ProviderTransitionOwnerContext } from '../../../core/providers/typ
 import { getVaultPath } from '../../../utils/path';
 import type { KiroAgentMode } from '../execution/KiroSessionModeMetadata';
 import { getKiroProviderSettings } from '../settings';
+import type { KiroAgentDirectories } from './KiroAgentModelLock';
 import {
   type KiroCatalogCommandRunner,
   SpawnKiroCatalogCommandRunner,
@@ -42,6 +43,12 @@ export type KiroAgentCatalogDiscoveryResult =
   | {
     agents: KiroDiscoveredAgent[];
     currentAgentId: string | null;
+    /**
+     * Agent-definition directories mined from the `agent list` headers. Optional so existing
+     * callers/fixtures that predate the model-lock feature still satisfy the type; the live
+     * `discoverCatalog` always populates it (with nulls when a header is absent).
+     */
+    directories?: KiroAgentDirectories;
     kind: 'completed';
   }
   | {
@@ -129,6 +136,50 @@ export function parseKiroAgentListOutput(output: string): KiroDiscoveredAgent[] 
   return agents;
 }
 
+// A `Workspace:` / `Global:` header line, capturing the scope label and the directory path
+// that follows the colon. These lines are excluded from the agent list by
+// SECTION_HEADER_PATTERN; here we additionally mine them for the agent-definition dirs so a
+// selected agent's `<dir>/<id>.json` (which carries its pinned `"model"`) can be resolved
+// later. The path is whatever trails the colon after ANSI codes are stripped; a count-suffixed
+// header (`Global: 3 agents`) yields a non-path value and is simply ignored downstream.
+const AGENT_DIR_HEADER_PATTERN = /^(Workspace|Global)\s*(?:\([^)]*\))?\s*:\s*(.+?)\s*$/u;
+
+/**
+ * Extracts the local and global agent-definition directories from the `Workspace:` and
+ * `Global:` header lines of `kiro-cli agent list` output.
+ *
+ * `Workspace:` points at the local `<project>/.kiro/agents` directory and `Global:` at
+ * `~/.kiro/agents`. Either may be absent (no local `.kiro/agents`, or a headless invocation
+ * that omits the workspace header). A header whose value is not a path (e.g. a count suffix
+ * such as `Global: 3 agents`) is captured verbatim; the reader treats a non-existent
+ * directory as "no json", so a spurious value cannot lock the selector.
+ *
+ * @param output - Raw stdout from `kiro-cli agent list`.
+ * @returns The captured directories, each `null` when its header is absent.
+ */
+export function parseKiroAgentListDirectories(output: string): KiroAgentDirectories {
+  let localDir: string | null = null;
+  let globalDir: string | null = null;
+
+  for (const rawLine of stripAnsi(output).split(/\r?\n/)) {
+    const match = AGENT_DIR_HEADER_PATTERN.exec(rawLine.trim());
+    if (!match) {
+      continue;
+    }
+    const value = match[2].trim();
+    if (!value) {
+      continue;
+    }
+    if (match[1] === 'Workspace' && localDir === null) {
+      localDir = value;
+    } else if (match[1] === 'Global' && globalDir === null) {
+      globalDir = value;
+    }
+  }
+
+  return { globalDir, localDir };
+}
+
 /**
  * Reads the live agent catalog by running `kiro-cli agent list` through the same
  * spawn seam as the model catalog. Best-effort: a non-zero exit, a timeout, or a
@@ -167,14 +218,25 @@ export class KiroAgentCatalogService implements KiroAgentCatalogServiceLike {
         timeoutMs: this.options.agentCommandTimeoutMs ?? AGENT_COMMAND_TIMEOUT_MS,
       });
       if (commandResult.termination || commandResult.exitCode !== 0) {
-        return { agents: [], currentAgentId: null, kind: 'completed' };
+        return {
+          agents: [],
+          currentAgentId: null,
+          directories: { globalDir: null, localDir: null },
+          kind: 'completed',
+        };
       }
 
       const agents = parseKiroAgentListOutput(commandResult.stdout);
       const currentAgentId = agents.find(agent => agent.isCurrent)?.id ?? null;
-      return { agents, currentAgentId, kind: 'completed' };
+      const directories = parseKiroAgentListDirectories(commandResult.stdout);
+      return { agents, currentAgentId, directories, kind: 'completed' };
     } catch {
-      return { agents: [], currentAgentId: null, kind: 'completed' };
+      return {
+        agents: [],
+        currentAgentId: null,
+        directories: { globalDir: null, localDir: null },
+        kind: 'completed',
+      };
     }
   }
 }
