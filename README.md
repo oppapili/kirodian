@@ -14,8 +14,8 @@
 > **Versioning** — Kirodian uses its own [SemVer](https://semver.org/) line, independent of Claudian's. Each release states the upstream Claudian version it is based on:
 >
 > ```text
-> Kirodian v0.1.0
-> Based on Claudian v2.2.6
+> Kirodian v0.2.0
+> Based on Claudian v2.3.4
 > ```
 >
 > The rest of this README is inherited from Claudian and describes the shared plugin.
