@@ -9,7 +9,10 @@ import type {
 } from '../../../core/providers/types';
 import { KiroCommandCatalog } from '../commands/KiroCommandCatalog';
 import { KiroAgentCatalogCoordinator } from '../runtime/KiroAgentCatalogCoordinator';
-import { KiroAgentCatalogService } from '../runtime/KiroAgentCatalogService';
+import {
+  KiroAgentCatalogService,
+  type KiroAgentCatalogServiceLike,
+} from '../runtime/KiroAgentCatalogService';
 import { KiroCLIResolver } from '../runtime/KiroCLIResolver';
 import { KiroModelCatalogCoordinator } from '../runtime/KiroModelCatalogCoordinator';
 import { KiroModelCatalogService } from '../runtime/KiroModelCatalogService';
@@ -35,6 +38,7 @@ export interface KiroWorkspaceServices extends ProviderWorkspaceServices {
 
 export interface KiroWorkspaceServicesOptions {
   readonly commandMetadataProbe?: KiroCommandMetadataProbe;
+  readonly agentCatalogService?: KiroAgentCatalogServiceLike;
 }
 
 const kiroTabWarmupPolicy: ProviderTabWarmupPolicy = {
@@ -54,7 +58,7 @@ export async function createKiroWorkspaceServices(
   );
   const agentCatalogCoordinator = new KiroAgentCatalogCoordinator(
     plugin,
-    new KiroAgentCatalogService(plugin),
+    options.agentCatalogService ?? new KiroAgentCatalogService(plugin),
   );
   const commandMetadataProbe = options.commandMetadataProbe
     ?? new KiroCommandMetadataProbe(plugin);
@@ -86,6 +90,23 @@ export async function createKiroWorkspaceServices(
         void agentCatalogCoordinator.refresh().catch(() => {});
       },
     });
+
+  // Populate the agent catalog once, the moment these workspace services first go
+  // live. This is the same startup seam that readies the model catalog: provider
+  // services are initialized lazily through `ProviderWorkspaceRegistry.ensureInitialized`
+  // (driven at startup by both the selected-model metadata migration and the first
+  // Kiro chat tab's activation), and the model-catalog controller/coordinator built
+  // just above become usable at exactly this point. Prefetching here means the Agent
+  // selector is populated as soon as a Kiro chat tab is ready, rather than only after
+  // the user opens the settings tab (`prepareSettings`) or sends a first prompt.
+  //
+  // Best-effort and non-blocking: `refresh` no-ops while the provider is disabled,
+  // swallows a missing CLI / non-zero exit / parse failure into an empty completed
+  // result (leaving the persisted snapshot untouched so the selector simply stays
+  // hidden), and fires `notifyProviderChatOptionsChanged('kiro')` itself once it
+  // persists a change so the toolbar re-renders without any user action. The `void`
+  // + `.catch` keeps every failure off the UI thread and out of the session.
+  void agentCatalogCoordinator.refresh().catch(() => {});
 
   return {
     cliResolver: new KiroCLIResolver(),
