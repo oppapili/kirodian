@@ -35,7 +35,6 @@ export interface PersistedKiroProviderSettings {
   environmentHash: string;
   visibleModels: string[] | null;
   modelAliases: Record<string, string>;
-  planBasePermissionMode: 'normal' | 'yolo';
   preferredReasoningByModel: Record<string, string>;
   /** Runtime snapshot of the live session's agent modes, keyed by host. Not user-authored. */
   agentModesByHost: Record<string, KiroAgentModeSnapshot>;
@@ -58,7 +57,6 @@ export const DEFAULT_KIRO_PROVIDER_SETTINGS: Readonly<PersistedKiroProviderSetti
   environmentHash: '',
   environmentVariables: '',
   modelAliases: {},
-  planBasePermissionMode: 'normal',
   preferredReasoningByModel: {},
   selectedAgentMode: null,
   visibleModels: null,
@@ -152,7 +150,6 @@ export function getKiroProviderSettings(
       allowedModelIds,
       catalogModels.length > 0,
     ),
-    planBasePermissionMode: normalizeKiroBasePermissionMode(config.planBasePermissionMode),
     preferredReasoningByModel: normalizeKiroPreferredReasoningByModel(
       config.preferredReasoningByModel,
       enabledModelIds,
@@ -230,9 +227,6 @@ export function updateKiroProviderSettings(
       allowedModelIds,
       hasCatalog,
     ),
-    planBasePermissionMode: updates.planBasePermissionMode !== undefined
-      ? normalizeKiroBasePermissionMode(updates.planBasePermissionMode)
-      : current.planBasePermissionMode,
     preferredReasoningByModel: normalizeKiroPreferredReasoningByModel(
       updates.preferredReasoningByModel ?? current.preferredReasoningByModel,
       enabledModelIds,
@@ -601,10 +595,6 @@ function normalizeRawModelId(value: unknown): string | null {
 
 function readTrimmedString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function normalizeKiroBasePermissionMode(value: unknown): 'normal' | 'yolo' {
-  return value === 'yolo' ? 'yolo' : 'normal';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

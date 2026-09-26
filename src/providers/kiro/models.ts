@@ -23,7 +23,6 @@ export interface KiroDiscoveredModel {
 }
 
 export const KIRO_MODEL_PREFIX = 'kiro/';
-export const KIRO_CONTEXT_WINDOW_FALLBACK = 200_000;
 const KIRO_REASONING_EFFORT_ORDER = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
 const KIRO_FALLBACK_REASONING_EFFORTS: readonly KiroReasoningEffort[] = Object.freeze(
   STANDARD_REASONING_VALUES.map(value => Object.freeze({
@@ -149,24 +148,6 @@ export function resolveKiroDefaultReasoningEffort(
     return DEFAULT_REASONING_VALUE;
   }
   return availableValues[0] ?? DEFAULT_REASONING_VALUE;
-}
-
-export function resolveKiroContextWindow(
-  modelId: string,
-  models: KiroDiscoveredModel[],
-  customContextLimits: Record<string, number> = {},
-): number {
-  const model = findKiroModel(models, modelId);
-  if (model?.contextWindow !== undefined) {
-    return model.contextWindow;
-  }
-
-  const rawModelId = decodeKiroModelId(modelId);
-  const customLimit = customContextLimits[modelId]
-    ?? (rawModelId ? customContextLimits[rawModelId] : undefined);
-  return isPositiveFiniteNumber(customLimit)
-    ? customLimit
-    : KIRO_CONTEXT_WINDOW_FALLBACK;
 }
 
 export function normalizeKiroReasoningMetadata(value: unknown): Pick<
