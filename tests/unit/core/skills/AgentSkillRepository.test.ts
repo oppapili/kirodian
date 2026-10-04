@@ -249,4 +249,57 @@ describe('AgentSkillRepository', () => {
     const rejected = results.find(result => result.status === 'rejected') as PromiseRejectedResult;
     expect(rejected.reason).toBeInstanceOf(AgentSkillCollisionError);
   });
+
+  describe('with a custom skills root', () => {
+    const KIRO_ROOT = '.kiro/skills';
+    let kiroRepository: AgentSkillRepository;
+
+    beforeEach(() => {
+      kiroRepository = new AgentSkillRepository(vaultFiles, KIRO_ROOT);
+    });
+
+    it('creates and lists packages under the configured root, not the default', async () => {
+      const created = await kiroRepository.create({
+        name: 'kiro-skill',
+        description: 'Kiro description',
+        instructions: 'Kiro instructions',
+      });
+
+      expect(created.directoryPath).toBe(`${KIRO_ROOT}/kiro-skill`);
+      expect(created.filePath).toBe(`${KIRO_ROOT}/kiro-skill/SKILL.md`);
+      expect(await dataAdapter.read(`${KIRO_ROOT}/kiro-skill/SKILL.md`)).toContain('kiro-skill');
+      // Nothing was written under the default shared root.
+      expect(dataAdapter.nodes.has(`${AGENT_SKILLS_ROOT}/kiro-skill`)).toBe(false);
+
+      const listed = await kiroRepository.list();
+      expect(listed.skills.map(skill => skill.name)).toEqual(['kiro-skill']);
+    });
+
+    it('returns an empty list when the custom root is absent', async () => {
+      const result = await kiroRepository.list();
+      expect(result).toEqual({ skills: [], diagnostics: [] });
+    });
+
+    it('reads only the custom root and ignores skills under the default root', async () => {
+      // A skill under the default shared root must not leak into the Kiro root.
+      dataAdapter.addFolder(`${AGENT_SKILLS_ROOT}/shared-skill`);
+      dataAdapter.addFile(`${AGENT_SKILLS_ROOT}/shared-skill/SKILL.md`, markdown('shared-skill'));
+      dataAdapter.addFolder('.kiro');
+      dataAdapter.addFolder(KIRO_ROOT);
+      dataAdapter.addFolder(`${KIRO_ROOT}/kiro-skill`);
+      dataAdapter.addFile(`${KIRO_ROOT}/kiro-skill/SKILL.md`, markdown('kiro-skill'));
+
+      const result = await kiroRepository.list();
+      expect(result.skills.map(skill => skill.name)).toEqual(['kiro-skill']);
+    });
+  });
+
+  it('defaults the root to the shared .agents/skills path when none is given', async () => {
+    const created = await repository.create({
+      name: 'default-root-skill',
+      description: 'Description',
+      instructions: 'Instructions',
+    });
+    expect(created.directoryPath).toBe(`${AGENT_SKILLS_ROOT}/default-root-skill`);
+  });
 });
