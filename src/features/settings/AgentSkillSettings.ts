@@ -15,6 +15,7 @@ import {
   ManagedResourceRelocationError,
 } from '../../core/storage/VaultFileAdapter';
 import { t } from '../../i18n/i18n';
+import type { TranslationKey } from '../../i18n/types';
 import type {
   AgentSkillManagementCoordinator,
   AgentSkillMutationResult,
@@ -217,6 +218,11 @@ export class AgentSkillSettings {
     containerEl: HTMLElement,
     private readonly coordinator: AgentSkillManagementCoordinator,
     private readonly app: App,
+    // i18n key for the header help line describing where skills live. Defaults
+    // to the shared `.agents/skills` message; callers whose root differs (e.g.
+    // the Kiro tab's `.kiro/skills`) pass a matching key so the UI names the
+    // real directory.
+    private readonly expectationKey: TranslationKey = 'settings.agentSkills.sharedExpectation',
   ) {
     this.rootEl = containerEl.createDiv({ cls: 'claudian-agent-skills-manager' });
     this.unsubscribe = coordinator.subscribe(() => this.render());
@@ -282,7 +288,7 @@ export class AgentSkillSettings {
       cls: 'claudian-sp-header claudian-agent-skills-header',
     });
     const help = header.createDiv({ cls: 'claudian-agent-skills-help' });
-    help.createEl('p', { text: t('settings.agentSkills.sharedExpectation') });
+    help.createEl('p', { text: t(this.expectationKey) });
 
     const actions = header.createDiv({ cls: 'claudian-sp-header-actions' });
     const refreshButton = actions.createEl('button', {

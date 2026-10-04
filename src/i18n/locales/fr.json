@@ -361,6 +361,7 @@
       "sectionTitle": "Skills",
       "fixedRoot": "Managed in .agents/skills",
       "sharedExpectation": "Manage shared skills in .agents/skills/ for compatible providers.",
+      "sharedExpectationKiro": "Manage Kiro skills in .kiro/skills/ (kiro-cli does not read .agents/skills/).",
       "noSkills": "No shared skills configured. Click + to create one.",
       "skillBadge": "skill",
       "diagnosticsTitle": "Skills needing attention",

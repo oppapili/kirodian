@@ -11,7 +11,7 @@ import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '../../core/providers/ProviderSettingsCoordinator';
 import { ProviderWorkspaceRegistry } from '../../core/providers/ProviderWorkspaceRegistry';
 import type { ProviderId, ProviderSettingsTabRenderHandle } from '../../core/providers/types';
-import { AgentSkillRepository } from '../../core/skills/AgentSkillRepository';
+import { AGENT_SKILLS_ROOT, AgentSkillRepository, KIRO_WORKSPACE_SKILLS_ROOT } from '../../core/skills/AgentSkillRepository';
 import type {
   ChatViewPlacement,
   DualPaneSide,
@@ -124,15 +124,32 @@ export class ClaudianSettingTab extends PluginSettingTab {
   private refreshTitleModelOptions: (() => void) | null = null;
   private renderGeneration = 0;
   private readonly providerSettingsRenders = new Map<ProviderId, ProviderSettingsTabRenderHandle>();
-  private readonly agentSkillCoordinator: AgentSkillManagementCoordinator;
+  // One coordinator per skills root. Providers that read Claudian's shared
+  // `.agents/skills` share the default-root coordinator; Kiro reads
+  // `.kiro/skills` instead (kiro-cli does not read `.agents/skills`), so it
+  // gets its own coordinator keyed by that root. Keyed by root string so each
+  // root is instantiated at most once and reused across renders.
+  private readonly agentSkillCoordinators = new Map<string, AgentSkillManagementCoordinator>();
 
   constructor(app: App, plugin: FeatureHost & Plugin) {
     super(app, plugin);
     this.plugin = plugin;
-    this.agentSkillCoordinator = new AgentSkillManagementCoordinator(
-      new AgentSkillRepository(plugin.storage.getAdapter()),
-      () => plugin.notifyAgentSkillsChanged(),
+  }
+
+  /**
+   * Returns the skills coordinator for a given vault-relative root, creating it
+   * on first use. All roots share the same provider-refresh notification; they
+   * differ only in which directory the backing repository reads and writes.
+   */
+  private getAgentSkillCoordinator(root: string): AgentSkillManagementCoordinator {
+    const existing = this.agentSkillCoordinators.get(root);
+    if (existing) return existing;
+    const coordinator = new AgentSkillManagementCoordinator(
+      new AgentSkillRepository(this.plugin.storage.getAdapter(), root),
+      () => this.plugin.notifyAgentSkillsChanged(),
     );
+    this.agentSkillCoordinators.set(root, coordinator);
+    return coordinator;
   }
 
   getSettingDefinitions(): SettingDefinitionItem[] {
@@ -146,7 +163,9 @@ export class ClaudianSettingTab extends PluginSettingTab {
   private renderSettings(containerEl: HTMLElement): () => void {
     this.disposeProviderSettingsRenders();
     const renderGeneration = ++this.renderGeneration;
-    this.agentSkillCoordinator.resetSubscriptions();
+    for (const coordinator of this.agentSkillCoordinators.values()) {
+      coordinator.resetSubscriptions();
+    }
     containerEl.empty();
     containerEl.addClass('claudian-settings');
     const settingItems = containerEl.parentElement;
@@ -209,8 +228,18 @@ export class ClaudianSettingTab extends PluginSettingTab {
         }
         const handle = renderer.render(providerContent, {
           plugin: this.plugin.providerHost,
-          renderAgentSkillSettings: (target, _targetProviderId) => {
-            new AgentSkillSettings(target, this.agentSkillCoordinator, this.app);
+          renderAgentSkillSettings: (target, targetProviderId) => {
+            // Kiro reads `.kiro/skills`; every other provider uses Claudian's
+            // shared `.agents/skills`. Selecting the root by provider keeps the
+            // other providers on their existing coordinator unchanged.
+            const isKiro = targetProviderId === 'kiro';
+            const root = isKiro ? KIRO_WORKSPACE_SKILLS_ROOT : AGENT_SKILLS_ROOT;
+            new AgentSkillSettings(
+              target,
+              this.getAgentSkillCoordinator(root),
+              this.app,
+              isKiro ? 'settings.agentSkills.sharedExpectationKiro' : undefined,
+            );
           },
           renderHiddenProviderCommandSetting: (
             target,
@@ -302,7 +331,9 @@ export class ClaudianSettingTab extends PluginSettingTab {
       settingItems?.classList.remove('claudian-settings-items');
       this.renderGeneration += 1;
       this.disposeProviderSettingsRenders();
-      this.agentSkillCoordinator.resetSubscriptions();
+      for (const coordinator of this.agentSkillCoordinators.values()) {
+        coordinator.resetSubscriptions();
+      }
       this.refreshTitleModelOptions = null;
     };
   }
