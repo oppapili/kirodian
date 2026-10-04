@@ -13,6 +13,8 @@
   --claudian-brand-pi-rgb: 255, 255, 255;
   --claudian-brand-grok: #ffffff;
   --claudian-brand-grok-rgb: 255, 255, 255;
+  --claudian-brand-kiro: #943ded;
+  --claudian-brand-kiro-rgb: 148, 61, 237;
   --claudian-error: #dc3545;
   --claudian-error-rgb: 220, 53, 69;
   --claudian-compact: #5bc0de;
@@ -55,4 +57,9 @@ body.theme-light .claudian-container {
 .claudian-container[data-provider="grok"] {
   --claudian-brand: var(--claudian-brand-grok);
   --claudian-brand-rgb: var(--claudian-brand-grok-rgb);
+}
+
+.claudian-container[data-provider="kiro"] {
+  --claudian-brand: var(--claudian-brand-kiro);
+  --claudian-brand-rgb: var(--claudian-brand-kiro-rgb);
 }
