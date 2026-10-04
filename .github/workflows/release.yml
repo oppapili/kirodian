@@ -84,3 +84,4 @@ jobs:
             main.js
             manifest.json
             styles.css
+            versions.json
