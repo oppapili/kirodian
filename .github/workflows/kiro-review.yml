@@ -1,0 +1,37 @@
+name: Kiro Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  issue_comment:
+    types: [created]
+
+jobs:
+  kiro-review:
+    # Runs on PR open/sync and on a PR comment containing the trigger phrase.
+    # The action skips automatically when KIRO_API_KEY is unset (e.g. on a fork
+    # that has not configured it) and on fork PRs where the secret is unavailable,
+    # so no repository-name hardcoding is needed. Fork owners configure their own
+    # KIRO_API_KEY — see issue #61.
+    if: >-
+      ${{ github.event_name == 'pull_request' ||
+          (github.event_name == 'issue_comment' &&
+           github.event.issue.pull_request &&
+           contains(github.event.comment.body, '@kiro')) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # required to post the review and inline comments
+      issues: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Kiro CLI Review
+        uses: konippi/kiro-cli-review-action@1c11ef476d5722d06a0c702a041e6393c8d5310d # v1.0.1
+        with:
+          kiro_api_key: ${{ secrets.KIRO_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
