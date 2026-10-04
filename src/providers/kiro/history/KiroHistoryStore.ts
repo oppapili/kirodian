@@ -18,6 +18,11 @@ import {
   normalizeKiroToolUseResult,
   resolveKiroRawToolName,
 } from '../normalization/kiroToolNormalization';
+import {
+  isKiroV2HistoryContent,
+  parseKiroV2HistoryContent,
+  resolveKiroV2PromptIndexAfterAssistant,
+} from './KiroHistoryV2Store';
 
 const HISTORY_METHODS = new Set([
   '_x.ai/session/update',
@@ -257,16 +262,45 @@ export function parseKiroHistoryContent(
   };
 }
 
+/**
+ * Resolve the on-disk history file inside a resolved session directory,
+ * preferring the Kiro CLI v2 layout. v2 stores a flat
+ * `<sessionDirectory>/<sessionId>.jsonl`; v1 stores
+ * `<sessionDirectory>/updates.jsonl`. The resolver (`resolveKiroSessionDirectory`)
+ * returns the `.../cli` directory for v2 and the encoded-cwd session directory
+ * for v1, so both layouts resolve from the same `sessionDirectory` argument.
+ */
+async function readKiroHistoryFile(
+  sessionDirectory: string,
+  sessionId: string,
+): Promise<{ content: string; layout: 'v1' | 'v2' } | null> {
+  try {
+    const content = await fs.readFile(
+      path.join(sessionDirectory, `${sessionId}.jsonl`),
+      'utf8',
+    );
+    return { content, layout: 'v2' };
+  } catch {
+    // Fall through to the v1 layout below.
+  }
+  try {
+    const content = await fs.readFile(path.join(sessionDirectory, 'updates.jsonl'), 'utf8');
+    return { content, layout: 'v1' };
+  } catch {
+    return null;
+  }
+}
+
 export async function loadKiroHistory(
   sessionDirectory: string,
   sessionId: string,
 ): Promise<ParsedKiroHistory> {
-  try {
-    const content = await fs.readFile(path.join(sessionDirectory, 'updates.jsonl'), 'utf8');
-    return parseKiroHistoryContent(content, sessionId);
-  } catch {
-    return { messages: [] };
+  const file = await readKiroHistoryFile(sessionDirectory, sessionId);
+  if (!file) return { messages: [] };
+  if (file.layout === 'v2' || isKiroV2HistoryContent(file.content)) {
+    return parseKiroV2HistoryContent(file.content, sessionId);
   }
+  return parseKiroHistoryContent(file.content, sessionId);
 }
 
 export function resolveKiroPromptIndexAfterAssistant(
@@ -348,12 +382,12 @@ export async function loadKiroPromptIndexAfterAssistant(
   sessionId: string,
   resumeAt: string,
 ): Promise<number | null> {
-  try {
-    const content = await fs.readFile(path.join(sessionDirectory, 'updates.jsonl'), 'utf8');
-    return resolveKiroPromptIndexAfterAssistant(content, sessionId, resumeAt);
-  } catch {
-    return null;
+  const file = await readKiroHistoryFile(sessionDirectory, sessionId);
+  if (!file) return null;
+  if (file.layout === 'v2' || isKiroV2HistoryContent(file.content)) {
+    return resolveKiroV2PromptIndexAfterAssistant(file.content, sessionId, resumeAt);
   }
+  return resolveKiroPromptIndexAfterAssistant(file.content, sessionId, resumeAt);
 }
 
 function createPendingTurn(

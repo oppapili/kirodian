@@ -21,7 +21,23 @@ export function decodeKiroSessionCwd(encodedCwd: string): string | null {
   }
 }
 
-export function resolveKiroSessionCwd(sessionDirectory: string): string | null {
+export function resolveKiroSessionCwd(
+  sessionDirectory: string,
+  sessionId?: string | null,
+): string | null {
+  // v2 layout: `sessionDirectory` is the flat `.../cli` directory and the cwd
+  // is recorded in `<sessionId>.json`. Only attempt this when a sessionId is
+  // supplied and a matching v2 history file exists, so a v1 session directory
+  // (whose basename is the sessionId) is never misread as v2.
+  const normalizedSessionId = normalizeSessionId(sessionId);
+  if (
+    normalizedSessionId
+    && isFile(path.join(sessionDirectory, `${normalizedSessionId}.jsonl`))
+  ) {
+    const v2Cwd = readKiroV2SessionCwd(path.resolve(sessionDirectory), normalizedSessionId);
+    if (v2Cwd) return v2Cwd;
+  }
+
   const cwdDirectory = path.dirname(path.resolve(sessionDirectory));
   const decoded = decodeKiroSessionCwd(path.basename(cwdDirectory));
   if (decoded) return decoded;
@@ -46,6 +62,21 @@ export function resolveKiroSessionDirectory(
   }
 
   const roots = getTrustedSessionRoots(context);
+
+  // v2 layout (kiro-cli >= 2.27): a flat `<root>/cli/<sessionId>.jsonl` with a
+  // sibling `<root>/cli/<sessionId>.json` metadata file carrying the cwd. This
+  // is preferred over the legacy v1 directory layout so newly created sessions
+  // hydrate after a restart. The returned path is the `cli` directory; the
+  // store detects the v2 layout from the presence of `<sessionId>.jsonl`.
+  const v2Directory = resolveKiroV2SessionDirectory(
+    roots,
+    normalizedSessionId,
+    vaultPath,
+  );
+  if (v2Directory) {
+    return v2Directory;
+  }
+
   if (
     persistedHint
     && path.basename(path.normalize(persistedHint)) === normalizedSessionId
@@ -71,6 +102,76 @@ export function resolveKiroSessionDirectory(
     }
   }
   return null;
+}
+
+/**
+ * Resolve the Kiro CLI v2 `cli` directory for a session, or null when no v2
+ * history file exists for it. When a `<sessionId>.json` metadata file is
+ * present, its `cwd` must match `vaultPath` (if given) so a session created for
+ * a different working directory is not hydrated into this vault. A missing or
+ * unreadable metadata file is tolerated: the `.jsonl` existence alone is enough,
+ * matching the CLI's own best-effort behaviour.
+ */
+function resolveKiroV2SessionDirectory(
+  roots: readonly string[],
+  sessionId: string,
+  vaultPath: string | null,
+): string | null {
+  for (const root of roots) {
+    const cliDirectory = path.join(root, 'cli');
+    if (!isPathWithinRoot(cliDirectory, root)) {
+      continue;
+    }
+    const historyFile = path.join(cliDirectory, `${sessionId}.jsonl`);
+    if (!isPathWithinRoot(historyFile, cliDirectory) || !isFile(historyFile)) {
+      continue;
+    }
+    if (!isKiroV2SessionCwdConsistent(cliDirectory, sessionId, vaultPath)) {
+      continue;
+    }
+    return path.resolve(cliDirectory);
+  }
+  return null;
+}
+
+function isKiroV2SessionCwdConsistent(
+  cliDirectory: string,
+  sessionId: string,
+  vaultPath: string | null,
+): boolean {
+  if (!vaultPath || !path.isAbsolute(vaultPath)) {
+    return true;
+  }
+  const storedCwd = readKiroV2SessionCwd(cliDirectory, sessionId);
+  if (!storedCwd) {
+    return true;
+  }
+  return path.resolve(storedCwd) === path.resolve(vaultPath);
+}
+
+/**
+ * Read the `cwd` recorded in a v2 session's `<sessionId>.json` metadata file.
+ * Returns null when the file is absent, unreadable, malformed, or carries no
+ * absolute cwd.
+ */
+export function readKiroV2SessionCwd(
+  cliDirectory: string,
+  sessionId: string,
+): string | null {
+  const metadataFile = path.join(cliDirectory, `${sessionId}.json`);
+  if (!isPathWithinRoot(metadataFile, cliDirectory)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(metadataFile, 'utf8')) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+    const cwd = (parsed as Record<string, unknown>).cwd;
+    return typeof cwd === 'string' && path.isAbsolute(cwd) ? path.resolve(cwd) : null;
+  } catch {
+    return null;
+  }
 }
 
 export function getTrustedKiroSessionRoots(
@@ -143,6 +244,14 @@ function findExactSessionDirectory(root: string, sessionId: string): string | nu
 function isDirectory(value: string): boolean {
   try {
     return fs.statSync(value).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function isFile(value: string): boolean {
+  try {
+    return fs.statSync(value).isFile();
   } catch {
     return false;
   }
