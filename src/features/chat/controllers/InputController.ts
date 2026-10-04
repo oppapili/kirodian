@@ -24,6 +24,7 @@ import {
   isCanonicalUserMessage,
   type StreamChunk,
 } from '../../../core/types';
+import { BRAND_NAME } from '../../../i18n/constants';
 import { t } from '../../../i18n/i18n';
 import { ResumeSessionDropdown } from '../../../shared/components/ResumeSessionDropdown';
 import type { BrowserSelectionContext } from '../../../utils/browser';
@@ -596,11 +597,11 @@ export class InputController {
           this.#finishAcceptedMissingSession(streamGeneration);
         }
         const notice = resolution === 'deleted'
-            ? 'The provider session no longer exists. Its Claudian record was removed; send again to start a new session.'
+            ? `The provider session no longer exists. Its ${BRAND_NAME} record was removed; send again to start a new session.`
             : resolution === 'reset'
-              ? 'The provider session no longer exists. Claudian preserved the recoverable history; send again to rebuild the session.'
+              ? `The provider session no longer exists. ${BRAND_NAME} preserved the recoverable history; send again to rebuild the session.`
               : resolution === 'preserved'
-                ? 'The provider session no longer exists. Claudian preserved its record because the remaining history could not be verified.'
+                ? `The provider session no longer exists. ${BRAND_NAME} preserved its record because the remaining history could not be verified.`
                 : 'The provider session no longer exists. Send again to start a new session.';
         new Notice(notice);
         wasInvalidated = true;

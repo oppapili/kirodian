@@ -1,4 +1,6 @@
-const WELCOME_BRAND_NAME = 'Claudian';
+import { BRAND_NAME } from '@/i18n/constants';
+
+const WELCOME_BRAND_NAME = BRAND_NAME;
 
 export function renderWelcomeContent(
   welcomeEl: HTMLElement,

@@ -55,7 +55,7 @@ describe('Claudian file menu', () => {
 
     expect(host.registerEvent).toHaveBeenCalledWith(eventRef);
     expect((menu as any).items).toHaveLength(1);
-    expect((menu as any).items[0].title).toBe('Add to Claudian');
+    expect((menu as any).items[0].title).toBe('Add to Kirodian');
   });
 
   it('does not add the action for folders', () => {

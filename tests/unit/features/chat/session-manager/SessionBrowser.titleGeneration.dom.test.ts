@@ -52,7 +52,7 @@ it('generates a title for a previously skipped chat after selecting an available
   const button = within(fixture.container).getByRole('button', { name: 'Generate title' });
   expect(button.getAttribute('type')).toBe('button');
   fireEvent.click(button);
-  await waitFor(() => expect(Notice).toHaveBeenCalledWith('Select an available title model in Claudian settings.'));
+  await waitFor(() => expect(Notice).toHaveBeenCalledWith('Select an available title model in Kirodian settings.'));
   expect(fixture.generateTitle).not.toHaveBeenCalled();
   expect(fixture.conversation.title).toBe('Fallback title');
   expect(fixture.conversation.titleGenerationStatus).toBeUndefined();

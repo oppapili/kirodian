@@ -1628,7 +1628,7 @@ describe('InputController coordinator execution', () => {
     expect(fixture.deps.renderer.removeMessage).not.toHaveBeenCalled();
     expect(fixture.deps.conversationController.save).not.toHaveBeenCalled();
     expect(Notice).toHaveBeenCalledWith(
-      'The provider session no longer exists. Claudian preserved the recoverable history; send again to rebuild the session.',
+      'The provider session no longer exists. Kirodian preserved the recoverable history; send again to rebuild the session.',
     );
   });
 
@@ -1647,7 +1647,7 @@ describe('InputController coordinator execution', () => {
     expect(fixture.deps.renderer.removeMessage).not.toHaveBeenCalled();
     expect(fixture.deps.conversationController.save).not.toHaveBeenCalled();
     expect(Notice).toHaveBeenCalledWith(
-      'The provider session no longer exists. Its Claudian record was removed; send again to start a new session.',
+      'The provider session no longer exists. Its Kirodian record was removed; send again to start a new session.',
     );
   });
 

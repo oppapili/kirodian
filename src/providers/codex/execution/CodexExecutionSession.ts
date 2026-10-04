@@ -27,6 +27,7 @@ import { ProviderModelUnavailableError } from '../../../core/providers/models/Pr
 import type { ProviderHost } from '../../../core/providers/ProviderHost';
 import type { ChatMessage, ImageAttachment, StreamChunk } from '../../../core/types';
 import { createTurnStats, isTokenCount } from '../../../core/types';
+import { BRAND_NAME } from '../../../i18n/constants';
 import { appendBrowserContext } from '../../../utils/browser';
 import { appendCanvasContext } from '../../../utils/canvas';
 import {
@@ -433,7 +434,7 @@ export class CodexExecutionSession
         this.#finishError(
           run,
           'configuration',
-          'No Codex model is selected. Enable a model in Claudian settings.',
+          `No Codex model is selected. Enable a model in ${BRAND_NAME} settings.`,
           true,
         );
         return;

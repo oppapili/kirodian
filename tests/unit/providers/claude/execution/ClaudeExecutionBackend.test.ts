@@ -173,7 +173,7 @@ describe('ClaudeExecutionBackend', () => {
     }).events);
     expect(events).toContainEqual(expect.objectContaining({ type: 'execution_error', category: 'configuration' }));
     expect(JSON.stringify(events)).toContain('selected Claude model is unavailable');
-    expect(JSON.stringify(events)).toContain('Open Claudian settings → Claude');
+    expect(JSON.stringify(events)).toContain('Open Kirodian settings → Claude');
     expect(sdkMock.getQueryCallCount()).toBe(0);
     await session.dispose();
   });
