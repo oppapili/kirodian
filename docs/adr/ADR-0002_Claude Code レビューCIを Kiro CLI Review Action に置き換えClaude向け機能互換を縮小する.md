@@ -86,6 +86,23 @@ required check に**しない**。
 skip され続ける」ケースのみで、これは secret 設定の推奨と、skip 時の `::notice::` 出力に
 よる可視化で防ぐ。
 
+# 追記: agent 設定の配置と @kiro オンデマンド一本化（実装時の調整）
+
+導入後の実走行で、`konippi/kiro-cli-review-action@v1.0.1` に 2 つの不具合が判明した
+（詳細は issue #63）。
+
+- **同梱 agent コピーの失敗**: action は同梱 `agents/code-reviewer.json` を
+  `GITHUB_ACTION_PATH` 基準で `.kiro/agents/` へコピーするが、同変数が未解決だと
+  ENOENT で失敗する。→ 対処: action の README が推奨するとおり
+  **`.kiro/agents/code-reviewer.json` を default branch に配置**し、action のコピー処理を
+  回避する。これは「同梱 agent で動かす」という当初方針（本 ADR 決定節）の技術的前提が
+  崩れたための最小構成であり、Kirodian 固有のレビュー観点カスタムとは別目的（観点の
+  作り込みは将来別 issue）。
+- **pull_request 自動トリガが機能しない**: action が same-repo PR も fork と誤判定して
+  自己スキップする。→ 対処: `pull_request` 自動トリガを**除去**し、`@kiro`
+  （`issue_comment`）オンデマンド一本化とする。kiro-review は advisory（required check で
+  ない）なので、自動レビューを外しても品質ゲートは人間レビュー + `ci.yml` で担保される。
+
 # 代替案（Alternatives）
 
 - **案 A: 自前の headless Kiro CLI レビューを GitHub Actions 上で実装する。**
