@@ -2,6 +2,7 @@
 
 import {
   createProviderIconSvg,
+  KIRO_PROVIDER_ICON,
   OPENAI_PROVIDER_ICON,
   OPENCODE_PROVIDER_ICON,
   PI_PROVIDER_ICON,
@@ -52,5 +53,21 @@ describe('createProviderIconSvg', () => {
     expect(paths).toHaveLength(2);
     expect(paths[0].getAttribute('fill-rule')).toBe('evenodd');
     expect(paths.every(path => path.getAttribute('fill') === 'currentColor')).toBe(true);
+  });
+
+  it('renders the Kiro provider icon as a transform-wrapped currentColor mark', () => {
+    const svg = createProviderIconSvg(KIRO_PROVIDER_ICON, {
+      dataProvider: 'kiro',
+      parent: document.body,
+    });
+
+    expect(svg.getAttribute('viewBox')).toBe('0 0 75 100');
+    const group = svg.querySelector('g');
+    expect(group).not.toBeNull();
+    expect(group?.getAttribute('transform')).toBe('matrix(3.800695,0,0,4.166604,-7.598366,0.001061)');
+    const path = svg.querySelector('path');
+    expect(path).not.toBeNull();
+    expect(path?.getAttribute('fill')).toBe('currentColor');
+    expect(path?.getAttribute('fill-rule')).toBe('evenodd');
   });
 });
