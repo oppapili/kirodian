@@ -271,6 +271,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
     for (const id of tabIds) {
       const label = t(`settings.tabs.${id}`);
       const button = tabBar.createEl('button', {
+        attr: { type: 'button' },
         cls: `claudian-settings-tab${id === this.activeTab ? ' claudian-settings-tab--active' : ''}`,
         text: label,
       });
@@ -303,6 +304,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
       });
       providerContents.set(providerId, content);
       const button = providerTabBar.createEl('button', {
+        attr: { type: 'button' },
         cls: `claudian-settings-provider-tab${providerId === this.activeProviderTab ? ' claudian-settings-provider-tab--active' : ''}`,
         text: ProviderRegistry.getProviderDisplayName(providerId),
       });

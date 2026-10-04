@@ -191,13 +191,15 @@ export class EnvSnippetModal extends Modal {
 
     const cancelBtn = buttonContainer.createEl('button', {
       text: t('settings.envSnippets.modal.cancel'),
-      cls: 'claudian-cancel-btn'
+      cls: 'claudian-cancel-btn',
+      attr: { type: 'button' }
     });
     cancelBtn.addEventListener('click', () => this.close());
 
     const saveBtn = buttonContainer.createEl('button', {
       text: this.snippet ? t('settings.envSnippets.modal.update') : t('settings.envSnippets.modal.save'),
-      cls: 'claudian-save-btn'
+      cls: 'claudian-save-btn',
+      attr: { type: 'button' }
     });
     saveBtn.addEventListener('click', () => saveSnippet());
 
@@ -272,7 +274,7 @@ export class EnvSnippetManager {
 
       const restoreBtn = actionsEl.createEl('button', {
         cls: 'claudian-settings-action-btn',
-        attr: { 'aria-label': 'Insert' },
+        attr: { 'aria-label': 'Insert', type: 'button' },
       });
       setIcon(restoreBtn, 'clipboard-paste');
       restoreBtn.addEventListener('click', () => {

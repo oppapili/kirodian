@@ -411,6 +411,7 @@ export class SessionBrowser {
 
     if (renderedConversationCount < visibleConversationTotal && !options.signal?.aborted) {
       const loadMoreButton = sessionList.createEl('button', {
+        attr: { type: 'button' },
         cls: 'claudian-history-load-more',
         text: `Load more (${visibleConversationTotal - renderedConversationCount} remaining)`,
       });
@@ -853,6 +854,7 @@ export class SessionBrowser {
 
     if (openState === 'closed' && options.onOpenConversationInNewTab) {
       const openInNewTabBtn = actions.createEl('button', {
+        attr: { type: 'button' },
         cls: 'claudian-action-btn claudian-open-new-tab-btn',
       });
       setIcon(openInNewTabBtn, 'square-plus');
@@ -871,6 +873,7 @@ export class SessionBrowser {
 
     const createDeleteButton = (): void => {
       const deleteBtn = actions.createEl('button', {
+        attr: { type: 'button' },
         cls: 'claudian-action-btn claudian-delete-btn',
       });
       setIcon(deleteBtn, 'trash-2');
@@ -889,6 +892,7 @@ export class SessionBrowser {
 
     if (conversation.isLegacySession && options.onAssignConversationToDevice) {
       const assignDeviceBtn = actions.createEl('button', {
+        attr: { type: 'button' },
         cls: 'claudian-action-btn claudian-assign-device-btn',
       });
       setIcon(assignDeviceBtn, 'monitor-down');
