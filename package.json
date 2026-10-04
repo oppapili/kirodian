@@ -36,7 +36,7 @@
     "productivity",
     "ide"
   ],
-  "author": "Yishen Tu",
+  "author": "oppapili (fork of Claudian by Yishen Tu)",
   "license": "MIT",
   "devDependencies": {
     "@eslint-community/eslint-plugin-eslint-comments": "^4.7.2",
