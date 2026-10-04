@@ -3,7 +3,6 @@ import {
   ACPClientConnection,
   ACPJSONRPCTransport,
   ACPSubprocess,
-  normalizeACPAvailableCommands,
 } from '../../acp';
 import {
   KIRO_COMMANDS_AVAILABLE_NOTIFICATION_METHODS,
@@ -53,7 +52,7 @@ implements KiroExecutionNativeConnection {
     for (const method of KIRO_COMMANDS_AVAILABLE_NOTIFICATION_METHODS) {
       this.unsubscribers.push(this.transport.onNotification(method, params => {
         const commands = parseKiroAvailableCommandsNotification(params);
-        if (commands) this.latestCommands = normalizeACPAvailableCommands(commands);
+        if (commands) this.latestCommands = commands;
       }));
     }
   }
