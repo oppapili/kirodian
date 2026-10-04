@@ -29,9 +29,12 @@ inclusion: always
 |---|---|
 | 任意（常に） | `AGENTS.md`（ルート） |
 | `src/app/**` | `src/app/AGENTS.md` |
+| `src/composition/**` | `src/composition/AGENTS.md` |
 | `src/core/**` | `src/core/AGENTS.md` |
 | `src/features/chat/**` | `src/features/chat/AGENTS.md` |
+| `src/i18n/**` | `src/i18n/AGENTS.md` |
 | `src/style/**` | `src/style/AGENTS.md` |
+| `src/providers/acp/**` | `src/providers/acp/AGENTS.md` |
 | `src/providers/claude/**` | `src/providers/claude/AGENTS.md` |
 | `src/providers/codex/**` | `src/providers/codex/AGENTS.md` |
 | `src/providers/grok/**` | `src/providers/grok/AGENTS.md` |
