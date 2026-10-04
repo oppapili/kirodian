@@ -49,10 +49,14 @@ history is not carried over; the fork restarts its own line from `0.x`.
   for the plugin version. Each release has a matching git tag (no `v` prefix,
   e.g. `0.3.0`) and GitHub Release at the same version.
 - **`versions.json`:** records `"<plugin_version>": "<minAppVersion>"` so
-  Obsidian can resolve the right build per app version. `npm version` runs
-  `scripts/sync-version.js`, which syncs `manifest.json` to `package.json`'s
-  version and adds/updates the matching `versions.json` entry; both files are
-  staged automatically.
+  Obsidian can resolve the right build per app version. `npm version <type>
+  --no-git-tag-version` runs `scripts/sync-version.js`, which syncs
+  `manifest.json` to `package.json`'s version and adds/updates the matching
+  `versions.json` entry; both files are staged automatically. The
+  `--no-git-tag-version` flag is required: this repo uses `v`-less tags and a
+  protected `main`, so the version bump lands through a PR and the tag is created
+  by hand afterwards (see **Release procedure** below), not by `npm version`'s
+  default commit-and-`v`-tag behaviour.
 
 ### Bump type and labels
 
@@ -87,13 +91,23 @@ issues a release includes.
 
 ### Release procedure
 
-1. Run `npm version <major|minor|patch>`. This updates `manifest.json` and
-   `versions.json` via `scripts/sync-version.js`, then creates the version commit
-   and tag.
-2. Push the tag. `.github/workflows/release.yml` runs CI verification, builds the
-   plugin, and creates a GitHub Release with `main.js`, `manifest.json`, and
-   `styles.css` attached.
-3. `scripts/check-release-version.mjs` enforces that the tag,
+1. Bump the version with `npm version <major|minor|patch> --no-git-tag-version`.
+   This updates `manifest.json` and `versions.json` via `scripts/sync-version.js`
+   and stages both files, **without** creating a commit or a `v`-prefixed tag.
+2. Commit the bump on a short-lived branch and open a PR; merge it into `main`.
+   `main` is a protected branch, so the version bump cannot be pushed to it
+   directly — it lands through the PR like any other change.
+3. On the updated `main`, create a `v`-less tag at the release commit (e.g.
+   `0.3.0`, matching `manifest.json`) and push it. Pushing the tag is the release
+   trigger. The tag push is done by a human: the KiroCrew git-publish floor
+   rejects pushes made by an agent.
+4. `.github/workflows/release.yml` runs CI verification, builds the plugin, and
+   creates a GitHub Release with `main.js`, `manifest.json`, `styles.css`, and
+   `versions.json` attached. A tag whose name contains a hyphen (a SemVer
+   pre-release identifier, e.g. `0.3.0-beta.1`) is published as a GitHub
+   pre-release; see the beta/pre-release procedure in
+   `.kiro/steering/release-and-labels.md`.
+5. `scripts/check-release-version.mjs` enforces that the tag,
    `package.json`'s version, and `manifest.json`'s version all match before the
    release is published.
 
