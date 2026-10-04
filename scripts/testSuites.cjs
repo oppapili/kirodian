@@ -10,6 +10,7 @@ const scriptTests = [
   'scripts/check-release-version.test.mjs',
   'scripts/check-stylelint-config.test.mjs',
   'scripts/summarize-jest-results.test.mjs',
+  'scripts/sync-version.test.mjs',
   'scripts/ciTestSelection.test.mjs',
   'scripts/run-tests.test.mjs',
 ];

@@ -40,6 +40,63 @@ Please also:
 - Avoid new production dependencies unless the need and tradeoff are explicit.
 - Update documentation when behavior or user-facing configuration changes.
 
+## Versioning & Releases
+
+Kirodian is a fork of Claudian and versions independently. Claudian-derived tag
+history is not carried over; the fork restarts its own line from `0.x`.
+
+- **Source of truth:** `manifest.json`'s `version` is the single source of truth
+  for the plugin version. Each release has a matching git tag (no `v` prefix,
+  e.g. `0.3.0`) and GitHub Release at the same version.
+- **`versions.json`:** records `"<plugin_version>": "<minAppVersion>"` so
+  Obsidian can resolve the right build per app version. `npm version` runs
+  `scripts/sync-version.js`, which syncs `manifest.json` to `package.json`'s
+  version and adds/updates the matching `versions.json` entry; both files are
+  staged automatically.
+
+### Bump type and labels
+
+The version bump for a change follows its issue label (and Conventional Commit
+type):
+
+- `breaking` (or `feat!` / a `BREAKING CHANGE:` commit footer) -> **major** (X).
+  Examples: an incompatible settings-file format change, a renamed command ID, a
+  breaking integration API.
+- `enhancement` (feat) -> **minor** (Y). A backward-compatible feature.
+- `bug` (fix) / `documentation` (docs) -> **patch** (Z).
+
+### 0.x exception
+
+Under SemVer, `0.x` is an unstable range with no backward-compatibility
+guarantee. During `0.x`, breaking changes are absorbed into the **minor**
+(`0.Y`) and `X` stays `0`. Major = breaking only takes effect once `1.0.0` is
+reached.
+
+`1.0.0` is reached when the Obsidian community-plugin submission is complete and
+the public API — the settings-file format, command IDs, and public interfaces —
+can be declared stable.
+
+### Branching
+
+Kirodian follows GitHub Flow: `main` plus short-lived `feature/xxx` / `fix/xxx`
+branches merged via pull request. `main` is always releasable. Because the plugin
+ships as a single artifact, there is no long-lived `develop` branch.
+
+Milestones are named after target versions (e.g. `0.3.0`, `1.0.0`) to group the
+issues a release includes.
+
+### Release procedure
+
+1. Run `npm version <major|minor|patch>`. This updates `manifest.json` and
+   `versions.json` via `scripts/sync-version.js`, then creates the version commit
+   and tag.
+2. Push the tag. `.github/workflows/release.yml` runs CI verification, builds the
+   plugin, and creates a GitHub Release with `main.js`, `manifest.json`, and
+   `styles.css` attached.
+3. `scripts/check-release-version.mjs` enforces that the tag,
+   `package.json`'s version, and `manifest.json`'s version all match before the
+   release is published.
+
 ## New Provider Policy
 
 Pull requests that add a new provider are not accepted.
