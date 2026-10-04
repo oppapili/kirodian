@@ -34,7 +34,7 @@ describe('agent skill host invalidation', () => {
     await expect(pending).resolves.toBeUndefined();
   });
 
-  it('constructs one settings-owned shared repository coordinator', () => {
+  it('lazily constructs one coordinator per skills root on demand', () => {
     const adapter = {};
     const getAdapter = jest.fn().mockReturnValue(adapter);
     const plugin = {
@@ -42,9 +42,22 @@ describe('agent skill host invalidation', () => {
       notifyAgentSkillsChanged: jest.fn(),
     };
 
-    const tab = new ClaudianSettingTab({} as any, plugin as any);
+    const tab = new ClaudianSettingTab({} as any, plugin as any) as any;
 
+    // No coordinator (and no adapter fetch) until a provider tab asks for one.
+    expect(getAdapter).not.toHaveBeenCalled();
+
+    const shared = tab.getAgentSkillCoordinator('.agents/skills');
+    expect(shared).toBeDefined();
     expect(getAdapter).toHaveBeenCalledTimes(1);
-    expect((tab as any).agentSkillCoordinator).toBeDefined();
+
+    // Same root reuses the cached coordinator without a second adapter fetch.
+    expect(tab.getAgentSkillCoordinator('.agents/skills')).toBe(shared);
+    expect(getAdapter).toHaveBeenCalledTimes(1);
+
+    // A different root (Kiro's `.kiro/skills`) gets its own coordinator.
+    const kiro = tab.getAgentSkillCoordinator('.kiro/skills');
+    expect(kiro).not.toBe(shared);
+    expect(getAdapter).toHaveBeenCalledTimes(2);
   });
 });

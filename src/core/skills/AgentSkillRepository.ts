@@ -19,6 +19,21 @@ import {
 import { AgentSkillValidationError, validateAgentSkillInput, validateAgentSkillName } from './validateAgentSkill';
 
 export const AGENT_SKILLS_ROOT = '.agents/skills';
+
+/**
+ * Vault-relative directory kiro-cli reads workspace skills from.
+ *
+ * kiro-cli discovers skills under each `<vault>/.kiro/skills/<name>/SKILL.md`
+ * (the global `~/.kiro/skills` is outside the vault and out of scope for the
+ * vault-relative settings UI). kiro-cli does not read Claudian's shared
+ * `.agents/skills`, so the Kiro settings tab targets this root instead.
+ *
+ * Kept here beside {@link AGENT_SKILLS_ROOT} as a neutral path constant rather
+ * than inside `src/providers/kiro/`, because the architecture boundary forbids
+ * `src/features/` (which selects the root) from importing a concrete provider.
+ * It is only a string; no Kiro-specific behaviour lives in the core.
+ */
+export const KIRO_WORKSPACE_SKILLS_ROOT = '.kiro/skills';
 const SKILL_FILENAME = 'SKILL.md';
 
 export class AgentSkillRepositoryError extends Error {
@@ -60,35 +75,44 @@ function toError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-function packagePath(name: string): string {
-  return `${AGENT_SKILLS_ROOT}/${name}`;
-}
-
-function skillFilePath(name: string): string {
-  return `${packagePath(name)}/${SKILL_FILENAME}`;
-}
-
 export class AgentSkillRepository {
   private mutationQueue: Promise<void> = Promise.resolve();
 
-  constructor(private readonly files: VaultFileAdapter) {}
+  /**
+   * @param files Vault-relative file adapter.
+   * @param root Vault-relative skills directory. Defaults to the shared
+   *   `.agents/skills` root used by Claudian's compatible providers; callers
+   *   that need a provider-specific layout (e.g. Kiro's `.kiro/skills`) pass
+   *   their own root. The default keeps every existing caller unchanged.
+   */
+  constructor(
+    private readonly files: VaultFileAdapter,
+    private readonly root: string = AGENT_SKILLS_ROOT,
+  ) {}
+
+  private packagePath(name: string): string {
+    return `${this.root}/${name}`;
+  }
+
+  private skillFilePath(name: string): string {
+    return `${this.packagePath(name)}/${SKILL_FILENAME}`;
+  }
 
   async list(): Promise<AgentSkillListResult> {
-    const agentsExists = await this.files.verifyManagedPath('.agents', {
-      expectedType: 'folder',
-      allowMissing: true,
-    });
-    if (!agentsExists) return { skills: [], diagnostics: [] };
-
-    const rootExists = await this.files.verifyManagedPath(AGENT_SKILLS_ROOT, {
+    // The root may legitimately be absent (neither `.agents/skills` nor
+    // `.kiro/skills` is guaranteed to exist in a given vault). Checking the
+    // root itself with allowMissing generalizes the previous `.agents` parent
+    // probe across any configured root: absent root means no skills, not an
+    // error. An unsafe root (symlink, wrong type) still throws from here.
+    const rootExists = await this.files.verifyManagedPath(this.root, {
       expectedType: 'folder',
       allowMissing: true,
     });
     if (!rootExists) return { skills: [], diagnostics: [] };
 
-    const listing = await this.files.listManagedFolder(AGENT_SKILLS_ROOT);
+    const listing = await this.files.listManagedFolder(this.root);
     const directPackages = listing.folders
-      .filter(folder => path.posix.dirname(folder) === AGENT_SKILLS_ROOT)
+      .filter(folder => path.posix.dirname(folder) === this.root)
       .sort((left, right) => left.localeCompare(right));
     const skills: AgentSkillDocument[] = [];
     const diagnostics: AgentSkillListResult['diagnostics'] = [];
@@ -117,8 +141,8 @@ export class AgentSkillRepository {
   async create(input: AgentSkillInput): Promise<AgentSkillDocument> {
     validateAgentSkillInput(input);
     return this.#withMutation(async () => {
-      await this.files.ensureManagedFolder(AGENT_SKILLS_ROOT);
-      const directory = packagePath(input.name);
+      await this.files.ensureManagedFolder(this.root);
+      const directory = this.packagePath(input.name);
       try {
         await this.files.createManagedFolderExclusive(directory);
       } catch (error) {
@@ -128,7 +152,7 @@ export class AgentSkillRepository {
         throw error;
       }
 
-      const filePath = skillFilePath(input.name);
+      const filePath = this.skillFilePath(input.name);
       const content = serializeAgentSkillMarkdown({}, input);
       try {
         await this.files.writeManagedFile(filePath, content);
@@ -175,8 +199,8 @@ export class AgentSkillRepository {
         return this.#documentFromRaw(input.name, content);
       }
 
-      const oldDirectory = packagePath(previousName);
-      const newDirectory = packagePath(input.name);
+      const oldDirectory = this.packagePath(previousName);
+      const newDirectory = this.packagePath(input.name);
       try {
         await this.files.relocateManagedPackageNoReplace(oldDirectory, newDirectory);
       } catch (error) {
@@ -192,7 +216,7 @@ export class AgentSkillRepository {
         throw error;
       }
 
-      const newFilePath = skillFilePath(input.name);
+      const newFilePath = this.skillFilePath(input.name);
       try {
         await this.files.writeManagedFile(newFilePath, content);
       } catch (error) {
@@ -227,7 +251,7 @@ export class AgentSkillRepository {
       if (current.revision !== expectedRevision) {
         throw new AgentSkillRevisionConflictError(name);
       }
-      const directory = packagePath(name);
+      const directory = this.packagePath(name);
       await this.files.verifyManagedPath(directory, { expectedType: 'folder' });
       await this.files.trash(directory);
     });
@@ -247,8 +271,8 @@ export class AgentSkillRepository {
     raw: string;
   }> {
     this.#assertValidName(name);
-    const directoryPath = packagePath(name);
-    const filePath = skillFilePath(name);
+    const directoryPath = this.packagePath(name);
+    const filePath = this.skillFilePath(name);
     await this.files.verifyManagedPath(directoryPath, { expectedType: 'folder' });
     await this.files.verifyManagedPath(filePath, { expectedType: 'file' });
     const raw = await this.files.readManagedFile(filePath);
@@ -265,8 +289,8 @@ export class AgentSkillRepository {
     }
     return {
       ...parsed,
-      directoryPath: packagePath(name),
-      filePath: skillFilePath(name),
+      directoryPath: this.packagePath(name),
+      filePath: this.skillFilePath(name),
       revision: digest(raw),
     };
   }

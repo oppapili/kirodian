@@ -47,3 +47,29 @@ describe('ClaudianSettingTab model option updates', () => {
     );
   });
 });
+
+describe('ClaudianSettingTab agent-skill coordinator selection', () => {
+  function makeTab() {
+    const plugin = {
+      notifyAgentSkillsChanged: jest.fn(),
+      storage: { getAdapter: jest.fn(() => ({})) },
+    };
+    return new ClaudianSettingTab({} as any, plugin as any);
+  }
+
+  it('reuses one coordinator per skills root', () => {
+    const tab = makeTab() as any;
+    const first = tab.getAgentSkillCoordinator('.agents/skills');
+    const second = tab.getAgentSkillCoordinator('.agents/skills');
+    expect(second).toBe(first);
+  });
+
+  it('gives the Kiro root a distinct coordinator from the shared default root', () => {
+    const tab = makeTab() as any;
+    const shared = tab.getAgentSkillCoordinator('.agents/skills');
+    const kiro = tab.getAgentSkillCoordinator('.kiro/skills');
+    expect(kiro).not.toBe(shared);
+    // Each root is still cached independently.
+    expect(tab.getAgentSkillCoordinator('.kiro/skills')).toBe(kiro);
+  });
+});
