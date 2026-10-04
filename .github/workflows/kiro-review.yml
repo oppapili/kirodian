@@ -30,7 +30,20 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Check API key
+        id: check
+        env:
+          KIRO_API_KEY: ${{ secrets.KIRO_API_KEY }}
+        run: |
+          if [ -n "$KIRO_API_KEY" ]; then
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::KIRO_API_KEY not set; skipping Kiro review."
+          fi
+
       - name: Run Kiro CLI Review
+        if: steps.check.outputs.has_key == 'true'
         uses: konippi/kiro-cli-review-action@1c11ef476d5722d06a0c702a041e6393c8d5310d # v1.0.1
         with:
           kiro_api_key: ${{ secrets.KIRO_API_KEY }}
