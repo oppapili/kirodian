@@ -633,7 +633,10 @@ RewindableExecutionSession {
           ...(request?.configuration.model
             ? { newModelId: decodeKiroModelId(request.configuration.model) ?? undefined }
             : {}),
-          sourceCwd: resolveKiroSessionCwd(state.forkSourceSessionDirectory)
+          sourceCwd: resolveKiroSessionCwd(
+            state.forkSourceSessionDirectory,
+            state.forkSource.sessionId,
+          )
             ?? this.config.vaultWorkingDirectory,
           sourceSessionId: state.forkSource.sessionId,
           targetPromptIndex,

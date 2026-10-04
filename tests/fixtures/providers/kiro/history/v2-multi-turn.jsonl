@@ -1,0 +1,10 @@
+{"version":"v1","kind":"Prompt","data":{"message_id":"prompt-1","content":[{"kind":"text","data":"Inspect the sample file."}],"meta":{"timestamp":1700000000}}}
+{"version":"v1","kind":"AssistantMessage","data":{"message_id":"assistant-1","content":[{"kind":"thinking","data":{"text":"I will read it.","signature":null,"redactedContent":[]}},{"kind":"thinking","data":{"text":"","signature":null,"redactedContent":[1,2,3]}},{"kind":"toolUse","data":{"toolUseId":"tool-1","name":"read_file","input":{"path":"notes/sample.md"}}},{"kind":"text","data":"Done."}]}}
+{"version":"v1","kind":"ToolResults","data":{"message_id":"results-1","content":[{"kind":"toolResult","data":{"toolUseId":"tool-1","content":[{"kind":"text","data":"sample text"}]}}]}}
+not-json-garbage-line
+{"version":"v1","kind":"UnknownKind","data":{"message_id":"ignored-1","content":[]}}
+{"version":"v1","kind":"Prompt","data":{"message_id":"prompt-2","content":[{"kind":"text","data":"Run a search."}],"meta":{"timestamp":1700000100}}}
+{"version":"v1","kind":"AssistantMessage","data":{"message_id":"assistant-2","content":[{"kind":"toolUse","data":{"toolUseId":"tool-2","name":"grep","input":{"pattern":"foo","path":"src"}}},{"kind":"text","data":"Found it."}]}}
+{"version":"v1","kind":"ToolResults","data":{"message_id":"results-2","content":[{"kind":"toolResult","data":{"toolUseId":"tool-2","content":[{"kind":"json","data":{"numMatches":2,"numFiles":1}}]}}]}}
+{"version":"v1","kind":"Prompt","data":{"message_id":"prompt-3","content":[{"kind":"text","data":"Just chat, no tools."}],"meta":{"timestamp":1700000200}}}
+{"version":"v1","kind":"AssistantMessage","data":{"message_id":"assistant-3","content":[{"kind":"text","data":"Okay."}]}}
