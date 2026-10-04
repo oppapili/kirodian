@@ -20,6 +20,7 @@ import type {
   SubagentInfo,
   ToolCallInfo,
 } from '../../../core/types';
+import { BRAND_NAME } from '../../../i18n/constants';
 import { t } from '../../../i18n/i18n';
 import { enhanceRenderedCodeFence } from '../../../shared/components/CopyableCodeFence';
 import { extractUserDisplayContent } from '../../../utils/context';
@@ -485,7 +486,7 @@ export class MessageRenderer {
     textEl.appendText(' ');
     textEl.createSpan({
       cls: 'claudian-interrupted-hint',
-      text: '\u00B7 What should Claudian do instead?',
+      text: `\u00B7 What should ${BRAND_NAME} do instead?`,
     });
   }
 

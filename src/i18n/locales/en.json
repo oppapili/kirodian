@@ -24,7 +24,7 @@
   },
   "chat": {
     "selectAvailableModel": "Select an available model before sending.",
-    "selectAvailableTitleModel": "Select an available title model in Claudian settings.",
+    "selectAvailableTitleModel": "Select an available title model in Kirodian settings.",
     "rewind": {
       "confirmMessage": "Rewind to this point? File changes after this message may be overwritten or removed. This cannot be undone.",
       "confirmMessageConflicts": "Rewind to this point? {count} file(s) were modified outside the agent and will be overwritten:\n{files}",
@@ -88,7 +88,7 @@
     }
   },
   "settings": {
-    "title": "Claudian Settings",
+    "title": "Kirodian Settings",
     "tabs": {
       "general": "General",
       "providers": "Providers",
@@ -103,7 +103,7 @@
     "models": "Models",
     "experimental": "Experimental",
     "userName": {
-      "name": "What should Claudian call you?",
+      "name": "What should Kirodian call you?",
       "desc": "Your name for personalized greetings (leave empty for generic greetings)"
     },
     "excludedTags": {
@@ -163,7 +163,7 @@
     },
     "hiddenSlashCommands": {
       "name": "Hidden Commands and Skills",
-      "desc": "Hide specific commands and skills from the dropdown. Useful for hiding Claude Code entries that are not relevant to Claudian. Enter names without the leading slash, one per line.",
+      "desc": "Hide specific commands and skills from the dropdown. Useful for hiding Claude Code entries that are not relevant to Kirodian. Enter names without the leading slash, one per line.",
       "placeholder": "commit\nbuild\ntest"
     },
     "safety": "Safety",
@@ -258,7 +258,7 @@
       "desc": "Show Write and Edit diffs expanded when they first appear."
     },
     "chatViewPlacement": {
-      "name": "Open Claudian in",
+      "name": "Open Kirodian in",
       "desc": "Choose where the chat panel opens when it is created",
       "rightSidebar": "Right sidebar",
       "leftSidebar": "Left sidebar",
@@ -292,7 +292,7 @@
     "providerEnablement": {
       "name": "Enable {provider}",
       "desc": "Make enabled {provider} models available for new conversations. Existing sessions are preserved when disabled.",
-      "lastProviderWarning": "At least one provider must remain enabled for Claudian to work.",
+      "lastProviderWarning": "At least one provider must remain enabled for Kirodian to work.",
       "noModelsWarning": "No {provider} models are enabled. Go to Models below and enable at least one model."
     },
     "claude": {
@@ -306,7 +306,7 @@
     "codex": {
       "installationMethod": {
         "name": "Installation method",
-        "desc": "How Claudian should launch Codex on Windows. Native Windows uses a Windows executable path. WSL launches the Linux CLI inside a selected distro.",
+        "desc": "How Kirodian should launch Codex on Windows. Native Windows uses a Windows executable path. WSL launches the Linux CLI inside a selected distro.",
         "nativeWindows": "Native Windows",
         "wsl": "WSL"
       },

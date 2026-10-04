@@ -13,6 +13,7 @@ import { getHiddenProviderCommandSet } from '../../core/providers/commands/hidde
 import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
 import { type AppTabManagerState, DEFAULT_CHAT_PROVIDER_ID, type ProviderId } from '../../core/providers/types';
 import { type ConversationMeta, VIEW_TYPE_CLAUDIAN } from '../../core/types';
+import { BRAND_NAME } from '../../i18n/constants';
 import {
   cancelScheduledAnimationFrame,
   scheduleAnimationFrame,
@@ -169,7 +170,7 @@ export class ClaudianView extends ItemView {
   }
 
   getDisplayText(): string {
-    return 'Claudian';
+    return BRAND_NAME;
   }
 
   getIcon(): string {

@@ -16,6 +16,7 @@ import type {
   ChatViewPlacement,
   DualPaneSide,
 } from '../../core/types/settings';
+import { BRAND_NAME } from '../../i18n/constants';
 import { getAvailableLocales, getLocaleDisplayName, setLocale, t } from '../../i18n/i18n';
 import type { Locale, TranslationKey } from '../../i18n/types';
 import { renderEnvironmentSettingsSection } from '../../shared/settings/EnvironmentSettingsSection';
@@ -81,7 +82,7 @@ function openHotkeySettings(app: App): void {
       return;
     }
 
-    searchEl.value = 'Claudian';
+    searchEl.value = BRAND_NAME;
     tab.updateHotkeyVisibility?.();
   }, 100);
 }
@@ -154,7 +155,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
 
   getSettingDefinitions(): SettingDefinitionItem[] {
     return [{
-      name: 'Claudian',
+      name: BRAND_NAME,
       searchable: false,
       render: setting => this.renderSettings(setting.settingEl),
     }];

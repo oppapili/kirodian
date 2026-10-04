@@ -2635,7 +2635,7 @@ describe('ClaudianPlugin', () => {
 
       expect(plugin.addRibbonIcon).toHaveBeenCalledWith(
         'bot',
-        'Open Claudian',
+        'Open Kirodian',
         expect.any(Function),
       );
       const ribbonCallback = (plugin.addRibbonIcon as jest.Mock).mock.calls[0][2];
