@@ -18,9 +18,9 @@
 > Based on Claudian v2.3.4
 > ```
 >
-> The rest of this README is inherited from Claudian and describes the shared plugin.
+> The rest of this README has been adjusted for Kirodian; the shared plugin foundation it describes is inherited from Claudian.
 
-An Obsidian plugin that embeds AI coding agents (Claude Code, Codex, Grok, Opencode, Pi, and more to come) in your vault. Your vault becomes the agent's working directory — file read/write, search, bash, and multi-step workflows all work out of the box. Visit [claudian.md](https://claudian.md/) to learn more.
+An Obsidian plugin that embeds AI coding agents (Claude Code, Codex, Grok, Opencode, Pi, and more to come) in your vault. Your vault becomes the agent's working directory — file read/write, search, bash, and multi-step workflows all work out of the box. Kirodian is based on Claudian — see [claudian.md](https://claudian.md/) for more about the upstream project.
 
 ## Features & Usage
 
@@ -38,8 +38,6 @@ Open the chat sidebar from the ribbon icon or command palette. Select text and u
 
 **Tabs & Session Management** — Use multiple tabs in single-panel mode or a persistent session manager beside the chat in dual-pane mode.
 
-**Collaboration** — Collab is now a standalone plugin. See [Claudian Collab](https://github.com/YishenTu/claudian-collab).
-
 ## Requirements
 
 - At least one of the following harnesses:
@@ -52,14 +50,14 @@ Open the chat sidebar from the ribbon icon or command palette. Select text and u
 - Obsidian v1.13.0+
 - Desktop only (macOS, Linux, Windows)
 
-Claudian now supports OpenCode v2, OpenCode v1 support will end on October 30, 2026. See the [OpenCode v2 migration guide](https://opencode.ai/v2/docs/migrate-v1).
+Kirodian supports OpenCode v2; OpenCode v1 support will end on October 30, 2026. See the [OpenCode v2 migration guide](https://opencode.ai/v2/docs/migrate-v1).
 
 ## Installation
 
 ### From Obsidian Community Plugins (recommended)
 
 1. Open Obsidian → Settings → Community plugins → Browse
-2. Search for "Claudian" and click Install
+2. Search for "Kirodian" and click Install
 3. Enable the plugin
 
 Or install directly from the [community plugin page](https://community.obsidian.md/plugins/realclaudian).
@@ -69,8 +67,8 @@ Or install directly from the [community plugin page](https://community.obsidian.
 1. Clone this repository into your vault's plugins folder:
    ```bash
    cd /path/to/vault/.obsidian/plugins
-   git clone https://github.com/YishenTu/claudian.git
-   cd claudian
+   git clone https://github.com/oppapili/kirodian.git
+   cd kirodian
    ```
 
 2. Install dependencies and build:
@@ -80,7 +78,7 @@ Or install directly from the [community plugin page](https://community.obsidian.
    ```
 
 3. Enable the plugin in Obsidian:
-   - Settings → Community plugins → Enable "Claudian"
+   - Settings → Community plugins → Enable "Kirodian"
 
 ### Development
 
@@ -95,7 +93,7 @@ npm run build
 ## Privacy & Data Use
 
 - **Sent to API**: Your input, attached files, images, and tool call outputs. Depending on the selected provider, data is sent to Anthropic (Claude), OpenAI (Codex), xAI (Grok), or the providers configured in OpenCode or Pi. The destination can be configured through provider settings and environment variables.
-- **No telemetry or unsolicited background activity**: Claudian does not run telemetry beacons. UI polling timers read local Obsidian/editor selection state only. Network activity is limited to explicit provider runtime work, configured MCP endpoints, provider SDK/CLI calls needed to answer your requests, and their configured services.
+- **No telemetry or unsolicited background activity**: Kirodian does not run telemetry beacons. UI polling timers read local Obsidian/editor selection state only. Network activity is limited to explicit provider runtime work, configured MCP endpoints, provider SDK/CLI calls needed to answer your requests, and their configured services.
 
 ## Troubleshooting
 
@@ -103,9 +101,9 @@ The following sections use Claude Code as an example.
 
 ### Provider CLI not found
 
-If Claudian cannot auto-detect a provider CLI, verify that the CLI is installed and available to GUI applications through PATH. Typical errors include `spawn claude ENOENT` and `Claude CLI not found`. This issue is common with Node version managers (nvm, fnm, volta).
+If Kirodian cannot auto-detect a provider CLI, verify that the CLI is installed and available to GUI applications through PATH. Typical errors include `spawn claude ENOENT` and `Claude CLI not found`. This issue is common with Node version managers (nvm, fnm, volta).
 
-Leave the CLI path setting empty first so Claudian can auto-detect the CLI. If auto-detection fails, find the executable path and set it in Settings → Advanced → Claude CLI path.
+Leave the CLI path setting empty first so Kirodian can auto-detect the CLI. If auto-detection fails, find the executable path and set it in Settings → Advanced → Claude CLI path.
 
 | Platform | Command | Example Path |
 |----------|---------|--------------|
@@ -135,7 +133,7 @@ Either:
 
 ### More help
 
-For provider-specific installation and configuration guidance, refer to the provider documentation linked in the [Requirements](#requirements) section. If you have a feature request or run into a bug, please [submit a GitHub issue](https://github.com/YishenTu/claudian/issues).
+For provider-specific installation and configuration guidance, refer to the provider documentation linked in the [Requirements](#requirements) section. If you have a feature request or run into a bug, please [submit a GitHub issue](https://github.com/oppapili/kirodian/issues).
 
 ## Architecture
 
