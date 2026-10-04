@@ -66,6 +66,9 @@ issue #34。この文書は Kiro が常時参照する運用指示であり、�
   本リポは `v` なしタグ運用のため、`npm version` 既定の `v` 付きタグ自動生成を
   `--no-git-tag-version` で切る。`scripts/sync-version.js` が `manifest.json` と
   `versions.json` を自動更新・ステージする（正式版と同じ）。
+  なお `npm version prerelease` は**パッチ系列**を生成する（`0.2.0` →
+  `0.2.1-beta.0`）。次のマイナーβ（例 `0.3.0-beta.1`）にしたいときは
+  **バージョン文字列を明示指定**する: `npm version 0.3.0-beta.1 --no-git-tag-version`。
 - **マージとタグ**: 版上げ変更は PR 化して `main` にマージする（保護ブランチへの
   直 push 不可）。マージ後の最新 `main` で `v` なしタグ（例 `0.3.0-beta.1`）を打って
   push するのが Release 発火トリガ。タグ push はユーザが手動で行う（KiroCrew の
