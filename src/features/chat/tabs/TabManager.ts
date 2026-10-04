@@ -1094,6 +1094,7 @@ export class TabManager implements TabManagerInterface {
       text: error instanceof Error ? error.message : 'Failed to load conversation',
     });
     const retryButton = statusEl.createEl('button', {
+      attr: { type: 'button' },
       cls: 'mod-cta claudian-tab-hydration-retry',
       text: 'Retry',
     });
