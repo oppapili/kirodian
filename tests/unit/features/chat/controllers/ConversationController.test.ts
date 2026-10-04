@@ -108,7 +108,7 @@ describe('ConversationController', () => {
         expect(deps.clearQueuedMessage).toHaveBeenCalled();
         expect(linkedContentController.resetAutoDraft).toHaveBeenCalled();
         const welcomeEl = deps.getWelcomeEl()!;
-        expect(welcomeEl.querySelector('.claudian-welcome-brand')?.textContent).toBe('Claudian');
+        expect(welcomeEl.querySelector('.claudian-welcome-brand')?.textContent).toBe('Kirodian');
         expect(welcomeEl.querySelector('.claudian-welcome-greeting')).not.toBeNull();
         expect(deps.plugin.createConversation).not.toHaveBeenCalled();
         expect(deps.plugin.switchConversation).not.toHaveBeenCalled();

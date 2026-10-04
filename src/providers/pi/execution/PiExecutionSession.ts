@@ -31,6 +31,7 @@ import type {
   StreamChunk,
   TurnStats,
 } from '../../../core/types';
+import { BRAND_NAME } from '../../../i18n/constants';
 import { appendBrowserContext } from '../../../utils/browser';
 import { appendCanvasContext } from '../../../utils/canvas';
 import {
@@ -1454,7 +1455,7 @@ function resolveSelectedModel(
     || !settings.visibleModels.includes(model)
   ) {
     throw new PiConfigurationError(
-      'No Pi model is selected. Enable a discovered model in Claudian settings.',
+      `No Pi model is selected. Enable a discovered model in ${BRAND_NAME} settings.`,
     );
   }
   return model;

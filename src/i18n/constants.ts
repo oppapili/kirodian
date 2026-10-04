@@ -7,6 +7,13 @@
 import type { Locale } from './types';
 
 /**
+ * User-visible brand name shown in the UI (view/tab title, welcome screen,
+ * ribbon tooltip, notices, settings heading). Single source of truth so a
+ * fork rebrand touches one constant instead of scattered string literals.
+ */
+export const BRAND_NAME = 'Kirodian';
+
+/**
  * Supported locales with metadata
  */
 export interface LocaleInfo {

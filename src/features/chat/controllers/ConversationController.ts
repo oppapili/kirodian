@@ -12,6 +12,7 @@ import type {
   ConversationMutablePatch,
   ProviderId,
 } from '../../../core/types';
+import { BRAND_NAME } from '../../../i18n/constants';
 import { t } from '../../../i18n/i18n';
 import { confirm } from '../../../shared/modals/ConfirmModal';
 import { extractUserDisplayContent } from '../../../utils/context';
@@ -571,7 +572,7 @@ export class ConversationController {
     // Time-specific greetings
     const getTimeGreetings = (): string[] => {
       if (hour >= 5 && hour < 12) {
-        return [personalize('Good morning'), 'Coffee and Claudian time?'];
+        return [personalize('Good morning'), `Coffee and ${BRAND_NAME} time?`];
       } else if (hour >= 12 && hour < 18) {
         return [personalize('Good afternoon'), personalize('Hey there'), personalize("How's it going") + '?'];
       } else if (hour >= 18 && hour < 22) {

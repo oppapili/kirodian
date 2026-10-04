@@ -24,7 +24,7 @@
   },
   "chat": {
     "selectAvailableModel": "Selecciona un modelo disponible antes de enviar.",
-    "selectAvailableTitleModel": "Selecciona un modelo de títulos disponible en los ajustes de Claudian.",
+    "selectAvailableTitleModel": "Selecciona un modelo de títulos disponible en los ajustes de Kirodian.",
     "rewind": {
       "confirmMessage": "¿Rebobinar a este punto? Los cambios de archivos posteriores a este mensaje podrían sobrescribirse o eliminarse. Esta acción no se puede deshacer.",
       "confirmMessageConflicts": "¿Rebobinar a este punto? Se sobrescribirán {count} archivo(s) modificados fuera del agente:\n{files}",
@@ -88,7 +88,7 @@
     }
   },
   "settings": {
-    "title": "Configuración de Claudian",
+    "title": "Configuración de Kirodian",
     "tabs": {
       "general": "General",
       "providers": "Proveedores",
@@ -103,7 +103,7 @@
     "models": "Modelos",
     "experimental": "Experimental",
     "userName": {
-      "name": "¿Cómo debería Claudian llamarte?",
+      "name": "¿Cómo debería Kirodian llamarte?",
       "desc": "Tu nombre para saludos personalizados (dejar vacío para saludos genéricos)"
     },
     "excludedTags": {
@@ -163,7 +163,7 @@
     },
     "hiddenSlashCommands": {
       "name": "Comandos y habilidades ocultos",
-      "desc": "Oculta comandos y habilidades específicos del menú desplegable. Útil para ocultar entradas de Claude Code que no son relevantes para Claudian. Ingresa los nombres sin la barra inicial, uno por línea.",
+      "desc": "Oculta comandos y habilidades específicos del menú desplegable. Útil para ocultar entradas de Claude Code que no son relevantes para Kirodian. Ingresa los nombres sin la barra inicial, uno por línea.",
       "placeholder": "commit\nbuild\ntest"
     },
     "safety": "Seguridad",
@@ -258,7 +258,7 @@
       "desc": "Mostrar los diffs de Write y Edit expandidos cuando aparecen por primera vez."
     },
     "chatViewPlacement": {
-      "name": "Abrir Claudian en",
+      "name": "Abrir Kirodian en",
       "desc": "Elige dónde se abre el panel de chat cuando se crea",
       "rightSidebar": "Barra lateral derecha",
       "leftSidebar": "Barra lateral izquierda",
@@ -292,7 +292,7 @@
     "providerEnablement": {
       "name": "Activar {provider}",
       "desc": "Hacer que los modelos de {provider} activados estén disponibles para conversaciones nuevas. Las sesiones existentes se conservan al desactivar el proveedor.",
-      "lastProviderWarning": "Debe haber al menos un proveedor habilitado para que Claudian funcione.",
+      "lastProviderWarning": "Debe haber al menos un proveedor habilitado para que Kirodian funcione.",
       "noModelsWarning": "No hay modelos de {provider} activados. Ve a Modelos más abajo y activa al menos uno."
     },
     "claude": {
@@ -306,7 +306,7 @@
     "codex": {
       "installationMethod": {
         "name": "Método de instalación",
-        "desc": "Cómo debe iniciar Claudian Codex en Windows. Windows nativo usa una ruta de ejecutable de Windows. WSL inicia la CLI de Linux dentro de una distribución seleccionada.",
+        "desc": "Cómo debe iniciar Kirodian Codex en Windows. Windows nativo usa una ruta de ejecutable de Windows. WSL inicia la CLI de Linux dentro de una distribución seleccionada.",
         "nativeWindows": "Windows nativo",
         "wsl": "WSL"
       },

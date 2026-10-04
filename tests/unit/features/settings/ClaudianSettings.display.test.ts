@@ -329,7 +329,7 @@ describe('ClaudianSettingTab display settings', () => {
     const [definition] = tab.getSettingDefinitions();
 
     expect(definition).toEqual(expect.objectContaining({
-      name: 'Claudian',
+      name: 'Kirodian',
       searchable: false,
     }));
     expect(Object.hasOwn(ClaudianSettingTab.prototype, 'display')).toBe(false);

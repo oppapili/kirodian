@@ -13,6 +13,7 @@ import type {
   ProviderChatUIConfig,
   ProviderId,
 } from '../../../../core/providers/types';
+import { BRAND_NAME } from '../../../../i18n/constants';
 import { getChatSettingsSnapshot } from '../../ChatSettings';
 import { MainChatComposerDropdown } from '../../composer/MainChatComposerDropdown';
 import { LinkedContentController } from '../../linked-content';
@@ -233,7 +234,7 @@ function buildInputToolbar(
           plugin.settings,
         );
         if (!newProvider) {
-          new Notice('Select an available model in Claudian settings.');
+          new Notice(`Select an available model in ${BRAND_NAME} settings.`);
           tab.ui.modelSelector.updateDisplay();
           return;
         }
