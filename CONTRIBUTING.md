@@ -1,4 +1,4 @@
-# Contributing to Claudian
+# Contributing to Kirodian
 
 Issues and pull requests are welcome. Issues are the preferred way to contribute: if you describe the problem and your environment clearly, I will review it and make a best effort to address it.
 
@@ -15,7 +15,7 @@ A useful issue explains the problem well enough for someone else to understand a
 - What you were trying to do.
 - What happened and what you expected instead.
 - Clear reproduction steps or a minimal example.
-- Your Claudian version, Obsidian version, operating system, provider, provider CLI version, and installation method.
+- Your Kirodian version, Obsidian version, operating system, provider, provider CLI version, and installation method.
 - Relevant logs, screenshots, or recordings.
 
 Remove API keys, tokens, private vault content, personal paths, and other sensitive information before attaching logs or screenshots.
@@ -57,7 +57,7 @@ Contributions that improve an existing provider are welcome when they follow the
 
 ## Development
 
-Claudian requires the Node.js version declared in `.node-version`.
+Kirodian requires the Node.js version declared in `.node-version`.
 
 ```bash
 npm install
