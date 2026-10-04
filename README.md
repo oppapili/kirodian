@@ -176,6 +176,18 @@ Issues and focused pull requests are welcome. Issues are the preferred starting 
 
 Before opening a pull request, please read the [contribution guide](CONTRIBUTING.md). Pull requests must explain the problem, the proposed solution, why the approach is appropriate, and how the change was validated. Pull requests that add a new provider are not accepted; the guide explains this maintenance and product-quality boundary in detail.
 
+### AI code review (@kiro)
+
+This repository has an on-demand AI code review workflow (`.github/workflows/kiro-review.yml`). Comment `@kiro` on a pull request and Kiro CLI reviews it. There is no automatic trigger; it runs only when you ask.
+
+If you work from a fork and want the review in your own repository, set a `KIRO_API_KEY` secret on the fork (a Kiro **Pro / Pro+ / Power** subscription is required — the free tier does not work):
+
+```bash
+gh secret set KIRO_API_KEY --repo <your-account>/kirodian
+```
+
+Secrets are not inherited from the upstream repository, so a fork without its own `KIRO_API_KEY` simply skips the review (the CI stays green). See [CONTRIBUTING.md](CONTRIBUTING.md) for the full setup.
+
 ## License
 
 Licensed under the [MIT License](LICENSE).
