@@ -40,6 +40,40 @@ Please also:
 - Avoid new production dependencies unless the need and tradeoff are explicit.
 - Update documentation when behavior or user-facing configuration changes.
 
+## Code Review (@kiro)
+
+This repository runs an on-demand AI code review powered by Kiro CLI
+(`.github/workflows/kiro-review.yml`). It is **advisory** — a helper, not a
+required check. The quality gate remains human review plus the `ci.yml` checks
+(typecheck, lint, test, build, performance).
+
+### Using it
+
+Comment `@kiro` on a pull request. The workflow runs Kiro CLI against the PR diff
+and posts its review. There is no automatic trigger — the review runs only when
+you ask for it with a comment.
+
+### Enabling it on a fork
+
+The workflow needs a `KIRO_API_KEY` secret, which is **not** inherited from the
+upstream repository. Without it the review step skips and CI stays green, so a
+fork does nothing until you opt in:
+
+1. Obtain a Kiro CLI API key. A Kiro **Pro / Pro+ / Power** subscription is
+   required; the free tier cannot run the review.
+2. Add the key as an Actions secret on your fork, either via the CLI:
+
+   ```bash
+   gh secret set KIRO_API_KEY --repo <your-account>/kirodian
+   ```
+
+   or in the GitHub UI under **Settings → Secrets and variables → Actions → New
+   repository secret**, named `KIRO_API_KEY`.
+3. Open a pull request on your fork and comment `@kiro` to trigger a review.
+
+The review agent is defined by `.kiro/agents/code-reviewer.json` on the default
+branch (read-only tools; it cannot write files or run shell commands).
+
 ## Versioning & Releases
 
 Kirodian is a fork of Claudian and versions independently. Claudian-derived tag
