@@ -54,13 +54,17 @@ Kirodian supports OpenCode v2; OpenCode v1 support will end on October 30, 2026.
 
 ## Installation
 
-### From Obsidian Community Plugins (recommended)
+### Via BRAT (recommended)
 
-1. Open Obsidian → Settings → Community plugins → Browse
-2. Search for "Kirodian" and click Install
-3. Enable the plugin
+Kirodian is not yet in the Obsidian community plugin registry, so updates are delivered through [BRAT](https://github.com/TfTHacker/obsidian42-brat) (Beta Reviewer's Auto-update Tool), which tracks this repository's GitHub Releases.
 
-Or install directly from the [community plugin page](https://community.obsidian.md/plugins/realclaudian).
+1. Install **BRAT** from Obsidian → Settings → Community plugins → Browse → search "BRAT".
+2. In BRAT settings, choose **Add Beta Plugin** and enter `oppapili/kirodian`.
+3. Enable **Kirodian** in Settings → Community plugins.
+
+BRAT keeps Kirodian up to date from this repo's Releases. Do not install from the Claudian community page — that updates to Claudian, not Kirodian.
+
+> **Upgrading from a manual install:** if an older `realclaudian` or hand-copied folder exists under `.obsidian/plugins/`, remove it first. A leftover copy causes duplicate entries and can trigger the wrong update source. Kirodian installs under `.obsidian/plugins/kirodian/`.
 
 ### From source (development)
 
