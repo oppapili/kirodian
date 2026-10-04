@@ -72,10 +72,22 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Resolve upstream Claudian version
+        id: upstream
+        run: |
+          CLAUDIAN_VERSION=$(node -p "require('./package.json').claudianVersion || ''")
+          if [ -z "$CLAUDIAN_VERSION" ]; then
+            echo "package.json is missing the required \"claudianVersion\" field." >&2
+            exit 1
+          fi
+          echo "version=$CLAUDIAN_VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           body: |
+            > Based on Claudian v${{ steps.upstream.outputs.version }}
+
             ## What's Changed
             ${{ steps.changelog.outputs.notes }}
 

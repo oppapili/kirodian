@@ -1,6 +1,7 @@
 {
   "name": "kirodian",
   "version": "0.2.0",
+  "claudianVersion": "2.3.4",
   "description": "Kirodian - Kiro CLI and other coding agents embedded in Obsidian (fork of Claudian)",
   "main": "main.js",
   "engines": {
