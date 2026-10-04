@@ -96,11 +96,32 @@ export const GROK_PROVIDER_ICON: ProviderIconSvg = {
   path: 'M3.25 3h4.18l4.8 6.64L17.88 3h3.17l-7.36 8.65L20.44 21h-4.18l-5.16-7.14L5.02 21H1.85l7.79-9.16L3.25 3Zm3.03 1.7 10.85 14.6h1.28L7.56 4.7H6.28Z',
 };
 
-// Placeholder Kiro mark: a stylized "K". Replace with the official Kiro logo path
-// when finalizing branding.
+// Official Kiro logo (single-colour mark). The source art is drawn in a 75x100
+// viewBox and positioned by a matrix transform, so it is emitted as a composite
+// icon: a <g transform> wrapping the path preserves that placement. The path
+// fills with currentColor so the mark follows the surrounding text colour.
 export const KIRO_PROVIDER_ICON: ProviderIconSvg = {
-  viewBox: '0 0 24 24',
-  path: 'M5 3h3v7.2L15.2 3H19l-7 7 7.4 11H15.6l-5.6-8.6L8 14.4V21H5V3Z',
+  kind: 'composite',
+  viewBox: '0 0 75 100',
+  children: [
+    {
+      tag: 'g',
+      attributes: {
+        transform: 'matrix(3.800695,0,0,4.166604,-7.598366,0.001061)',
+      },
+      children: [
+        {
+          tag: 'path',
+          attributes: {
+            d: 'M4.594,6.677C6.67,-2.226 18.746,-2.211 21.16,6.632C21.513,7.929 22.885,14.214 19.487,20.379C17.942,23.176 13.646,25.869 12.497,22.262C8.6,25.477 3.315,24.1 5.789,18.609L5.471,18.752C1.901,20.057 1.608,17.544 2.298,16.239C2.748,15.399 3.025,14.904 3.235,14.342C3.588,13.367 3.693,12.774 3.828,11.844C4.098,10.007 4.105,8.237 4.593,6.677L4.594,6.677ZM12.964,6.687C12.638,6.676 12.329,6.839 12.154,7.115C11.937,7.438 11.824,7.94 11.824,8.577C11.824,9.282 11.974,10.467 12.964,10.467L12.972,10.467C13.729,10.467 14.186,9.762 14.186,8.577C14.186,7.955 14.059,7.452 13.819,7.122C13.625,6.843 13.304,6.68 12.964,6.687ZM17.044,6.687C16.718,6.676 16.409,6.839 16.234,7.115C16.017,7.438 15.904,7.94 15.904,8.577C15.904,9.282 16.054,10.467 17.044,10.467L17.052,10.467C17.809,10.467 18.267,9.762 18.267,8.577C18.267,7.955 18.139,7.452 17.899,7.122C17.705,6.843 17.384,6.68 17.044,6.687Z',
+            fill: 'currentColor',
+            'fill-rule': 'evenodd',
+            'clip-rule': 'evenodd',
+          },
+        },
+      ],
+    },
+  ],
 };
 
 export interface CreateProviderIconSvgOptions {
