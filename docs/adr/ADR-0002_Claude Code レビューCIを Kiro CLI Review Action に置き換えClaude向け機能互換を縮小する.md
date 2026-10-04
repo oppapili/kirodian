@@ -60,6 +60,32 @@ Kirodian は Kiro CLI を Agent backend として組み込む Obsidian プラグ
   観点（AGENTS.md / steering 準拠）へのカスタムは将来別 issue で `.kiro/agents/
   code-reviewer.json` を追加して対応できる。
 
+# KIRO_API_KEY 未設定時の挙動と品質ゲートの考え方
+
+`kiro-review.yml` は `KIRO_API_KEY` secret が未設定のとき、`Check API key` ステップで
+検知して Kiro レビューステップを skip する（ジョブは緑のまま）。この skip 設計の意図は
+品質低下ではなく、環境差異の吸収である。
+
+- **意図 1 — fork の暴発防止**: fork では、各自が自分の `KIRO_API_KEY` を設定したときだけ
+  レビューが動く。他人の fork の PR を本家のキー残高で勝手にレビューさせない。
+- **意図 2 — キー無し環境で CI を赤くしない**: Action の `kiro_api_key` は required input の
+  ため、未設定だと required input 欠落で Run ステップが失敗する。ガードで skip して緑に保つ。
+
+これは upstream Claudian がレビュージョブを `if: github.repository == 'YishenTu/claudian'`
+で環境限定していたのと本質的に同じ「環境差異の吸収」であり、品質を落とす目的ではない。
+Kirodian ではリポジトリ名ハードコードをやめ、secret の有無で等価の吸収を行う。
+
+**品質ゲートの所在**: コードの品質ゲートは**人間のレビュー**と `ci.yml`
+（typecheck / lint / test / build / performance）である。kiro-review（AI レビュー）は
+助言・補助であってブロッカーではない。したがって kiro-review は Branch protection の
+required check に**しない**。
+
+**本家 `oppapili/kirodian` の運用**: `KIRO_API_KEY` を Actions secret に設定することを
+推奨する。設定すれば skip は発動せず、AI レビューが常時走る。「未設定時 skip 設計」と
+「本家でレビュー常時実行」は両立する。品質低下が起きうるのは「本家でキーを入れ忘れて
+skip され続ける」ケースのみで、これは secret 設定の推奨と、skip 時の `::notice::` 出力に
+よる可視化で防ぐ。
+
 # 代替案（Alternatives）
 
 - **案 A: 自前の headless Kiro CLI レビューを GitHub Actions 上で実装する。**
