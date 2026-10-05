@@ -121,10 +121,16 @@ jest.mock('@/core/providers/ProviderRegistry', () => ({
     }),
     getBlankTabProviderIds: jest.fn().mockReturnValue(['claude']),
     getEnabledProviderIds: jest.fn().mockReturnValue(['claude']),
+    // Visibility defaults to the enabled set in this harness: tests drive the
+    // visible blank-tab path through getEnabledProviderIds.mockReturnValue(...).
+    getVisibleProviderIds: jest.fn((settings?: unknown) => (
+      (ProviderRegistry.getEnabledProviderIds as jest.Mock)(settings)
+    )),
     getRegisteredProviderIds: jest.fn().mockReturnValue(['claude', 'codex']),
     getProviderDisplayName: jest.fn().mockReturnValue('Claude'),
     getTaskResultInterpreter: jest.fn(),
     isEnabled: jest.fn().mockReturnValue(true),
+    isVisible: jest.fn().mockReturnValue(true),
     resolveProviderForModel: jest.fn().mockReturnValue('claude'),
     resolveSettingsProviderId: jest.fn().mockReturnValue('claude'),
   },

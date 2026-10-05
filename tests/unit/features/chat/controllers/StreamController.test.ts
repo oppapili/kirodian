@@ -72,6 +72,20 @@ jest.mock('@/utils/path', () => ({
 
 const originalWindow = (globalThis as { window?: Window }).window;
 
+function createMemoryLocalStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() {
+      return values.size;
+    },
+    clear: () => values.clear(),
+    getItem: (key: string) => values.get(key) ?? null,
+    key: (index: number) => [...values.keys()][index] ?? null,
+    removeItem: (key: string) => values.delete(key),
+    setItem: (key: string, value: string) => values.set(key, value),
+  } satisfies Storage;
+}
+
 function installTestWindow(): void {
   const testWindow = {
     requestAnimationFrame: (callback: FrameRequestCallback): number =>
@@ -89,6 +103,10 @@ function installTestWindow(): void {
     clearInterval: (handle: number): void => {
       globalThis.clearInterval(handle as unknown as ReturnType<typeof setInterval>);
     },
+    // The default chat provider is now kiro, whose isEnabled reads a persisted
+    // device-settings seed from window.localStorage during provider resolution.
+    // The bare test window must expose one or resolution throws.
+    localStorage: createMemoryLocalStorage(),
   } as Window;
 
   Object.defineProperty(globalThis, 'window', {

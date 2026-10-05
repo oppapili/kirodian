@@ -7,6 +7,7 @@ import { axe } from 'jest-axe';
 import { MarkdownRenderer } from 'obsidian';
 
 import type { ProviderBackgroundEventScope, ProviderBackgroundOutputEvent } from '@/core/execution';
+import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ChatMessage } from '@/core/types';
 import {
   providerOutputEventToStreamChunk,
@@ -38,11 +39,13 @@ it('renders a native completion and its follow-up through the real chat stream p
   const messagesEl = document.body.createDiv();
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin,
-    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl);
+    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl,
+    undefined, undefined, () => ProviderRegistry.getCapabilities('claude'));
   const state = new ChatState();
-  const subagentManager = new SubagentManager(() => undefined);
+  const subagentManager = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({
     plugin, state, renderer, subagentManager,
+    getProviderId: () => 'claude',
     getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined,
   });
   const message: ChatMessage = {
@@ -95,10 +98,12 @@ it.each([false, true])('shows a session notification immediately with streaming=
   const messagesEl = document.body.createDiv();
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin,
-    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl);
+    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl,
+    undefined, undefined, () => ProviderRegistry.getCapabilities('claude'));
   const state = new ChatState();
-  const subagents = new SubagentManager(() => undefined);
+  const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
+    getProviderId: () => 'claude',
     getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
   const lifecycleRegistry = new ProviderExecutionLifecycleRegistry();
   const backend = new FakeSideBackend();
@@ -164,10 +169,12 @@ it.each(['text', 'image', 'image-only'])('keeps preceding output before a %s pro
   const messagesEl = document.body.createDiv();
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin,
-    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl);
+    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl,
+    undefined, undefined, () => ProviderRegistry.getCapabilities('claude'));
   const state = new ChatState();
-  const subagents = new SubagentManager(() => undefined);
+  const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
+    getProviderId: () => 'claude',
     getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
   const target = reserveBackgroundTurn({ state, renderer, createMessageId: () => 'automatic' });
   const user: ChatMessage = { id: 'followup', role: 'user', timestamp: 2,
@@ -215,10 +222,12 @@ it.each([false, true])('flushes an automatic tool card before stream disposal wi
   const messagesEl = document.body.createDiv();
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin,
-    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl);
+    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl,
+    undefined, undefined, () => ProviderRegistry.getCapabilities('claude'));
   const state = new ChatState();
-  const subagents = new SubagentManager(() => undefined);
+  const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
+    getProviderId: () => 'claude',
     getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
   try {
     await renderAutoTriggeredTurn({ state, renderer, stream, isConnected: () => true, createMessageId: () => 'automatic' }, {
@@ -243,10 +252,12 @@ it.each([false, true])('keeps automatic Agent results across requested settlemen
   const messagesEl = document.body.createDiv();
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin,
-    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl);
+    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl,
+    undefined, undefined, () => ProviderRegistry.getCapabilities('claude'));
   const state = new ChatState();
-  const subagents = new SubagentManager(() => undefined);
+  const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
+    getProviderId: () => 'claude',
     getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
   let entered!: () => void;
   let release!: () => void;
@@ -293,10 +304,12 @@ it.each([false, true])('matches task-notification grouping before and after repl
   const messagesEl = document.body.createDiv();
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin,
-    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl);
+    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl,
+    undefined, undefined, () => ProviderRegistry.getCapabilities('claude'));
   const state = new ChatState();
-  const subagents = new SubagentManager(() => undefined);
+  const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
+    getProviderId: () => 'claude',
     getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
   let id = 0;
   const host = { state, renderer, stream, isConnected: () => true, createMessageId: () => `message-${++id}` };

@@ -177,6 +177,24 @@ describe('ClaudianSettingsStorage', () => {
       expect(writtenContent.lastSelectedChatModel).toBeNull();
     });
 
+    it('drops an explicitly stored selection on a hidden provider', async () => {
+      // A persisted selection written before Claude was hidden is no longer a
+      // valid visible selection; load discards it (migrates to null) and persists.
+      mockAdapter.exists.mockResolvedValue(true);
+      mockAdapter.read.mockResolvedValue(JSON.stringify({
+        lastSelectedChatModel: {
+          providerId: 'claude',
+          model: 'opus',
+        },
+      }));
+
+      const result = await storage.load();
+      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
+
+      expect(result.lastSelectedChatModel).toBeNull();
+      expect(writtenContent.lastSelectedChatModel).toBeNull();
+    });
+
     it('migrates the live top-level model for the stored settings provider', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
@@ -235,7 +253,10 @@ describe('ClaudianSettingsStorage', () => {
       });
     });
 
-    it('preserves a Claude environment-tier alias during legacy migration', async () => {
+    it('coerces a hidden Claude legacy selection to the default provider', async () => {
+      // Claude is hidden post-migration: a legacy settingsProvider pointing at
+      // it must land on the default (kiro), not retain claude. With no kiro
+      // top-level/saved model to carry over, the selection resolves to null.
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         settingsProvider: 'claude',
@@ -244,24 +265,39 @@ describe('ClaudianSettingsStorage', () => {
 
       const result = await storage.load();
 
-      expect(result.lastSelectedChatModel).toEqual({
-        providerId: 'claude',
-        model: 'opus',
-      });
+      expect(result.lastSelectedChatModel).toBeNull();
     });
 
-    it('uses Claude for an unknown legacy provider only when a top-level model exists', async () => {
+    it('coerces a hidden Claude legacy selection to kiro when a kiro model exists', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
-        settingsProvider: 'unknown-provider',
-        model: 'haiku',
+        settingsProvider: 'claude',
+        model: 'opus',
+        savedProviderModel: {
+          kiro: 'kiro/claude-sonnet-4',
+        },
       }));
 
       const result = await storage.load();
 
       expect(result.lastSelectedChatModel).toEqual({
-        providerId: 'claude',
-        model: 'haiku',
+        providerId: 'kiro',
+        model: 'kiro/claude-sonnet-4',
+      });
+    });
+
+    it('uses the default provider for an unknown legacy provider only when a top-level model exists', async () => {
+      mockAdapter.exists.mockResolvedValue(true);
+      mockAdapter.read.mockResolvedValue(JSON.stringify({
+        settingsProvider: 'unknown-provider',
+        model: 'kiro/claude-sonnet-4',
+      }));
+
+      const result = await storage.load();
+
+      expect(result.lastSelectedChatModel).toEqual({
+        providerId: 'kiro',
+        model: 'kiro/claude-sonnet-4',
       });
     });
 
