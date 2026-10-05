@@ -20,11 +20,11 @@
 >
 > The rest of this README has been adjusted for Kirodian; the shared plugin foundation it describes is inherited from Claudian.
 
-An Obsidian plugin that embeds AI coding agents (Claude Code, Codex, Grok, Opencode, Pi, and more to come) in your vault. Your vault becomes the agent's working directory — file read/write, search, bash, and multi-step workflows all work out of the box. Kirodian is based on Claudian — see [claudian.md](https://claudian.md/) for more about the upstream project.
+An Obsidian plugin that embeds AI coding agents (Claude Code and Kiro CLI) in your vault. Your vault becomes the agent's working directory — file read/write, search, bash, and multi-step workflows all work out of the box. Kirodian is based on Claudian — see [claudian.md](https://claudian.md/) for more about the upstream project.
 
 ## Features & Usage
 
-Open the chat sidebar from the ribbon icon or command palette. Select text and use the shortcut for inline editing. Everything works like your familiar coding agent, Claude Code, Codex, Grok, Opencode, and Pi — talk to the agent, and it reads, writes, edits, and searches files in your vault.
+Open the chat sidebar from the ribbon icon or command palette. Select text and use the shortcut for inline editing. Everything works like your familiar coding agent, Claude Code or Kiro CLI — talk to the agent, and it reads, writes, edits, and searches files in your vault.
 
 **Inline Edit** — Select text or start at the cursor position + hotkey to edit directly in notes with word-level diff preview.
 
@@ -42,15 +42,10 @@ Open the chat sidebar from the ribbon icon or command palette. Select text and u
 
 - At least one of the following harnesses:
   - [Claude Code CLI](https://code.claude.com/docs/en/overview)
-  - [Codex CLI](https://github.com/openai/codex)
-  - [Grok Build](https://github.com/xai-org/grok-build)
-  - [OpenCode](https://github.com/anomalyco/opencode)
-  - [Pi](https://github.com/earendil-works/pi)
+  - [Kiro CLI](https://kiro.dev/)
 - A compatible subscription or API provider, such as [OpenRouter](https://openrouter.ai/docs/guides/guides/claude-code-integration), [Kimi](https://platform.kimi.ai/docs/guide/claude-code-kimi), [GLM](https://docs.z.ai/devpack/tool/claude), or [DeepSeek](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code) etc.
 - Obsidian v1.13.0+
 - Desktop only (macOS, Linux, Windows)
-
-Kirodian supports OpenCode v2; OpenCode v1 support will end on October 30, 2026. See the [OpenCode v2 migration guide](https://opencode.ai/v2/docs/migrate-v1).
 
 ## Installation
 
@@ -96,7 +91,7 @@ npm run build
 
 ## Privacy & Data Use
 
-- **Sent to API**: Your input, attached files, images, and tool call outputs. Depending on the selected provider, data is sent to Anthropic (Claude), OpenAI (Codex), xAI (Grok), or the providers configured in OpenCode or Pi. The destination can be configured through provider settings and environment variables.
+- **Sent to API**: Your input, attached files, images, and tool call outputs. Depending on the selected provider, data is sent to Anthropic (Claude) or AWS (Kiro). The destination can be configured through provider settings and environment variables.
 - **No telemetry or unsolicited background activity**: Kirodian does not run telemetry beacons. UI polling timers read local Obsidian/editor selection state only. Network activity is limited to explicit provider runtime work, configured MCP endpoints, provider SDK/CLI calls needed to answer your requests, and their configured services.
 
 ## Troubleshooting
@@ -154,10 +149,7 @@ src/
 │   └── ...                      # commands, prompt, storage, tools, types
 ├── providers/
 │   ├── claude/                  # Claude SDK adaptor, prompt encoding, storage, MCP, plugins
-│   ├── codex/                   # Codex app-server adaptor, JSON-RPC transport, JSONL history
-│   ├── grok/                    # Grok Build ACP adaptor, native history, models, and tools
-│   ├── opencode/                # Opencode adaptor
-│   ├── pi/                      # Pi RPC adaptor, model discovery, JSONL history
+│   ├── kiro/                    # Kiro CLI ACP adaptor, native history, models, and tools
 │   └── acp/                     # Agent Client Protocol shared transport
 ├── features/
 │   ├── chat/                    # Sidebar chat: tabs, controllers, renderers
