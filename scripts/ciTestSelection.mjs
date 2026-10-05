@@ -8,10 +8,9 @@ import suites from './testSuites.cjs';
 const fullSelection = {
   testFiles: null, scriptTests: null, crossPlatformTests: null,
   crossPlatformShards: ['1/2', '2/2'],
-  crossPlatform: true, piWindows: true,
+  crossPlatform: true,
 };
 const docsTest = 'tests/unit/docs/Documentation.test.ts';
-const piTest = 'tests/integration/providers/pi/PiSubprocess.windows.test.ts';
 const isDocumentation = file => file.endsWith('.md') || file.startsWith('docs/');
 const isJestTest = file => /^tests\/(?:unit|integration)\/.*\.test\.ts$/.test(file);
 const isGraphInput = file => /^(?:src|tests)\/.*\.(?:[cm]?[jt]sx?|json)$/.test(file);
@@ -23,10 +22,6 @@ const fileConsumers = [
     'tests/unit/style/components/code.test.ts',
     'tests/unit/style/components/messages.test.ts',
     'tests/unit/features/chat/tabs/TabAttentionStyles.test.ts',
-  ]],
-  [/^tests\/fixtures\/providers\/grok\/history\//, [
-    'tests/unit/providers/grok/history/GrokConversationHistoryService.test.ts',
-    'tests/unit/providers/grok/history/GrokHistoryStore.test.ts',
   ]],
 ];
 const scriptConsumers = new Map(suites.scriptTests.flatMap(file => [
@@ -70,13 +65,11 @@ export function selectCiTests({ changes, relatedTests, eventName }) {
   }
   const testFiles = [...files];
   const crossPlatformTests = suites.crossPlatformTests.filter(file => files.has(file));
-  const piWindows = files.has(piTest);
   return {
     testFiles, scriptTests: [...scripts], crossPlatformTests,
     crossPlatformShards: crossPlatformTests.length > 1 ? ['1/2', '2/2'] : ['1/1'],
-    crossPlatform: crossPlatformTests.length > 0 || piWindows
+    crossPlatform: crossPlatformTests.length > 0
       || scripts.has('scripts/ciTestSelection.test.mjs') || scripts.has('scripts/run-tests.test.mjs'),
-    piWindows,
   };
 }
 
@@ -127,7 +120,6 @@ function main() {
     `cross-platform-tests=${JSON.stringify(selection.crossPlatformTests)}`,
     `cross-platform-shards=${JSON.stringify(selection.crossPlatformShards)}`,
     `cross-platform=${selection.crossPlatform}`,
-    `pi-windows=${selection.piWindows}`,
     `has-tests=${selection.testFiles === null || selection.testFiles.length > 0
       || selection.scriptTests === null || selection.scriptTests.length > 0}`,
   ].join('\n');

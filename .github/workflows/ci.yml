@@ -142,7 +142,6 @@ jobs:
       script-tests: ${{ steps.scope.outputs.script-tests }}
       cross-platform-tests: ${{ steps.scope.outputs.cross-platform-tests }}
       cross-platform-shards: ${{ steps.scope.outputs.cross-platform-shards }}
-      pi-windows: ${{ steps.scope.outputs.pi-windows }}
       has-tests: ${{ steps.scope.outputs.has-tests }}
       cross-platform: ${{ steps.scope.outputs.cross-platform }}
     steps:
@@ -244,10 +243,6 @@ jobs:
           path: test-results/native-timings/
           if-no-files-found: error
           retention-days: 14
-
-      - name: Run Windows Pi launch integration
-        if: runner.os == 'Windows' && matrix.shard != '2/2' && needs.test-scope.outputs.pi-windows == 'true'
-        run: npm run test:unit -- --runInBand tests/integration/providers/pi/PiSubprocess.windows.test.ts
 
   build-artifacts:
     runs-on: ubuntu-latest

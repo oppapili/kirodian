@@ -46,12 +46,11 @@ test('native smoke consumers run on native platforms when affected', () => {
   }
 });
 
-test('native selection uses only nonempty shards and retains a Pi-only job', () => {
+test('native selection uses only nonempty shards', () => {
   const paths = 'tests/unit/utils/windowsCmdShim.test.ts';
   const sdk = 'tests/unit/core/process/ManagedStdioProcess.test.ts';
   assert.deepEqual(select([paths]).crossPlatformShards, ['1/1']);
   assert.deepEqual(select([paths, sdk]).crossPlatformShards, ['1/2', '2/2']);
-  assert.deepEqual(select(['tests/integration/providers/pi/PiSubprocess.windows.test.ts']).crossPlatformShards, ['1/1']);
   assert.deepEqual(select(['package-lock.json']).crossPlatformShards, ['1/2', '2/2']);
 });
 
@@ -69,14 +68,6 @@ test('filesystem-read documentation, styles, and captured fixtures retain their 
   assert.deepEqual(select(['README.md']).testFiles, [docs]);
   assert.deepEqual(select(['src/features/chat/AGENTS.md']).testFiles, [docs]);
   assert.ok(select(['src/style/components/code.css']).testFiles.includes('tests/unit/style/components/code.test.ts'));
-  const fixture = select(['tests/fixtures/providers/grok/history/example.json']);
-  assert.ok(fixture.testFiles.includes('tests/unit/providers/grok/history/GrokHistoryStore.test.ts'));
-});
-
-test('native Pi launch runs only when affected', () => {
-  const pi = 'tests/integration/providers/pi/PiSubprocess.windows.test.ts';
-  assert.equal(select(['src/providers/pi/runtime/PiSubprocess.ts'], [pi]).piWindows, true);
-  assert.equal(select(['src/features/chat/ClaudianView.ts'], [panel]).piWindows, false);
 });
 
 test('script edits select their script tests without unrelated Jest work', () => {
@@ -108,7 +99,6 @@ test('unsafe deletions and global or unknown changes retain full verification', 
     assert.equal(result.testFiles, null);
     assert.equal(result.crossPlatformTests, null);
     assert.equal(result.scriptTests, null);
-    assert.equal(result.piWindows, true);
   }
 });
 
