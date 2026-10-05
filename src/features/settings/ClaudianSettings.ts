@@ -177,7 +177,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
 
     setLocale(this.plugin.settings.locale as Locale);
 
-    const providerTabs = ProviderRegistry.getRegisteredProviderIds();
+    const providerTabs = ProviderRegistry.getVisibleProviderIds(this.plugin.settings);
     const tabIds: SettingsTabId[] = ['general', 'providers'];
     const preferredProvider = providerTabs.includes(this.plugin.settings.settingsProvider)
       ? this.plugin.settings.settingsProvider

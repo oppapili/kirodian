@@ -45,7 +45,7 @@ export type TabProviderSettings = Record<string, unknown> & {
 export function getBlankTabModelOptions(
   settings: Record<string, unknown>,
 ): ProviderUIOption[] {
-  return ProviderRegistry.getEnabledProviderIds(settings).flatMap((providerId) => {
+  return ProviderRegistry.getVisibleProviderIds(settings).flatMap((providerId) => {
     const uiConfig = ProviderRegistry.getChatUIConfig(providerId);
     const providerIcon = uiConfig.getProviderIcon?.() ?? undefined;
     const group = ProviderRegistry.getProviderDisplayName(providerId);
@@ -303,7 +303,7 @@ export function onProviderAvailabilityChanged(
   if (tab.conversationId !== null) return false;
 
   const settingsSnapshot = plugin.settings as unknown as Record<string, unknown>;
-  const enabledProviderIds = ProviderRegistry.getEnabledProviderIds(settingsSnapshot);
+  const enabledProviderIds = ProviderRegistry.getVisibleProviderIds(settingsSnapshot);
   const previousDraftModel = tab.draftModel;
   const previousProviderId = tab.providerId;
   let nextProviderId = tab.providerId;

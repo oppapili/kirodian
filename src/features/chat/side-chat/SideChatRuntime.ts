@@ -92,7 +92,14 @@ export class SideChatRuntime {
       undefined,
       () => this.capabilities,
     );
-    this.#subagents = new SubagentManager(() => undefined);
+    // Bind the subagent interpreter to this side chat's own provider. Without an
+    // explicit interpreter SubagentManager falls back to DEFAULT_CHAT_PROVIDER_ID,
+    // which would misread another provider's Task/Agent tool shape; the source
+    // provider is the correct, provider-neutral choice for every provider.
+    this.#subagents = new SubagentManager(
+      () => undefined,
+      ProviderRegistry.getTaskResultInterpreter(deps.source.providerId),
+    );
     this.#prompts = new InlineInteractionPrompts({
       getPromptParentEl: () => deps.getPromptParentEl(),
       onBeforeShow: () => this.#stream.hideThinkingIndicator(),

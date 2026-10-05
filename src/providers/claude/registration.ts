@@ -20,6 +20,7 @@ export const claudeProviderRegistration: ProviderModule = {
   id: 'claude',
   displayName: 'Claude',
   blankTabOrder: 20,
+  hidden: true,
   isEnabled: settings => getClaudeProviderSettings(settings).enabled,
   setEnabled: (settings, enabled) => updateClaudeProviderSettings(settings, { enabled }),
   capabilities: CLAUDE_PROVIDER_CAPABILITIES,
