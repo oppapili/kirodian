@@ -92,8 +92,7 @@
     "tabs": {
       "general": "일반",
       "providers": "제공자",
-      "claude": "Claude",
-      "codex": "Codex"
+      "claude": "Claude"
     },
     "display": "표시",
     "conversations": "대화",
@@ -174,10 +173,6 @@
     "claudeSafeMode": {
       "name": "안전 모드",
       "desc": "Safe 토글이 활성화되었을 때 사용하는 권한 모드입니다."
-    },
-    "codexSafeMode": {
-      "name": "안전 모드",
-      "desc": "Safe 토글이 활성화되었을 때 사용하는 샌드박스 모드입니다."
     },
     "environment": "환경",
     "customVariables": {
@@ -301,60 +296,6 @@
         "desc": "기본은 Claude의 일반 스타일입니다. 간결 모드는 결과부터 제시하고 서두를 생략합니다. Claude Code 2.1.237 이상이 필요합니다.",
         "default": "기본",
         "concise": "간결"
-      }
-    },
-    "codex": {
-      "installationMethod": {
-        "name": "설치 방식",
-        "desc": "Windows에서 Kirodian이 Codex를 실행하는 방식입니다. 네이티브 Windows는 Windows 실행 파일 경로를 사용하고, WSL은 선택한 배포판 안에서 Linux CLI를 실행합니다.",
-        "nativeWindows": "네이티브 Windows",
-        "wsl": "WSL"
-      },
-      "cliPath": {
-        "name": "Codex CLI 경로",
-        "descUnix": "로컬 Codex CLI의 사용자 지정 경로입니다. 비워 두면 알려진 Codex 설치를 먼저 사용한 뒤 PATH를 찾습니다.",
-        "descWindows": "로컬 Codex CLI의 사용자 지정 경로입니다. 비워 두면 PATH에서 자동 감지합니다. 일반적으로 `codex.exe`인 네이티브 Windows 실행 파일 경로를 사용하세요.",
-        "descWsl": "WSL 안에서 실행할 Linux 측 Codex 명령 또는 절대 경로입니다. 비워 두면 선택한 배포판의 PATH에서 찾습니다.",
-        "validation": {
-          "wslWindowsPath": "WSL 모드에는 Windows 실행 파일 경로가 아니라 Linux 명령 또는 Linux 절대 경로가 필요합니다."
-        }
-      },
-      "wslDistroOverride": {
-        "name": "WSL 배포판 재정의",
-        "desc": "선택적 고급 재정의입니다. 비워 두면 가능한 경우 WSL 작업공간 경로에서 배포판을 추론하고, 그렇지 않으면 기본 WSL 배포판을 사용합니다."
-      },
-      "safeMode": {
-        "workspaceWrite": "작업공간 쓰기",
-        "readOnly": "읽기 전용"
-      },
-      "responseStyle": {
-        "name": "응답 스타일",
-        "desc": "지원되는 모델에서 Codex의 대화 스타일을 선택합니다. 다음 메시지부터 적용됩니다.",
-        "pragmatic": "실용적",
-        "friendly": "친근함"
-      },
-      "reasoningSummary": {
-        "name": "추론 요약",
-        "desc": "생각 블록에 모델의 추론 과정 요약을 표시합니다.",
-        "auto": "자동",
-        "concise": "간결",
-        "detailed": "상세",
-        "off": "끄기"
-      },
-      "ultraEffort": {
-        "name": "Ultra 추론 강도 활성화",
-        "desc": "Ultra를 지원하는 Codex 모델의 추론 강도 선택기에 표시합니다. Ultra는 최대 추론과 자동 작업 위임을 사용합니다."
-      },
-      "skills": {
-        "name": "Codex 스킬",
-        "desc": "Manage shared vault-level skills stored only in .agents/skills/.",
-        "hiddenName": "숨긴 스킬",
-        "hiddenDesc": "드롭다운에서 특정 Codex 스킬을 숨깁니다. 앞의 $ 없이 스킬 이름을 한 줄에 하나씩 입력하세요.",
-        "hiddenPlaceholder": "analyze\nexplain\nfix"
-      },
-      "environment": {
-        "name": "Codex 환경",
-        "desc": "Codex 전용 런타임 변수만 입력하세요. OPENAI_* 및 CODEX_* 설정에 사용합니다. Codex 자동 감지에 도움이 필요하면 이 공급자 섹션 대신 공유 PATH에 설치 디렉터리를 추가하세요."
       }
     },
     "agentSkills": {
