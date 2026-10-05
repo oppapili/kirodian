@@ -41,7 +41,7 @@ export interface ProviderCapabilities {
   reasoningControl: 'effort' | 'token-budget' | 'none';
 }
 
-export const DEFAULT_CHAT_PROVIDER_ID = 'claude' as const satisfies ProviderId;
+export const DEFAULT_CHAT_PROVIDER_ID = 'kiro' as const satisfies ProviderId;
 
 /**
  * Chat-facing provider registration.
