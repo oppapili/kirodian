@@ -1,10 +1,6 @@
 import '@/providers';
 
-import {
-  TEST_CODEX_CATALOG,
-  TEST_CODEX_MODEL,
-  TEST_CODEX_MODEL_LABEL,
-} from '@test/helpers/codexModels';
+import { claudeCatalogFixture } from '@test/helpers/claudeModels';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
@@ -38,19 +34,21 @@ describe('ProviderRegistry', () => {
     )).toThrow('Provider "nonexistent" is not registered.');
   });
 
-  it('returns Codex capabilities', () => {
-    const caps = ProviderRegistry.getCapabilities('codex');
-    expect(caps.providerId).toBe('codex');
+  it('returns Claude capabilities', () => {
+    const caps = ProviderRegistry.getCapabilities('claude');
+    expect(caps.providerId).toBe('claude');
     expect(caps.supportsFork).toBe(true);
-    expect(caps.supportsRewind).toBe(false);
+    expect(caps.supportsRewind).toBe(true);
     expect(caps.reasoningControl).toBe('effort');
   });
 
-  it('returns OpenCode capabilities', () => {
-    const caps = ProviderRegistry.getCapabilities('opencode');
-    expect(caps.providerId).toBe('opencode');
+  it('returns Kiro capabilities', () => {
+    const caps = ProviderRegistry.getCapabilities('kiro');
+    expect(caps.providerId).toBe('kiro');
     expect(caps.supportsProviderCommands).toBe(true);
-    expect(caps.supportsFork).toBe(true);
+    expect(caps.supportsImageAttachments).toBe(true);
+    expect(caps.supportsFork).toBe(false);
+    expect(caps.supportsRewind).toBe(false);
   });
 
   it('registers provider-owned subagent protocols outside the capability matrix', () => {
@@ -58,94 +56,54 @@ describe('ProviderRegistry', () => {
     expect(claudeAdapter).toMatchObject({
       protocol: 'managed-agent',
     });
-    const opencodeAdapter = ProviderRegistry.getSubagentAdapter('opencode');
-    expect(opencodeAdapter).toMatchObject({
-      protocol: 'managed-agent',
-    });
-    expect(ProviderRegistry.getSubagentAdapter('grok')).toMatchObject({
+    expect(ProviderRegistry.getSubagentAdapter('kiro')).toMatchObject({
       protocol: 'lifecycle',
     });
-    expect(ProviderRegistry.getSubagentAdapter('codex')).toMatchObject({
-      protocol: 'lifecycle',
-    });
-    expect(ProviderRegistry.getSubagentAdapter('pi')).toBeNull();
 
     expect(claudeAdapter?.isSpawnTool('Agent')).toBe(true);
     expect(claudeAdapter?.isSpawnTool('Task')).toBe(true);
-    expect(opencodeAdapter?.isSpawnTool('Agent')).toBe(true);
-    expect(opencodeAdapter?.isSpawnTool('Task')).toBe(false);
 
-    for (const providerId of ['claude', 'opencode', 'grok', 'codex', 'pi'] as const) {
+    for (const providerId of ['claude', 'kiro'] as const) {
       expect(ProviderRegistry.getCapabilities(providerId)).not.toHaveProperty(
         'supportsLegacySubagentTools',
       );
     }
   });
 
-  it('returns Pi capabilities', () => {
-    const caps = ProviderRegistry.getCapabilities('pi');
-    expect(caps.providerId).toBe('pi');
-    expect(caps.supportsProviderCommands).toBe(true);
-    expect(caps.supportsImageAttachments).toBe(true);
-    expect(caps.supportsTurnSteer).toBe(true);
-    expect(caps.supportsFork).toBe(true);
-  });
-
   it('lists registered provider ids', () => {
     const ids = ProviderRegistry.getRegisteredProviderIds();
     expect(ids).toContain('claude');
-    expect(ids).toContain('codex');
-    expect(ids).toContain('grok');
-    expect(ids).toContain('pi');
+    expect(ids).toContain('kiro');
   });
 
   it('filters enabled provider ids using registration metadata', () => {
     expect(ProviderRegistry.getEnabledProviderIds({
       providerConfigs: {
-        codex: { enabled: false },
+        kiro: { enabled: false },
       },
     })).toEqual(['claude']);
     expect(ProviderRegistry.getEnabledProviderIds({
       providerConfigs: {
-        codex: { enabled: true },
+        kiro: { enabled: true },
       },
-    })).toEqual(['codex', 'claude']);
+    })).toEqual(['kiro', 'claude']);
     expect(ProviderRegistry.getEnabledProviderIds({
       providerConfigs: {
         claude: { enabled: false },
-        codex: { enabled: true },
+        kiro: { enabled: true },
       },
-    })).toEqual(['codex']);
-    expect(ProviderRegistry.getEnabledProviderIds({
-      providerConfigs: {
-        codex: { enabled: true },
-        opencode: { enabled: true },
-      },
-    })).toEqual(['opencode', 'codex', 'claude']);
-    expect(ProviderRegistry.getEnabledProviderIds({
-      providerConfigs: {
-        codex: { enabled: true },
-        grok: { enabled: true },
-        opencode: { enabled: true },
-        pi: { enabled: true },
-      },
-    })).toEqual(['opencode', 'pi', 'grok', 'codex', 'claude']);
+    })).toEqual(['kiro']);
   });
 
   it('exposes the blank-tab provider order from top to bottom', () => {
     // Claude is hidden (code retained, removed from UI), so it never appears in
-    // the blank-tab picker even while enabled. Order is the reverse of the
-    // enabled-ascending blankTabOrder (opencode 10, pi 11, kiro 12, grok 12,
-    // codex 15); kiro follows grok at the order-12 tie by registration order.
+    // the blank-tab picker even while enabled. Kiro (blankTabOrder 12) is the
+    // only visible built-in that remains.
     expect(ProviderRegistry.getBlankTabProviderIds({
       providerConfigs: {
-        codex: { enabled: true },
-        grok: { enabled: true },
         kiro: { enabled: true },
-        opencode: { enabled: true },
-        pi: { enabled: true },
       },
-    })).toEqual(['codex', 'kiro', 'grok', 'pi', 'opencode']);
+    })).toEqual(['kiro']);
   });
 
   it('defaults to kiro as the chat provider', () => {
@@ -172,16 +130,18 @@ describe('ProviderRegistry', () => {
   it('exposes title generation models only from enabled providers', () => {
     const disabledSettings = {
       providerConfigs: {
-        codex: {
-          discoveredModels: TEST_CODEX_CATALOG,
+        claude: {
+          discoveredModels: [{ value: 'sonnet', label: 'Sonnet', description: '' }],
+          visibleModels: ['sonnet'],
           enabled: false,
         },
       },
     };
     const enabledSettings = {
       providerConfigs: {
-        codex: {
-          discoveredModels: TEST_CODEX_CATALOG,
+        claude: {
+          discoveredModels: [{ value: 'sonnet', label: 'Sonnet', description: '' }],
+          visibleModels: ['sonnet'],
           enabled: true,
         },
       },
@@ -189,49 +149,32 @@ describe('ProviderRegistry', () => {
 
     expect(
       ProviderRegistry.getTitleGenerationModelOptions(disabledSettings)
-        .some(option => option.value === `openai-codex/${TEST_CODEX_MODEL}`),
+        .some(option => option.value === 'sonnet'),
     ).toBe(false);
     expect(
       ProviderRegistry.getTitleGenerationModelOptions(enabledSettings)
-        .some(option => option.value === `openai-codex/${TEST_CODEX_MODEL}`),
-    ).toBe(true);
-
-    const claudeDisabledSettings = {
-      providerConfigs: {
-        claude: { enabled: false },
-        codex: {
-          discoveredModels: TEST_CODEX_CATALOG,
-          enabled: true,
-        },
-      },
-    };
-    expect(
-      ProviderRegistry.getTitleGenerationModelOptions(claudeDisabledSettings)
         .some(option => option.value === 'sonnet'),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('prefixes title generation model labels with their provider names', () => {
     const options = ProviderRegistry.getTitleGenerationModelOptions({
       providerConfigs: {
-        claude: { discoveredModels: [{ value: 'sonnet', label: 'Sonnet', description: '' }], visibleModels: ['sonnet'] },
-        codex: {
-          discoveredModels: TEST_CODEX_CATALOG,
+        claude: {
+          discoveredModels: [{ value: 'sonnet', label: 'Sonnet', description: '' }],
+          visibleModels: ['sonnet'],
           enabled: true,
         },
       },
     });
 
-    expect(options.find(option => option.value === `openai-codex/${TEST_CODEX_MODEL}`)?.label)
-      .toBe(`Codex: ${TEST_CODEX_MODEL_LABEL}`);
     expect(options.find(option => option.value === 'sonnet')?.label)
       .toBe('Claude: Sonnet');
   });
 
   it('returns the display name from provider registration metadata', () => {
     expect(ProviderRegistry.getProviderDisplayName('claude')).toBe('Claude');
-    expect(ProviderRegistry.getProviderDisplayName('codex')).toBe('Codex');
-    expect(ProviderRegistry.getProviderDisplayName('grok')).toBe('Grok');
+    expect(ProviderRegistry.getProviderDisplayName('kiro')).toBe('Kiro');
   });
 
   it('requires an explicit title model instead of selecting Claude automatically', async () => {
@@ -250,46 +193,12 @@ describe('ProviderRegistry', () => {
       settings: {
         titleGenerationModel: '',
         providerConfigs: {
-          codex: { enabled: true },
+          claude: { enabled: true },
         },
       },
     } as any);
     const callback = jest.fn();
 
-    await service.generateTitle('conv-1', 'hello', callback);
-
-    expect(providerCalls).toEqual([]);
-    expect(ProviderWorkspaceRegistry.ensureInitialized).not.toHaveBeenCalled();
-    expect(callback).toHaveBeenCalledWith('conv-1', {
-      success: false,
-      error: expect.stringContaining('Select an available title model'),
-    });
-  });
-
-  it('does not select another provider when the title model is empty', async () => {
-    const providerCalls: ProviderId[] = [];
-    const originalCreate = ProviderRegistry.createTitleGenerationService.bind(ProviderRegistry);
-    jest.spyOn(ProviderRegistry, 'createTitleGenerationService')
-      .mockImplementation((plugin: any, providerId?: ProviderId) => {
-        if (!providerId) {
-          return originalCreate(plugin);
-        }
-        providerCalls.push(providerId);
-        return createMockTitleService(providerId);
-      });
-
-    const service = ProviderRegistry.createTitleGenerationService({
-      settings: {
-        settingsProvider: 'codex',
-        titleGenerationModel: '',
-        providerConfigs: {
-          claude: { enabled: false },
-          codex: { enabled: true },
-        },
-      },
-    } as any);
-
-    const callback = jest.fn();
     await service.generateTitle('conv-1', 'hello', callback);
 
     expect(providerCalls).toEqual([]);
@@ -314,88 +223,35 @@ describe('ProviderRegistry', () => {
 
     const service = ProviderRegistry.createTitleGenerationService({
       settings: {
-        titleGenerationModel: TEST_CODEX_MODEL,
+        titleGenerationModel: 'claude-code/sonnet',
         providerConfigs: {
-          codex: { enabled: true, visibleModels: [TEST_CODEX_MODEL], discoveredModels: TEST_CODEX_CATALOG },
-        },
-      },
-    } as any);
-    const callback = jest.fn();
-
-    await service.generateTitle('conv-1', 'hello', callback);
-
-    expect(providerCalls).toEqual(['codex']);
-    expect(callback).toHaveBeenCalledWith('conv-1', {
-      success: true,
-      title: 'codex title',
-    });
-  });
-
-  it('rejects a disabled title selection before initializing its provider', async () => {
-    const providerCalls: ProviderId[] = [];
-    const originalCreate = ProviderRegistry.createTitleGenerationService.bind(ProviderRegistry);
-    jest.spyOn(ProviderRegistry, 'createTitleGenerationService')
-      .mockImplementation((plugin: any, providerId?: ProviderId) => {
-        if (!providerId) {
-          return originalCreate(plugin);
-        }
-        providerCalls.push(providerId);
-        return createMockTitleService(providerId);
-      });
-
-    const service = ProviderRegistry.createTitleGenerationService({
-      settings: {
-        titleGenerationModel: TEST_CODEX_MODEL,
-        providerConfigs: {
-          codex: {
-            discoveredModels: TEST_CODEX_CATALOG,
-            enabled: false,
+          claude: {
+            ...claudeCatalogFixture(['sonnet']),
+            enabled: true,
           },
         },
       },
     } as any);
-
     const callback = jest.fn();
+
     await service.generateTitle('conv-1', 'hello', callback);
 
-    expect(providerCalls).toEqual([]);
-    expect(ProviderWorkspaceRegistry.ensureInitialized).not.toHaveBeenCalled();
+    expect(providerCalls).toEqual(['claude']);
     expect(callback).toHaveBeenCalledWith('conv-1', {
-      success: false,
-      error: expect.stringContaining('Select an available title model'),
+      success: true,
+      title: 'claude title',
     });
   });
 
-  it.each(['unknown-title-model', TEST_CODEX_MODEL])(
-    'preserves an unavailable title selection without starting a provider: %s',
-    async titleGenerationModel => {
-      const settings = {
-        titleGenerationModel,
-        providerConfigs: {
-          codex: { enabled: true, visibleModels: [], discoveredModels: TEST_CODEX_CATALOG },
-        },
-      };
-      const callback = jest.fn();
-      const service = ProviderRegistry.createTitleGenerationService({ settings } as any);
-      await service.generateTitle('conversation', 'hello', callback);
-      expect(ProviderWorkspaceRegistry.ensureInitialized).not.toHaveBeenCalled();
-      expect(settings.titleGenerationModel).toBe(titleGenerationModel);
-      expect(callback).toHaveBeenCalledWith('conversation', {
-        success: false,
-        error: expect.stringContaining('Select an available title model'),
-      });
-    },
-  );
-
   it('rechecks title availability after provider initialization', async () => {
     const settings = {
-      titleGenerationModel: TEST_CODEX_MODEL,
+      titleGenerationModel: 'claude-code/sonnet',
       providerConfigs: {
-        codex: { enabled: true, visibleModels: [TEST_CODEX_MODEL], discoveredModels: TEST_CODEX_CATALOG },
+        claude: { ...claudeCatalogFixture(['sonnet']), enabled: true },
       },
     };
     jest.mocked(ProviderWorkspaceRegistry.ensureInitialized).mockImplementation(async () => {
-      settings.providerConfigs.codex.enabled = false;
+      settings.providerConfigs.claude.enabled = false;
     });
     const createService = jest.spyOn(ProviderRegistry, 'createTitleGenerationService');
     const service = ProviderRegistry.createTitleGenerationService({ settings } as any);

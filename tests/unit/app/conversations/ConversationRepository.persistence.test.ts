@@ -77,32 +77,6 @@ function deferred<T = void>(): {
   return { promise, resolve, reject };
 }
 
-describe('ConversationRepository provider state', () => {
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
-  it('drops malformed OpenCode-owned state without clobbering opaque fields', async () => {
-    const conversation = createConversation();
-    conversation.providerId = 'opencode';
-    conversation.providerState = {
-      databasePath: { malformed: true },
-      futureResumeCursor: { token: 'opencode-cursor' },
-    };
-    const { repository, persistence } = createRepository(conversation);
-
-    await repository.rename(conversation.id, 'Renamed');
-
-    expect(persistence.saveMetadata).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        providerState: {
-          futureResumeCursor: { token: 'opencode-cursor' },
-        },
-      }),
-    );
-  });
-});
-
 describe('ConversationRepository persistence queue and binding fences', () => {
   afterEach(() => {
     jest.restoreAllMocks();

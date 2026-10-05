@@ -1,7 +1,3 @@
-import {
-  TEST_CODEX_MODEL,
-  TEST_CODEX_MODEL_LABEL,
-} from '@test/helpers/codexModels';
 import { createMockEl } from '@test/helpers/MockElement';
 
 import type { UsageInfo } from '@/core/types';
@@ -20,6 +16,12 @@ jest.mock('obsidian', () => ({
   Notice: jest.fn(),
   setIcon: jest.fn(),
 }));
+
+// Opaque non-Claude model id/label used to exercise provider-neutral toolbar
+// behavior (service-tier toggle, grouped model options). Not tied to any
+// specific provider.
+const TEST_SERVICE_TIER_MODEL = 'service-tier-model';
+const TEST_SERVICE_TIER_MODEL_LABEL = 'Service Tier Model';
 
 function makeUsage(overrides: Partial<UsageInfo> = {}): UsageInfo {
   return {
@@ -68,7 +70,7 @@ function createMockUIConfig() {
       activeLabel: 'YOLO',
     }),
     getServiceTierToggle: jest.fn().mockImplementation((settings: Record<string, unknown>) =>
-      settings.model === TEST_CODEX_MODEL
+      settings.model === TEST_SERVICE_TIER_MODEL
         ? {
           inactiveValue: 'default',
           inactiveLabel: 'Standard',
@@ -305,7 +307,7 @@ describe('ModelSelector', () => {
     const groupedModels = [
       { value: 'opus', label: 'Opus', group: 'Claude' },
       { value: 'sonnet', label: 'Sonnet', group: 'Claude' },
-      { value: TEST_CODEX_MODEL, label: TEST_CODEX_MODEL_LABEL, group: 'Codex' },
+      { value: TEST_SERVICE_TIER_MODEL, label: TEST_SERVICE_TIER_MODEL_LABEL, group: 'Other' },
     ];
     const uiConfig = createMockUIConfig();
     uiConfig.getModelOptions.mockReturnValue(groupedModels);
@@ -321,10 +323,10 @@ describe('ModelSelector', () => {
 
     const dropdown = parentEl.querySelector('.claudian-model-dropdown');
     const children = dropdown?.children || [];
-    // Reversed: [Codex group, built-in Codex model, Claude group, Sonnet, Opus]
+    // Reversed: [Other group, built-in Other model, Claude group, Sonnet, Opus]
     const groups = children.filter((c: any) => c.hasClass('claudian-model-group'));
     expect(groups.length).toBe(2);
-    expect(groups[0]?.textContent).toBe('Codex');
+    expect(groups[0]?.textContent).toBe('Other');
     expect(groups[1]?.textContent).toBe('Claude');
   });
 
@@ -688,7 +690,7 @@ describe('ServiceTierToggle', () => {
     callbacks = createMockCallbacks({
       getUIConfig: jest.fn().mockReturnValue(uiConfig),
       getSettings: jest.fn().mockReturnValue({
-        model: TEST_CODEX_MODEL,
+        model: TEST_SERVICE_TIER_MODEL,
         reasoning: 'medium',
         serviceTier: 'default',
         permissionMode: 'normal',

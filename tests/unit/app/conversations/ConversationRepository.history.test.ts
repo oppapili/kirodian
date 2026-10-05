@@ -6,8 +6,6 @@ import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { Conversation } from '@/core/types';
 import { ClaudeConversationHistoryService } from '@/providers/claude/history/ClaudeConversationHistoryService';
 import * as claudeHistory from '@/providers/claude/history/ClaudeHistoryStore';
-import { OpencodeConversationHistoryService } from '@/providers/opencode/history/OpencodeConversationHistoryService';
-import * as history from '@/providers/opencode/history/OpencodeHistoryStore';
 
 function createConversation(id = 'conversation-1'): Conversation {
   return {
@@ -55,37 +53,6 @@ function createRepository(conversation = createConversation()) {
 
 afterEach(() => jest.restoreAllMocks());
 
-test('a superseded native history read cannot overwrite the current conversation', async () => {
-  let started!: () => void;
-  let release!: () => void;
-  const reading = new Promise<void>(resolve => { started = resolve; });
-  const deferred = new Promise<void>(resolve => { release = resolve; });
-  const oldMessages: Conversation['messages'] = [
-    { id: 'old-message', role: 'assistant', content: 'Old session response', timestamp: 1 },
-  ];
-  const newMessages: Conversation['messages'] = [
-    { id: 'new-message', role: 'assistant', content: 'Current session response', timestamp: 2 },
-  ];
-  jest.spyOn(history, 'loadOpencodeSessionMessages').mockImplementation(async () => {
-    started();
-    await deferred;
-    return oldMessages;
-  });
-  jest.spyOn(ProviderRegistry, 'getConversationHistoryService')
-    .mockReturnValue(new OpencodeConversationHistoryService());
-  const conversation = createConversation();
-  conversation.providerId = 'opencode';
-  conversation.selectedModel = 'opencode/example';
-  const { repository } = createRepository(conversation);
-  const pending = repository.ensureHydrated(conversation.id);
-  await reading;
-  await repository.update(conversation.id, { sessionId: 'session-2', messages: newMessages });
-  release();
-  expect(await pending).toBeNull();
-  expect(repository.getCachedConversation(conversation.id)?.sessionId).toBe('session-2');
-  expect(repository.getCachedConversation(conversation.id)?.messages).toEqual(newMessages);
-});
-
 test('does not publish recovered identity after concurrent deletion', async () => {
   const conversation = createConversation();
   const { repository, persistence } = createRepository(conversation);
@@ -124,21 +91,6 @@ test('keeps relocated Claude history readable after its metadata save fails', as
   expect(repository.getCachedConversation(conversation.id)?.sessionId).toBe('session-1');
 });
 
-test('OpenCode hydrates a fresh projection after another projection was discarded', async () => {
-  const service = new OpencodeConversationHistoryService();
-  const first = { ...createConversation(), providerId: 'opencode' };
-  const nativeMessages: Conversation['messages'] = [
-    { id: 'native-response', role: 'assistant', content: 'Native history', timestamp: 2 },
-  ];
-  jest.spyOn(history, 'loadOpencodeSessionMessages').mockResolvedValue(nativeMessages);
-  await service.hydrateConversationHistory(first, '/vault');
-  const fresh = { ...createConversation(), providerId: 'opencode', messages: [
-    { id: 'local-input', role: 'user' as const, content: 'Local draft', timestamp: 1 },
-  ] };
-  await service.hydrateConversationHistory(fresh, '/vault');
-  expect(fresh.messages).toEqual(nativeMessages);
-});
-
 test('restores the conversation when missing-session metadata removal fails', async () => {
   const conversation = createConversation();
   const { repository, persistence } = createRepository(conversation);
@@ -152,18 +104,6 @@ test('restores the conversation when missing-session metadata removal fails', as
   await expect(repository.handleMissingProviderSession(conversation.id, 'session-1'))
     .rejects.toThrow('Metadata cleanup failed');
   expect(repository.getCachedConversation(conversation.id)).toBe(conversation);
-});
-
-test('surfaces a failed missing-session reset save while preserving live identity', async () => {
-  const conversation = { ...createConversation(), providerId: 'opencode' };
-  const { repository, persistence } = createRepository(conversation);
-  jest.spyOn(ProviderRegistry, 'getConversationHistoryService')
-    .mockReturnValue(new OpencodeConversationHistoryService());
-  persistence.saveMetadata.mockRejectedValue(new Error('Metadata save failed'));
-
-  await expect(repository.handleMissingProviderSession(conversation.id, 'session-1'))
-    .rejects.toThrow('Metadata save failed');
-  expect(repository.getCachedConversation(conversation.id)?.sessionId).toBe('session-1');
 });
 
 test('late accepted binding survives a missing-session decision', async () => {

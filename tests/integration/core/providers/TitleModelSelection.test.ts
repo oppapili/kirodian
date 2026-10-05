@@ -8,24 +8,15 @@ import type { ProviderHost } from '@/core/providers/ProviderHost';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { assertClaudeModelAvailable } from '@/providers/claude/runtime/ClaudeModelAvailability';
 import { updateClaudeProviderSettings } from '@/providers/claude/settings';
-import { assertCodexModelAvailable } from '@/providers/codex/runtime/CodexModelAvailability';
-import { assertGrokModelAvailable } from '@/providers/grok/runtime/GrokModelAvailability';
-import { assertOpencodeModelAvailable } from '@/providers/opencode/runtime/OpencodeModelAvailability';
-import { assertPiModelAvailable } from '@/providers/pi/runtime/PiModelAvailability';
 
 const executionGuards = {
-  claude: assertClaudeModelAvailable, codex: assertCodexModelAvailable, grok: assertGrokModelAvailable,
-  opencode: assertOpencodeModelAvailable, pi: assertPiModelAvailable,
+  claude: assertClaudeModelAvailable,
 };
 
 const titleCases = modelCatalogCases.map(provider => ({
   ...provider,
   forms: {
     claude: ['sonnet', 'claude-code/sonnet'],
-    codex: ['gpt-5.5', 'openai-codex/gpt-5.5'],
-    grok: ['selected', 'grok/selected'],
-    opencode: ['anthropic/selected', 'opencode:anthropic/selected'],
-    pi: ['anthropic/selected', 'pi:anthropic/selected'],
   }[provider.id],
 }));
 

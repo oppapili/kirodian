@@ -94,7 +94,7 @@ describe('InlineEditModal - openAndWait', () => {
         settingsProvider: 'claude',
         providerConfigs: {
           claude: { enabled: false },
-          codex: { enabled: true },
+          kiro: { enabled: true },
         },
       },
       getView: jest.fn().mockReturnValue(null),
@@ -121,7 +121,7 @@ describe('InlineEditModal - openAndWait', () => {
     await expect(modal.openAndWait()).resolves.toEqual({ decision: 'reject' });
     expect(ProviderWorkspaceRegistry.ensureInitialized).toHaveBeenCalledWith(
       plugin,
-      'codex',
+      'kiro',
       'inline-edit',
     );
   });
@@ -131,10 +131,10 @@ describe('InlineEditModal - openAndWait', () => {
     const app = {} as any;
     const plugin = {
       settings: {
-        settingsProvider: 'codex',
+        settingsProvider: 'kiro',
         providerConfigs: {
           claude: { enabled: false },
-          codex: { enabled: true },
+          kiro: { enabled: true },
         },
       },
       getConversationSync: jest.fn().mockReturnValue({
@@ -172,7 +172,7 @@ describe('InlineEditModal - openAndWait', () => {
     await expect(modal.openAndWait()).resolves.toEqual({ decision: 'reject' });
     expect(ProviderWorkspaceRegistry.ensureInitialized).toHaveBeenCalledWith(
       plugin,
-      'codex',
+      'kiro',
       'inline-edit',
     );
   });
@@ -201,7 +201,7 @@ describe('InlineEditModal - openAndWait', () => {
         settings: {
           hiddenProviderCommands: {
             claude: [],
-            codex: [],
+            kiro: [],
           },
         },
       } as any;
@@ -323,12 +323,12 @@ describe('InlineEditModal - openAndWait', () => {
         settings: {
           hiddenProviderCommands: {
             claude: [],
-            opencode: [],
+            kiro: [],
           },
           providerConfigs: {
-            opencode: {
+            kiro: {
               enabled: true,
-              visibleModels: ['anthropic/claude-sonnet-4'],
+              visibleModels: ['claude-sonnet-4'],
             },
           },
         },
@@ -336,8 +336,8 @@ describe('InlineEditModal - openAndWait', () => {
         getView: jest.fn().mockReturnValue({
           getActiveTab: jest.fn().mockReturnValue({
             conversationId: null,
-            draftModel: 'opencode:openai/gpt-5.4',
-            providerId: 'opencode',
+            draftModel: 'kiro:claude-sonnet-4',
+            providerId: 'kiro',
           }),
         }),
       } as any;
@@ -395,8 +395,8 @@ describe('InlineEditModal - openAndWait', () => {
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
-      expect(providerSpy).toHaveBeenCalledWith(plugin, 'opencode');
-      expect(inlineEditService.setModelOverride).toHaveBeenCalledWith('opencode:openai/gpt-5.4');
+      expect(providerSpy).toHaveBeenCalledWith(plugin, 'kiro');
+      expect(inlineEditService.setModelOverride).toHaveBeenCalledWith('kiro:claude-sonnet-4');
 
       widgetRef.reject();
       await expect(resultPromise).resolves.toEqual({ decision: 'reject' });
@@ -438,17 +438,17 @@ describe('InlineEditModal - openAndWait', () => {
         .mockReturnValue(inlineEditService as any);
       const conversation = {
         id: 'conv-1',
-        providerId: 'opencode',
-        selectedModel: 'opencode:anthropic/claude-sonnet-4',
+        providerId: 'kiro',
+        selectedModel: 'kiro:claude-sonnet-4',
       };
       const plugin = {
         settings: {
           hiddenProviderCommands: {
             claude: [],
-            opencode: [],
+            kiro: [],
           },
           providerConfigs: {
-            opencode: { enabled: true },
+            kiro: { enabled: true },
           },
         },
         getConversationSync: jest.fn().mockReturnValue(conversation),
@@ -456,7 +456,7 @@ describe('InlineEditModal - openAndWait', () => {
           getActiveTab: jest.fn().mockReturnValue({
             conversationId: 'conv-1',
             draftModel: null,
-            providerId: 'opencode',
+            providerId: 'kiro',
           }),
         }),
       } as any;
@@ -514,8 +514,8 @@ describe('InlineEditModal - openAndWait', () => {
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
-      expect(providerSpy).toHaveBeenCalledWith(plugin, 'opencode');
-      expect(inlineEditService.setModelOverride).toHaveBeenCalledWith('opencode:anthropic/claude-sonnet-4');
+      expect(providerSpy).toHaveBeenCalledWith(plugin, 'kiro');
+      expect(inlineEditService.setModelOverride).toHaveBeenCalledWith('kiro:claude-sonnet-4');
 
       widgetRef.reject();
       await expect(resultPromise).resolves.toEqual({ decision: 'reject' });
@@ -554,7 +554,7 @@ describe('InlineEditModal - openAndWait', () => {
         settings: {
           hiddenProviderCommands: {
             claude: [],
-            codex: [],
+            kiro: [],
           },
         },
       } as any;
@@ -663,7 +663,7 @@ describe('InlineEditModal - openAndWait', () => {
         settings: {
           hiddenProviderCommands: {
             claude: [],
-            codex: [],
+            kiro: [],
           },
         },
       } as any;
@@ -769,7 +769,7 @@ describe('InlineEditModal - openAndWait', () => {
         settings: {
           hiddenProviderCommands: {
             claude: [],
-            codex: [],
+            kiro: [],
           },
           mediaFolder: '',
         },
@@ -897,7 +897,7 @@ describe('InlineEditModal - openAndWait', () => {
         settings: {
           hiddenProviderCommands: {
             claude: [],
-            codex: [],
+            kiro: [],
           },
           mediaFolder: '',
         },
@@ -1101,7 +1101,7 @@ describe('InlineEditModal - openAndWait', () => {
         settings: {
           hiddenProviderCommands: {
             claude: [],
-            codex: [],
+            kiro: [],
           },
           mediaFolder: '',
         },

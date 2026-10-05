@@ -6,10 +6,7 @@ import { Menu } from 'obsidian';
 import {
   TOOL_AGENT_OUTPUT,
   TOOL_APPLY_PATCH,
-  TOOL_SPAWN_AGENT,
   TOOL_SUBAGENT,
-  TOOL_WAIT_AGENT,
-  TOOL_WRITE_STDIN,
 } from '@/core/tools/toolNames';
 import type { ChatMessage, ImageAttachment } from '@/core/types';
 import { renderCitationGroup } from '@/features/chat/rendering/CitationRenderer';
@@ -53,7 +50,7 @@ function createMockComponent() {
   };
 }
 
-function mockCapabilities(providerId: 'claude' | 'codex' | 'grok' = 'claude') {
+function mockCapabilities(providerId: 'claude' | 'kiro' = 'claude') {
   return () => ({
     providerId,
     supportsEphemeralSessions: false,
@@ -68,7 +65,7 @@ function mockCapabilities(providerId: 'claude' | 'codex' | 'grok' = 'claude') {
 
 function createRenderer(
   messagesEl?: any,
-  providerId: 'claude' | 'codex' | 'grok' = 'claude',
+  providerId: 'claude' | 'kiro' = 'claude',
   settings: Record<string, unknown> = {},
 ) {
   const el = messagesEl ?? createMockEl();
@@ -167,7 +164,7 @@ describe('MessageRenderer', () => {
     const { renderer } = createRenderer(messagesEl);
 
     const interruptMsg: ChatMessage = {
-      id: 'interrupt-codex-1',
+      id: 'interrupt-1',
       role: 'assistant',
       content: 'Starting to work on the feature...',
       timestamp: Date.now(),
@@ -230,7 +227,7 @@ describe('MessageRenderer', () => {
 
   it('renders persisted citation content blocks', () => {
     const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'codex');
+    const { renderer } = createRenderer(messagesEl, 'kiro');
     const citations = {
       kind: 'memory' as const,
       entries: [{
@@ -289,7 +286,7 @@ describe('MessageRenderer', () => {
     const renderer = new MessageRenderer({} as any, mockComponent as any, messagesEl);
 
     const interruptMsg: ChatMessage = {
-      id: 'interrupt-codex-2',
+      id: 'interrupt-2',
       role: 'assistant',
       content: '',
       timestamp: Date.now(),
@@ -699,75 +696,9 @@ describe('MessageRenderer', () => {
     expect(renderContentSpy).toHaveBeenCalledWith(expect.anything(), 'Real content');
   });
 
-  it('does not render stored Codex write_stdin transport tools', () => {
-    const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'codex');
-
-    const msg: ChatMessage = {
-      id: 'm1',
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      toolCalls: [
-        {
-          id: 'stdin-1',
-          name: TOOL_WRITE_STDIN,
-          input: { session_id: '2404', chars: '' },
-          status: 'completed',
-          result: 'poll output',
-        } as any,
-      ],
-      contentBlocks: [
-        { type: 'tool_use', toolId: 'stdin-1' } as any,
-      ],
-    };
-
-    renderer.renderStoredMessage(msg);
-
-    expect(renderStoredToolCall).not.toHaveBeenCalled();
-    expect(messagesEl.children).toHaveLength(0);
-  });
-
-  it('renders stored Codex write_stdin tools when they send real input', () => {
-    const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'codex');
-
-    const msg: ChatMessage = {
-      id: 'm1',
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      toolCalls: [
-        {
-          id: 'stdin-1',
-          name: TOOL_WRITE_STDIN,
-          input: { session_id: '2404', chars: 'y\n' },
-          status: 'completed',
-          result: 'Input sent.',
-        } as any,
-      ],
-      contentBlocks: [
-        { type: 'tool_use', toolId: 'stdin-1' } as any,
-      ],
-    };
-
-    renderer.renderStoredMessage(msg);
-
-    expect(renderStoredToolCall).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        id: 'stdin-1',
-        name: TOOL_WRITE_STDIN,
-        input: { session_id: '2404', chars: 'y\n' },
-      }),
-      { initiallyExpanded: false },
-    );
-    expect(messagesEl.children).toHaveLength(1);
-  });
-
   it('passes expanded file-edit default to stored apply_patch renderer', () => {
     const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'codex', { expandFileEditsByDefault: true });
+    const { renderer } = createRenderer(messagesEl, 'kiro', { expandFileEditsByDefault: true });
 
     const msg: ChatMessage = {
       id: 'm-apply-patch-expanded',
@@ -1580,183 +1511,6 @@ describe('MessageRenderer', () => {
           description: 'Subagent task',
           status: 'completed',
         })
-      );
-    });
-
-    it('renders Codex spawn_agent with the same prompt and result recovered on reload', () => {
-      const messagesEl = createMockEl();
-      const { renderer } = createRenderer(messagesEl, 'codex');
-
-      (renderStoredSubagent as jest.Mock).mockClear();
-
-      const msg: ChatMessage = {
-        id: 'm-codex-subagent',
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
-        toolCalls: [
-          {
-            id: 'spawn-1',
-            name: TOOL_SPAWN_AGENT,
-            input: {
-              message: 'Inspect utils.ts and return the final patch summary.',
-              model: 'gpt-5.4-mini',
-            },
-            status: 'completed',
-            result: '{"agent_id":"agent-1","nickname":"Zeno"}',
-          } as any,
-          {
-            id: 'wait-1',
-            name: TOOL_WAIT_AGENT,
-            input: { targets: ['agent-1'], timeout_ms: 30000 },
-            status: 'completed',
-            result: '{"status":{"agent-1":{"completed":"Patched utils.ts and verified imports."}},"timed_out":false}',
-          } as any,
-        ],
-        contentBlocks: [
-          { type: 'tool_use', toolId: 'spawn-1' } as any,
-        ],
-      };
-
-      renderer.renderStoredMessage(msg);
-
-      expect(renderStoredSubagent).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          id: 'spawn-1',
-          description: 'Zeno (gpt-5.4-mini)',
-          prompt: 'Inspect utils.ts and return the final patch summary.',
-          status: 'completed',
-          result: 'Patched utils.ts and verified imports.',
-        })
-      );
-    });
-
-    it('renders a stored Grok background task with the async subagent renderer', () => {
-      const messagesEl = createMockEl();
-      const { renderer } = createRenderer(messagesEl, 'grok');
-
-      const msg: ChatMessage = {
-        id: 'm-grok-subagent',
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
-        toolCalls: [
-          {
-            id: 'spawn-1',
-            name: 'spawn_subagent',
-            input: {
-              description: 'Inspect tools',
-              prompt: 'Inspect every mapping.',
-              run_in_background: true,
-              task_id: 'task-1',
-            },
-            status: 'completed',
-            result: 'Spawned task-1',
-          } as any,
-          {
-            id: 'output-1',
-            name: 'get_command_or_subagent_output',
-            input: { task_ids: ['task-1'] },
-            providerPayload: {
-              rawName: 'get_command_or_subagent_output',
-              rawOutput: {
-                Result: [{ output: 'All mappings verified.', status: 'completed', task_id: 'task-1' }],
-                type: 'task_output',
-              },
-            },
-            status: 'completed',
-            result: 'All mappings verified.',
-          } as any,
-        ],
-        contentBlocks: [{ type: 'tool_use', toolId: 'spawn-1' } as any],
-      };
-
-      renderer.renderStoredMessage(msg);
-
-      expect(renderStoredAsyncSubagent).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          asyncStatus: 'completed',
-          description: 'Inspect tools',
-          mode: 'async',
-          result: 'All mappings verified.',
-          status: 'completed',
-        }),
-      );
-      expect(renderStoredSubagent).not.toHaveBeenCalled();
-      expect(renderStoredToolCall).not.toHaveBeenCalled();
-    });
-
-    it('renders Grok output calls that target background commands', () => {
-      const messagesEl = createMockEl();
-      const { renderer } = createRenderer(messagesEl, 'grok');
-      const outputToolCall = {
-        id: 'output-command',
-        name: 'get_command_or_subagent_output',
-        input: { task_id: 'command-1' },
-        status: 'completed',
-        result: 'Command finished.',
-      } as any;
-      const msg: ChatMessage = {
-        id: 'm-grok-command-output',
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
-        toolCalls: [outputToolCall],
-        contentBlocks: [{ type: 'tool_use', toolId: 'output-command' } as any],
-      };
-
-      renderer.renderStoredMessage(msg);
-
-      expect(renderStoredToolCall).toHaveBeenCalledWith(
-        expect.anything(),
-        outputToolCall,
-        expect.anything(),
-      );
-    });
-
-    it('renders stored Grok output calls with mixed command and subagent targets', () => {
-      const messagesEl = createMockEl();
-      const { renderer } = createRenderer(messagesEl, 'grok');
-      const outputToolCall = {
-        id: 'output-mixed',
-        name: 'get_command_or_subagent_output',
-        input: { task_ids: ['task-1', 'command-1'] },
-        status: 'completed',
-        result: 'Subagent and command finished.',
-      } as any;
-      const msg: ChatMessage = {
-        id: 'm-grok-mixed-output',
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
-        toolCalls: [
-          {
-            id: 'spawn-1',
-            name: 'spawn_subagent',
-            input: {
-              description: 'Inspect tools',
-              run_in_background: true,
-              task_id: 'task-1',
-            },
-            status: 'completed',
-            result: 'Spawned task-1',
-          } as any,
-          outputToolCall,
-        ],
-        contentBlocks: [
-          { type: 'tool_use', toolId: 'spawn-1' } as any,
-          { type: 'tool_use', toolId: 'output-mixed' } as any,
-        ],
-      };
-
-      renderer.renderStoredMessage(msg);
-
-      expect(renderStoredToolCall).toHaveBeenCalledWith(
-        expect.anything(),
-        outputToolCall,
-        expect.anything(),
       );
     });
   });

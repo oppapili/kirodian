@@ -15,20 +15,20 @@ import {
 
 describe('providerEnvironment', () => {
   describe('classifyEnvironmentVariablesByOwnership', () => {
-    it('splits shared, Claude, and Codex vars by ownership', () => {
+    it('splits shared, Claude, and Kiro vars by ownership', () => {
       const result = classifyEnvironmentVariablesByOwnership([
         'PATH=/usr/local/bin',
         'ANTHROPIC_API_KEY=claude-key',
-        'OPENAI_API_KEY=codex-key',
-        'CODEX_SANDBOX=workspace-write',
+        'AWS_ACCESS_KEY_ID=kiro-key',
+        'KIRO_SANDBOX=workspace-write',
         'CUSTOM_FLAG=1',
       ].join('\n'));
 
       expect(result.shared).toBe(['PATH=/usr/local/bin', 'CUSTOM_FLAG=1'].join('\n'));
       expect(result.providers.claude).toBe('ANTHROPIC_API_KEY=claude-key');
-      expect(result.providers.codex).toBe([
-        'OPENAI_API_KEY=codex-key',
-        'CODEX_SANDBOX=workspace-write',
+      expect(result.providers.kiro).toBe([
+        'AWS_ACCESS_KEY_ID=kiro-key',
+        'KIRO_SANDBOX=workspace-write',
       ].join('\n'));
       expect(result.reviewKeys).toEqual(['CUSTOM_FLAG']);
     });
@@ -69,24 +69,24 @@ describe('providerEnvironment', () => {
         environmentVariables: [
           'PATH=/usr/local/bin',
           'ANTHROPIC_MODEL=claude-custom',
-          'OPENAI_MODEL=gpt-custom',
+          'AWS_PROFILE=kiro-profile',
         ].join('\n'),
       };
 
       expect(getSharedEnvironmentVariables(settings)).toBe('PATH=/usr/local/bin');
       expect(getProviderEnvironmentVariables(settings, 'claude')).toBe('ANTHROPIC_MODEL=claude-custom');
-      expect(getProviderEnvironmentVariables(settings, 'codex')).toBe('OPENAI_MODEL=gpt-custom');
+      expect(getProviderEnvironmentVariables(settings, 'kiro')).toBe('AWS_PROFILE=kiro-profile');
     });
 
     it('updates split env settings through scoped setters', () => {
       const settings: Record<string, unknown> = {};
 
       setSharedEnvironmentVariables(settings, 'PATH=/usr/local/bin');
-      setProviderEnvironmentVariables(settings, 'codex', 'OPENAI_API_KEY=test-key');
+      setProviderEnvironmentVariables(settings, 'kiro', 'AWS_ACCESS_KEY_ID=test-key');
 
       expect(settings.sharedEnvironmentVariables).toBe('PATH=/usr/local/bin');
       expect(settings.providerConfigs).toEqual({
-        codex: { environmentVariables: 'OPENAI_API_KEY=test-key' },
+        kiro: { environmentVariables: 'AWS_ACCESS_KEY_ID=test-key' },
       });
     });
   });
@@ -104,11 +104,11 @@ describe('providerEnvironment', () => {
     it('flags shared and foreign-provider keys in provider env sections', () => {
       const reviewKeys = getEnvironmentReviewKeysForScope([
         'PATH=/usr/local/bin',
-        'OPENAI_API_KEY=test-key',
+        'AWS_ACCESS_KEY_ID=test-key',
         'CUSTOM_FLAG=1',
       ].join('\n'), 'provider:claude');
 
-      expect(reviewKeys).toEqual(['PATH', 'OPENAI_API_KEY', 'CUSTOM_FLAG']);
+      expect(reviewKeys).toEqual(['PATH', 'AWS_ACCESS_KEY_ID', 'CUSTOM_FLAG']);
     });
   });
 
@@ -118,7 +118,7 @@ describe('providerEnvironment', () => {
     });
 
     it('returns provider scope for single-provider snippets', () => {
-      expect(inferEnvironmentSnippetScope('OPENAI_MODEL=gpt-custom')).toBe('provider:codex');
+      expect(inferEnvironmentSnippetScope('AWS_PROFILE=kiro-profile')).toBe('provider:kiro');
     });
 
     it('keeps mixed-ownership legacy snippets unscoped', () => {
@@ -138,7 +138,7 @@ describe('providerEnvironment', () => {
     });
 
     it('keeps the fallback scope only for empty snippets', () => {
-      expect(resolveEnvironmentSnippetScope('', 'provider:codex')).toBe('provider:codex');
+      expect(resolveEnvironmentSnippetScope('', 'provider:kiro')).toBe('provider:kiro');
     });
   });
 

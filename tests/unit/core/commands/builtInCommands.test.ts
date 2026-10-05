@@ -81,19 +81,6 @@ describe('builtInCommands', () => {
       expect(detectBuiltInCommand('/FORK')).not.toBeNull();
       expect(detectBuiltInCommand('/Fork')).not.toBeNull();
     });
-
-    it('detects /fast command', () => {
-      const result = detectBuiltInCommand('/fast');
-      expect(result).not.toBeNull();
-      expect(result?.command.name).toBe('fast');
-      expect(result?.command.action).toBe('fast');
-      expect(result?.args).toBe('');
-    });
-
-    it('leaves provider-restricted commands to other providers', () => {
-      expect(detectBuiltInCommand('/fast', 'claude')).toBeNull();
-      expect(detectBuiltInCommand('/fast', 'codex')?.command.action).toBe('fast');
-    });
   });
 
   describe('getBuiltInCommandsForDropdown', () => {
@@ -115,7 +102,7 @@ describe('builtInCommands', () => {
     it('returns true for universal commands on any provider', () => {
       const clearCmd = BUILT_IN_COMMANDS.find((c) => c.name === 'clear')!;
       expect(isBuiltInCommandSupported(clearCmd, 'claude')).toBe(true);
-      expect(isBuiltInCommandSupported(clearCmd, 'codex')).toBe(true);
+      expect(isBuiltInCommandSupported(clearCmd, 'kiro')).toBe(true);
     });
 
     it('returns false for provider-restricted commands on other providers', () => {
@@ -139,16 +126,6 @@ describe('builtInCommands', () => {
       )).toBe(false);
     });
 
-    it('enforces explicit provider restrictions', () => {
-      const fastCmd = BUILT_IN_COMMANDS.find((c) => c.name === 'fast')!;
-      expect(isBuiltInCommandSupported(fastCmd, 'codex')).toBe(true);
-      expect(isBuiltInCommandSupported(fastCmd, 'claude')).toBe(false);
-      expect(isBuiltInCommandSupported(fastCmd, {
-        providerId: 'codex',
-        supportsNativeHistory: true,
-        supportsFork: true,
-      })).toBe(true);
-    });
   });
 
 });

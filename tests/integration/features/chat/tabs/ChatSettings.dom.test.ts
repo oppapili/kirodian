@@ -14,7 +14,6 @@ import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { getChatSettingsSnapshot } from '@/features/chat/ChatSettings';
 import { destroyTab } from '@/features/chat/tabs/TabLifecycle';
 import { createTabRuntime } from '@/features/chat/tabs/TabRuntimeFactory';
-import { updateCurrentGrokCatalog } from '@/providers/grok/settings';
 
 import { createHarness, releaseSideChatHarnesses } from '../side-chat/SideChatDOMHarness';
 import { FakeSideSession } from '../side-chat/SideChatSessionHarness';
@@ -37,22 +36,8 @@ it.each(modelCatalogCases.flatMap(entry => [true, false].map(advertisesHigh => (
   const config = settings.providerConfigs[id]!;
   const levels = advertisesHigh ? ['low', 'medium', 'high'] : ['low', 'medium'];
   if (id === 'claude') (config.discoveredModels as Array<Record<string, unknown>>)[0].supportedEffortLevels = levels;
-  if (id === 'codex' && !advertisesHigh) Object.assign((config.discoveredModels as Array<Record<string, unknown>>)[0], {
-    supportedReasoningEfforts: levels.map(value => ({ value, description: value })), defaultReasoningEffort: 'medium',
-  });
-  if (id === 'pi') (config.discoveredModels as Array<Record<string, unknown>>)[0].thinkingLevels = ['off', ...levels];
-  if (id === 'opencode') config.thinkingOptionsByModel = {
-    'anthropic/selected': [{ value: 'default', label: 'Default' }, ...levels.map(value => ({ value, label: formatReasoningValueLabel(value) }))],
-  };
-  if (id === 'grok') updateCurrentGrokCatalog(settings, {
-    defaultModelId: 'selected', fingerprint: 'test', refreshedAt: 10,
-    models: [{ rawId: 'selected', displayName: 'Selected label', reasoningMetadataResolved: true,
-      defaultReasoningEffort: 'medium', supportsReasoning: true,
-      reasoningEfforts: levels.map(value => ({ value, label: formatReasoningValueLabel(value) })) }],
-  });
   settings.savedProviderModel = { [id]: 'old-model' };
-  settings.savedProviderEffort = { [id]: id === 'opencode' ? 'low' : 'high' };
-  if (id === 'opencode') config.preferredThinkingByModel = { 'anthropic/selected': 'high' };
+  settings.savedProviderEffort = { [id]: 'high' };
   const harness = createHarness({ settings });
   ProviderWorkspaceRegistry.setServices(id, {});
   const app = new App();
@@ -99,7 +84,7 @@ it.each(modelCatalogCases.flatMap(entry => [true, false].map(advertisesHigh => (
     expect(settings).not.toHaveProperty('reasoning');
     const ui = within(tab.dom.inputComposerEl);
     expect(ui.getByText('High', { selector: '.claudian-thinking-current' })).toBeDefined();
-    for (const reasoning of id === 'opencode' ? ['high', 'low', 'default'] : ['high', 'low']) {
+    for (const reasoning of ['high', 'low']) {
       const label = formatReasoningValueLabel(reasoning);
       if (reasoning !== 'high') {
         fireEvent.click(ui.getByText(label, { selector: '.claudian-thinking-gear' }));
