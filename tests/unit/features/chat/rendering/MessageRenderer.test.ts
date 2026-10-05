@@ -568,7 +568,9 @@ describe('MessageRenderer', () => {
   it('renders assistant content blocks using specialized renderers', () => {
     const messagesEl = createMockEl();
     const mockComponent = createMockComponent();
-    const renderer = new MessageRenderer({} as any, mockComponent as any, messagesEl);
+    const renderer = new MessageRenderer(
+      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities('claude'),
+    );
     const renderContentSpy = jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const msg: ChatMessage = {
@@ -1024,7 +1026,9 @@ describe('MessageRenderer', () => {
   it('should skip TaskOutput tool calls (internal async subagent communication)', () => {
     const messagesEl = createMockEl();
     const mockComponent = createMockComponent();
-    const renderer = new MessageRenderer({} as any, mockComponent as any, messagesEl);
+    const renderer = new MessageRenderer(
+      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities('claude'),
+    );
 
     (renderStoredToolCall as jest.Mock).mockClear();
 
@@ -1049,7 +1053,9 @@ describe('MessageRenderer', () => {
   it('should render other tool calls but skip TaskOutput when mixed', () => {
     const messagesEl = createMockEl();
     const mockComponent = createMockComponent();
-    const renderer = new MessageRenderer({} as any, mockComponent as any, messagesEl);
+    const renderer = new MessageRenderer(
+      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities('claude'),
+    );
 
     (renderStoredToolCall as jest.Mock).mockClear();
 

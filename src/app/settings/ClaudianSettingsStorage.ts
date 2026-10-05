@@ -14,6 +14,7 @@ import {
   resolveEnvironmentSnippetScope,
 } from '../../core/providers/providerEnvironment';
 import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
+import { DEFAULT_CHAT_PROVIDER_ID, type ProviderId } from '../../core/providers/types';
 import type { VaultFileAdapter } from '../../core/storage/VaultFileAdapter';
 import {
   CHAT_VIEW_PLACEMENTS,
@@ -450,6 +451,7 @@ function normalizeStoredChatModelSelection(
     !providerId
     || !model
     || !ProviderRegistry.getRegisteredProviderIds().includes(providerId)
+    || isHiddenProviderId(providerId)
   ) {
     return null;
   }
@@ -457,25 +459,45 @@ function normalizeStoredChatModelSelection(
   return { providerId, model };
 }
 
+/**
+ * Whether a persisted provider id now resolves to a hidden provider. Used to
+ * discard a stored chat-model selection whose provider was hidden since it was
+ * written (e.g. claude after the Kiro-default migration), so loading coerces it
+ * to the default provider rather than selecting an invisible one. Checks only
+ * the neutral hidden flag — a disabled-but-visible provider is NOT treated as
+ * hidden, so a legacy seed for one is preserved.
+ */
+function isHiddenProviderId(providerId: ProviderId): boolean {
+  return ProviderRegistry.getRegisteredProviderIds().includes(providerId)
+    && ProviderRegistry.isHidden(providerId);
+}
+
 function migrateLegacyChatModelSelection(
   stored: Record<string, unknown>,
 ): StoredChatModelSelection | null {
   const registeredProviderIds = new Set(ProviderRegistry.getRegisteredProviderIds());
   const storedProviderId = trimStoredString(stored.settingsProvider);
-  const providerId = registeredProviderIds.has(storedProviderId)
+  const storedProviderKnown = registeredProviderIds.has(storedProviderId);
+  const storedProviderHidden = storedProviderKnown && isHiddenProviderId(storedProviderId);
+  const providerId = storedProviderKnown && !storedProviderHidden
     ? storedProviderId
-    : 'claude';
+    : DEFAULT_CHAT_PROVIDER_ID;
   if (!registeredProviderIds.has(providerId)) {
     return null;
   }
 
-  const projectedModel = trimStoredString(stored.model);
   const savedProviderModels = stored.savedProviderModel;
   const savedModel = savedProviderModels
     && typeof savedProviderModels === 'object'
     && !Array.isArray(savedProviderModels)
     ? trimStoredString((savedProviderModels as Record<string, unknown>)[providerId])
     : '';
+  // The top-level `model` belongs to the stored provider. When that provider is
+  // a known HIDDEN one (e.g. claude post-migration), the model is a claude
+  // model that would be mislabeled under the default provider, so drop it and
+  // use the target provider's own saved model. For an unknown source the model
+  // has no known owner; keep the legacy carry so runtime resolution can handle it.
+  const projectedModel = storedProviderHidden ? '' : trimStoredString(stored.model);
   const model = projectedModel || savedModel;
   return model ? { providerId, model } : null;
 }

@@ -209,9 +209,37 @@ export class ProviderRegistry {
       ));
   }
 
+  /**
+   * Enabled providers that are also visible (not `hidden`). This is the
+   * user-facing set: the blank-tab model picker and settings provider tabs
+   * read it so a hidden provider disappears from the UI while staying
+   * registered and resolvable for persisted conversations. Visibility is a
+   * neutral registration property; no provider id is special-cased here.
+   */
+  static getVisibleProviderIds(settings: Record<string, unknown>): ProviderId[] {
+    return this.getEnabledProviderIds(settings)
+      .filter(providerId => !this.getProviderRegistration(providerId).hidden);
+  }
+
+  static isVisible(providerId: ProviderId, settings: Record<string, unknown>): boolean {
+    const registration = this.getProviderRegistration(providerId);
+    return !registration.hidden && registration.isEnabled(settings);
+  }
+
+  /**
+   * Whether a provider carries the neutral `hidden` registration flag,
+   * independent of enablement. Use this (not `isVisible`) when the question is
+   * purely "is this provider removed from the UI by registration", e.g. when
+   * migrating a persisted selection — a disabled-but-not-hidden provider must
+   * not be treated as hidden.
+   */
+  static isHidden(providerId: ProviderId): boolean {
+    return Boolean(this.getProviderRegistration(providerId).hidden);
+  }
+
   /** Provider order as presented from top to bottom in the blank-tab model selector. */
   static getBlankTabProviderIds(settings: Record<string, unknown>): ProviderId[] {
-    return this.getEnabledProviderIds(settings).reverse();
+    return this.getVisibleProviderIds(settings).reverse();
   }
 
   static getProviderDisplayName(providerId: ProviderId): string {
@@ -244,17 +272,22 @@ export class ProviderRegistry {
       const currentProvider = current;
       if (
         this.getRegisteredProviderIds().includes(currentProvider)
-        && this.isEnabled(currentProvider, settings)
+        && this.isVisible(currentProvider, settings)
       ) {
         return currentProvider;
       }
     }
 
-    if (this.isEnabled(DEFAULT_CHAT_PROVIDER_ID, settings)) {
+    if (
+      this.getRegisteredProviderIds().includes(DEFAULT_CHAT_PROVIDER_ID)
+      && this.isVisible(DEFAULT_CHAT_PROVIDER_ID, settings)
+    ) {
       return DEFAULT_CHAT_PROVIDER_ID;
     }
 
-    return this.getEnabledProviderIds(settings)[0] ?? DEFAULT_CHAT_PROVIDER_ID;
+    return this.getVisibleProviderIds(settings)[0]
+      ?? this.getEnabledProviderIds(settings)[0]
+      ?? DEFAULT_CHAT_PROVIDER_ID;
   }
 
   static resolveProviderForModel(

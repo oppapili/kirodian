@@ -41,7 +41,7 @@ export interface ProviderCapabilities {
   reasoningControl: 'effort' | 'token-budget' | 'none';
 }
 
-export const DEFAULT_CHAT_PROVIDER_ID = 'claude' as const satisfies ProviderId;
+export const DEFAULT_CHAT_PROVIDER_ID = 'kiro' as const satisfies ProviderId;
 
 /**
  * Chat-facing provider registration.
@@ -54,6 +54,15 @@ export const DEFAULT_CHAT_PROVIDER_ID = 'claude' as const satisfies ProviderId;
 export interface ProviderRegistration {
   displayName: string;
   blankTabOrder: number;
+  /**
+   * Neutral, provider-agnostic flag that removes a provider from every
+   * user-facing surface (blank-tab model picker, settings provider tabs)
+   * while leaving its code registered and its `isEnabled` logic untouched.
+   * Hidden providers remain resolvable by id so persisted conversations,
+   * title generation, and model routing keep working; only visibility
+   * changes. Defaults to visible when omitted.
+   */
+  hidden?: boolean;
   isEnabled: (settings: Record<string, unknown>) => boolean;
   setEnabled?: (settings: Record<string, unknown>, enabled: boolean) => void;
   capabilities: ProviderCapabilities;

@@ -7,6 +7,7 @@ import { within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
 import { MarkdownRenderer } from 'obsidian';
 
+import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ChatMessage } from '@/core/types';
 import { StreamController } from '@/features/chat/controllers/StreamController';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
@@ -32,10 +33,12 @@ it.each([false, true])('matches live and JSONL notification order with a late to
   const messagesEl = document.body.createDiv();
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin,
-    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl);
+    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl,
+    undefined, undefined, () => ProviderRegistry.getCapabilities('claude'));
   const state = new ChatState();
-  const subagents = new SubagentManager(() => undefined);
+  const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
+    getProviderId: () => 'claude',
     getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
   let response: ChatMessage = { id: 'response', role: 'assistant', timestamp: 1, content: '', contentBlocks: [] };
   const order = () => {
@@ -88,10 +91,12 @@ it.each(['child', 'result', 'snapshot'] as const)('keeps a pending Agent before 
   const messagesEl = document.body.createDiv();
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin,
-    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl);
+    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl,
+    undefined, undefined, () => ProviderRegistry.getCapabilities('claude'));
   const state = new ChatState();
-  const subagents = new SubagentManager(() => undefined);
+  const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
+    getProviderId: () => 'claude',
     getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
   const original: ChatMessage = { id: 'original', role: 'assistant', timestamp: 1, content: '', contentBlocks: [] };
   try {
@@ -126,10 +131,12 @@ it('does not recreate a response after its conversation is cleared during finali
   const messagesEl = document.body.createDiv();
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin,
-    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl);
+    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any, messagesEl,
+    undefined, undefined, () => ProviderRegistry.getCapabilities('claude'));
   const state = new ChatState();
-  const subagents = new SubagentManager(() => undefined);
+  const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
+    getProviderId: () => 'claude',
     getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
   const original: ChatMessage = { id: 'original', role: 'assistant', timestamp: 1, content: '', contentBlocks: [] };
   try {

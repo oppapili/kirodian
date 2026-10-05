@@ -194,39 +194,58 @@ describe('ProviderSettingsCoordinator', () => {
   });
 
   describe('normalizeProviderSelection', () => {
-    it('falls back to claude when codex is disabled', () => {
+    it('falls back to the default provider when codex is disabled', () => {
       const settings: Record<string, unknown> = {
         settingsProvider: 'codex',
         providerConfigs: {
           codex: { enabled: false },
+          kiro: { enabled: true },
         },
       };
 
       const changed = ProviderSettingsCoordinator.normalizeProviderSelection(settings);
 
       expect(changed).toBe(true);
-      expect(settings.settingsProvider).toBe('claude');
+      expect(settings.settingsProvider).toBe('kiro');
     });
 
-    it('falls back to claude for unknown providers', () => {
+    it('falls back to the default provider for unknown providers', () => {
       const settings: Record<string, unknown> = {
         settingsProvider: 'mystery-provider',
         providerConfigs: {
           codex: { enabled: true, discoveredModels: TEST_CODEX_CATALOG },
+          kiro: { enabled: true },
         },
       };
 
       const changed = ProviderSettingsCoordinator.normalizeProviderSelection(settings);
 
       expect(changed).toBe(true);
-      expect(settings.settingsProvider).toBe('claude');
+      expect(settings.settingsProvider).toBe('kiro');
+    });
+
+    it('normalizes a hidden stored provider away to the default', () => {
+      // Claude is hidden: a persisted settingsProvider pointing at it must be
+      // migrated to the visible default rather than retained.
+      const settings: Record<string, unknown> = {
+        settingsProvider: 'claude',
+        providerConfigs: {
+          kiro: { enabled: true },
+        },
+      };
+
+      const changed = ProviderSettingsCoordinator.normalizeProviderSelection(settings);
+
+      expect(changed).toBe(true);
+      expect(settings.settingsProvider).toBe('kiro');
     });
 
     it('returns false when already normalized (no-op)', () => {
       const settings: Record<string, unknown> = {
-        settingsProvider: 'claude',
+        settingsProvider: 'kiro',
         providerConfigs: {
           codex: { enabled: false },
+          kiro: { enabled: true },
         },
       };
       expect(ProviderSettingsCoordinator.normalizeProviderSelection(settings)).toBe(false);
@@ -950,8 +969,9 @@ describe('ProviderSettingsCoordinator', () => {
       } as unknown as Conversation;
 
       const settings: Record<string, unknown> = {
-        settingsProvider: 'claude',
+        settingsProvider: 'kiro',
         providerConfigs: {
+          kiro: { enabled: true },
           codex: {
             enabled: true,
             discoveredModels: TEST_CODEX_CATALOG,
@@ -979,6 +999,7 @@ describe('ProviderSettingsCoordinator', () => {
       expect(settings.savedProviderModel).toEqual({
         claude: 'haiku',
         codex: `openai-codex/${TEST_CODEX_MODEL}`,
+        kiro: 'haiku',
       });
       expect(settings.savedProviderServiceTier).toEqual({
         claude: 'default',

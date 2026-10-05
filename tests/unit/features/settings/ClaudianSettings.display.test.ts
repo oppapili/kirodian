@@ -404,6 +404,10 @@ describe('ClaudianSettingTab display settings', () => {
   it('keeps Provider initialization lazy and does not mutate chat selection on navigation', async () => {
     jest.spyOn(ProviderRegistry, 'getRegisteredProviderIds')
       .mockReturnValue(['claude', 'codex']);
+    // Provider settings tabs now come from getVisibleProviderIds; stub it to the
+    // same fixed list so the real registry is not consulted in this isolated test.
+    jest.spyOn(ProviderRegistry, 'getVisibleProviderIds')
+      .mockReturnValue(['claude', 'codex']);
     jest.spyOn(ProviderRegistry, 'getProviderDisplayName')
       .mockImplementation(providerId => providerId.toUpperCase());
     jest.spyOn(ProviderRegistry, 'getTitleGenerationModelOptions').mockReturnValue([]);
@@ -430,6 +434,10 @@ describe('ClaudianSettingTab display settings', () => {
 
   it('initializes each Provider settings tab once and reuses its rendered content', async () => {
     jest.spyOn(ProviderRegistry, 'getRegisteredProviderIds')
+      .mockReturnValue(['claude', 'codex']);
+    // Provider settings tabs now come from getVisibleProviderIds; stub it to the
+    // same fixed list so the real registry is not consulted in this isolated test.
+    jest.spyOn(ProviderRegistry, 'getVisibleProviderIds')
       .mockReturnValue(['claude', 'codex']);
     jest.spyOn(ProviderRegistry, 'getProviderDisplayName')
       .mockImplementation(providerId => providerId.toUpperCase());

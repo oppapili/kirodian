@@ -28,7 +28,7 @@ describe('ProviderRegistry', () => {
 
   it('returns capabilities for the default provider', () => {
     const caps = ProviderRegistry.getCapabilities();
-    expect(caps.providerId).toBe('claude');
+    expect(caps.providerId).toBe('kiro');
     expect(caps).toHaveProperty('supportsFork');
   });
 
@@ -133,14 +133,40 @@ describe('ProviderRegistry', () => {
   });
 
   it('exposes the blank-tab provider order from top to bottom', () => {
+    // Claude is hidden (code retained, removed from UI), so it never appears in
+    // the blank-tab picker even while enabled. Order is the reverse of the
+    // enabled-ascending blankTabOrder (opencode 10, pi 11, kiro 12, grok 12,
+    // codex 15); kiro follows grok at the order-12 tie by registration order.
     expect(ProviderRegistry.getBlankTabProviderIds({
       providerConfigs: {
         codex: { enabled: true },
         grok: { enabled: true },
+        kiro: { enabled: true },
         opencode: { enabled: true },
         pi: { enabled: true },
       },
-    })).toEqual(['claude', 'codex', 'grok', 'pi', 'opencode']);
+    })).toEqual(['codex', 'kiro', 'grok', 'pi', 'opencode']);
+  });
+
+  it('defaults to kiro as the chat provider', () => {
+    expect(ProviderRegistry.getCapabilities().providerId).toBe('kiro');
+  });
+
+  it('keeps a hidden provider enabled but out of the visible set', () => {
+    const settings = { providerConfigs: { kiro: { enabled: true } } };
+    // Claude is enabled-by-default yet hidden: present in enabled, absent from visible.
+    expect(ProviderRegistry.getEnabledProviderIds(settings)).toContain('claude');
+    expect(ProviderRegistry.getVisibleProviderIds(settings)).not.toContain('claude');
+    expect(ProviderRegistry.isVisible('claude', settings)).toBe(false);
+    expect(ProviderRegistry.isVisible('kiro', settings)).toBe(true);
+    expect(ProviderRegistry.getVisibleProviderIds(settings)).toContain('kiro');
+  });
+
+  it('resolves the settings provider to kiro when the stored selection is hidden', () => {
+    expect(ProviderRegistry.resolveSettingsProviderId({
+      settingsProvider: 'claude',
+      providerConfigs: { kiro: { enabled: true } },
+    })).toBe('kiro');
   });
 
   it('exposes title generation models only from enabled providers', () => {
