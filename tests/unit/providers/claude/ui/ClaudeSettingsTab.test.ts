@@ -360,6 +360,7 @@ function createContext(plugin: any) {
     plugin,
     notifyProviderModelOptionsChanged: jest.fn(),
     renderCustomContextLimits: jest.fn(),
+    renderAgentSkillSettings: jest.fn(),
   };
 }
 
