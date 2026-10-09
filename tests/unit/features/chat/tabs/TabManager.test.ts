@@ -1602,11 +1602,13 @@ describe('TabManager provider execution orchestration', () => {
     const switchToTab = jest.fn().mockResolvedValue(undefined);
     const targetTab = {
       conversationId: 'cross-view-conversation',
+      id: 'other-tab',
       lifecycleState: 'cold',
     };
     const otherManager = {
       canCreateTab: jest.fn().mockReturnValue(true),
       getTab: jest.fn().mockReturnValue(targetTab),
+      getTabIdentities: jest.fn().mockReturnValue([targetTab]),
       switchToTab,
     };
     const otherView = {
@@ -1647,11 +1649,13 @@ describe('TabManager provider execution orchestration', () => {
     const switchToTab = jest.fn(() => targetSwitch.promise);
     const targetTab = {
       conversationId: 'cross-view-conversation',
+      id: 'other-tab',
       lifecycleState: 'cold',
     };
     const otherManager = {
       canCreateTab: jest.fn().mockReturnValue(true),
       getTab: jest.fn().mockReturnValue(targetTab),
+      getTabIdentities: jest.fn().mockReturnValue([targetTab]),
       switchToTab,
     };
     const otherView = {
