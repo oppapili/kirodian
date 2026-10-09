@@ -16,9 +16,6 @@ import { ImageContextManager } from '@/features/chat/composer/ImageContextManage
 import { MainChatComposerDropdown } from '@/features/chat/composer/MainChatComposerDropdown';
 import { CanvasSelectionController } from '@/features/chat/input/CanvasSelectionController';
 import { sendTabInputMessageFromExplicitEnterShortcut } from '@/features/chat/tabs/TabInputEvents';
-import { CodexCommandCatalog } from '@/providers/codex/commands/CodexCommandCatalog';
-import type { CodexAppServerRuntime } from '@/providers/codex/runtime/CodexAppServerRuntime';
-import { CodexSkillListingService } from '@/providers/codex/skills/CodexSkillListingService';
 import { ComposerDropdownController } from '@/shared/composer-dropdown/ComposerDropdownController';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
@@ -465,7 +462,7 @@ it('renders known commands and skills as chips while unknown tokens stay text', 
   const parent = document.body.createDiv();
   const editor = createEditor(parent);
   const entry = (kind: 'command' | 'skill', name: string, prefix: string): ProviderCommandEntry => ({
-    content: '', id: `codex:${kind}:${name}`, providerId: 'codex', kind, name, scope: 'runtime',
+    content: '', id: `kiro:${kind}:${name}`, providerId: 'kiro', kind, name, scope: 'runtime',
     source: 'sdk', isEditable: false, isDeletable: false, displayPrefix: prefix, insertPrefix: prefix,
   });
   const listeners = new Set<() => void>();
@@ -474,7 +471,7 @@ it('renders known commands and skills as chips while unknown tokens stay text', 
   };
   const files = new FileContextManager(new VaultMentionDataProvider(createApp()));
   const dropdown = new MainChatComposerDropdown(parent, editor.element, files, {
-    providerId: 'codex',
+    providerId: 'kiro',
     providerDiscovery: {
       getSnapshot: () => snapshot,
       load: async () => snapshot,
@@ -510,74 +507,6 @@ it('renders known commands and skills as chips while unknown tokens stay text', 
     fireEvent.keyDown(textbox, { key: 'Backspace', code: 'Backspace' });
     expect(editor.element.value).toBe('Run ');
   } finally { dropdown.destroy(); editor.destroy(); parent.remove(); }
-});
-
-it('reloads Codex skills for typed tokens while keeping completed chips atomic', async () => {
-  const parent = document.body.createDiv();
-  const editor = createEditor(parent);
-  let name = 'first-skill';
-  const nativeRequest = jest.fn(async () => ({ data: [{ cwd: '/vault', skills: [{
-    name, path: '/skills/SKILL.md', scope: 'user', enabled: true,
-  }] }] }));
-  const skills = new CodexSkillListingService({
-    onSkillsChanged: () => () => undefined,
-    acquire: async () => ({
-      connection: {
-        launchSpec: { targetCwd: '/vault', pathMapper: { toHostPath: (path: string) => path } },
-        transport: { request: nativeRequest }, refreshPlugins: async () => undefined,
-      },
-      release: async () => undefined,
-    }),
-  } as unknown as CodexAppServerRuntime);
-  const catalog = new CodexCommandCatalog(skills);
-  const dropdown = new MainChatComposerDropdown(parent, editor.element, new FileContextManager(new VaultMentionDataProvider(createApp())), {
-    providerId: 'codex', providerConfig: catalog.getDropdownConfig(),
-    providerDiscovery: createCatalogCommandDiscoveryStore(catalog),
-  });
-  const handleInput = jest.fn(() => dropdown.handleInputChange());
-  editor.element.addEventListener('input', handleInput);
-  try {
-    editor.element.value = '$';
-    editor.element.selectionStart = editor.element.selectionEnd = 1;
-    dropdown.handleInputChange();
-    await waitFor(() => within(parent).getByRole('option', { name: '$first-skill' }));
-    editor.element.value = '$first';
-    editor.element.selectionStart = editor.element.selectionEnd = 6;
-    dropdown.handleInputChange();
-    await waitFor(() => within(parent).getByRole('option', { name: '$first-skill' }));
-    expect(nativeRequest).toHaveBeenCalledTimes(1);
-    dropdown.hide();
-    name = 'second-skill';
-    editor.element.value = '$';
-    editor.element.selectionStart = editor.element.selectionEnd = 1;
-    dropdown.handleInputChange();
-    await waitFor(() => within(parent).getByRole('option', { name: '$second-skill' }));
-    expect(within(parent).queryByRole('option', { name: '$first-skill' })).toBeNull();
-    expect(nativeRequest).toHaveBeenCalledTimes(2);
-    expect((await axe(within(parent).getByRole('option', { name: '$second-skill' }))).violations).toEqual([]);
-
-    fireEvent.click(within(parent).getByRole('option', { name: '$second-skill' }));
-    expect(editor.element.value).toBe('$second-skill ');
-    expect((await axe(within(parent).getByRole('img', { name: 'Skill: second-skill' }))).violations).toEqual([]);
-    const textbox = within(parent).getByRole('textbox', { name: 'Message' });
-    fireEvent.keyDown(textbox, { key: 'Backspace', code: 'Backspace' });
-    await waitFor(() => expect(handleInput).toHaveBeenCalledTimes(1));
-    expect(editor.element.value).toBe('$second-skill');
-    expect(within(parent).getByRole('img', { name: 'Skill: second-skill' })).toBeTruthy();
-    expect(dropdown.isVisible()).toBe(false);
-    fireEvent.keyDown(textbox, { key: 'Backspace', code: 'Backspace' });
-    await waitFor(() => expect(handleInput).toHaveBeenCalledTimes(2));
-    expect(editor.element.value).toBe('');
-    expect(within(parent).queryByRole('img', { name: 'Skill: second-skill' })).toBeNull();
-    expect(dropdown.isVisible()).toBe(false);
-    expect(nativeRequest).toHaveBeenCalledTimes(2);
-  } finally {
-    editor.element.removeEventListener('input', handleInput);
-    dropdown.destroy();
-    editor.destroy();
-    parent.remove();
-    await skills.dispose();
-  }
 });
 
 

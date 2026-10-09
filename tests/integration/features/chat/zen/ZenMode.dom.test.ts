@@ -18,7 +18,7 @@ import { ClaudianViews } from '@/composition/ClaudianViews';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import { getToolIcon } from '@/core/tools/toolIcons';
-import type { ClaudianSettings, Conversation, StreamChunk } from '@/core/types';
+import type { ClaudianSettings, Conversation } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { destroyTab } from '@/features/chat/tabs/TabLifecycle';
 import { createTabRuntime } from '@/features/chat/tabs/TabRuntimeFactory';
@@ -26,8 +26,6 @@ import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 import { FLAVOR_TEXTS } from '@/features/chat/turns/flavorTexts';
 import { createChatFocusCommand } from '@/features/chat/workspace/ChatFocusCommand';
 import { ZenModeController } from '@/features/chat/zen/ZenModeController';
-import { adaptCodexStreamChunk } from '@/providers/codex/execution/CodexExecutionEventNormalizer';
-import { CodexNotificationRouter } from '@/providers/codex/runtime/CodexNotificationRouter';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
 const originalResizeObserver = globalThis.ResizeObserver;
@@ -288,11 +286,11 @@ it('follows the view brand provider after it changes while zen is open', async (
   expect(zenPanel()!.dataset.provider).toBe('claude');
 
   // The tab switches to another provider's model from the zen composer.
-  view.plugin.getConversationSummary(tab.conversationId).providerId = 'codex';
+  view.plugin.getConversationSummary(tab.conversationId).providerId = 'kiro';
   view.syncProviderBrandColor();
 
-  expect(view.viewContainerEl.dataset.provider).toBe('codex');
-  expect(zenPanel()!.dataset.provider).toBe('codex');
+  expect(view.viewContainerEl.dataset.provider).toBe('kiro');
+  expect(zenPanel()!.dataset.provider).toBe('kiro');
 });
 
 it.each([
@@ -443,10 +441,10 @@ function expectZenPreview(text: string): void {
 }
 
 it.each([
-  'item/agentMessage/delta',
-  'item/reasoning/summaryTextDelta',
-  'item/reasoning/textDelta',
-])('retains waiting flavor in the transcript and Zen across empty Codex %s after a notification', async method => {
+  { label: 'text', event: { type: 'text_delta', text: '' } },
+  { label: 'reasoning summary', event: { type: 'thinking_delta', text: '' } },
+  { label: 'reasoning', event: { type: 'thinking_delta', text: '' } },
+])('retains waiting flavor in the transcript and Zen across empty $label output after a notification', async ({ event }) => {
   const { tab, sessions, rightSplit, setCollapsed } = await createZenFixture();
   setCollapsed(rightSplit, true);
   const session = await sendFromZen(tab, sessions, 'Explain this note');
@@ -456,12 +454,7 @@ it.each([
     message.contentBlocks?.some(block => block.type === 'task_notification')
   ))).toBe(true));
 
-  const chunks: StreamChunk[] = [];
-  const router = new CodexNotificationRouter(chunk => chunks.push(chunk));
-  router.handleNotification(method, { threadId: 'thread', turnId: 'turn', itemId: 'item', delta: '' });
-  const events = chunks.flatMap(chunk => adaptCodexStreamChunk(chunk) ?? []);
-  expect(events).not.toHaveLength(0);
-  for (const event of events) session.emitOutput(event);
+  session.emitOutput(event as never);
   await new Promise(resolve => setTimeout(resolve, 600));
 
   // Empty provider output must not replace the visible waiting surface or create empty reasoning.

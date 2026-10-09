@@ -54,7 +54,7 @@ describe('ClaudianSettingTab agent-skill coordinator selection', () => {
       notifyAgentSkillsChanged: jest.fn(),
       storage: { getAdapter: jest.fn(() => ({})) },
     };
-    return new ClaudianSettingTab({} as any, plugin as any);
+    return new ClaudianSettingTab({} as any, {} as any, plugin as any);
   }
 
   it('reuses one coordinator per skills root', () => {
