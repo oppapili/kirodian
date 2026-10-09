@@ -1829,10 +1829,10 @@ describe('ClaudianPlugin', () => {
         events.push('write');
       });
 
-      await plugin.applyEnvironmentVariables('provider:claude', 'ANTHROPIC_PROFILE=new');
+      await plugin.providerHost.applyEnvironmentVariables('provider:claude', 'ANTHROPIC_PROFILE=new');
 
       expect(events).toEqual(['before', 'write', 'after']);
-      expect(plugin.getEnvironmentVariablesForScope('provider:claude')).toBe('ANTHROPIC_PROFILE=new');
+      expect(plugin.providerHost.getEnvironmentVariablesForScope('provider:claude')).toBe('ANTHROPIC_PROFILE=new');
       unregister();
     });
 
@@ -1866,7 +1866,7 @@ describe('ClaudianPlugin', () => {
       };
       ProviderWorkspaceRegistry.setServices('claude', { cliResolver });
 
-      await expect(plugin.getResolvedProviderCliPath('claude', {
+      await expect(plugin.providerHost.getResolvedProviderCliPath('claude', {
         providerTransitionOwner: true,
       })).resolves.toBe('/owned/claude');
       expect(cliResolver.resolveFromSettings).toHaveBeenCalledWith(
@@ -1886,7 +1886,7 @@ describe('ClaudianPlugin', () => {
       }));
       ProviderWorkspaceRegistry.register('claude', { initialize });
 
-      await expect(plugin.getResolvedProviderCliPath('claude', {
+      await expect(plugin.providerHost.getResolvedProviderCliPath('claude', {
         providerTransitionOwner: true,
       })).rejects.toThrow('requires initialized workspace services');
       expect(initialize).not.toHaveBeenCalled();
@@ -1918,12 +1918,12 @@ describe('ClaudianPlugin', () => {
         .getProviderGeneration('claude');
 
       try {
-        const firstError = await plugin.applyEnvironmentVariables(
+        const firstError = await plugin.providerHost.applyEnvironmentVariables(
           'provider:claude',
           'ANTHROPIC_PROFILE=committed',
         ).catch(error => error);
 
-        expect(plugin.getEnvironmentVariablesForScope('provider:claude'))
+        expect(plugin.providerHost.getEnvironmentVariablesForScope('provider:claude'))
           .toBe('ANTHROPIC_PROFILE=committed');
         expect(markStale).toHaveBeenCalledTimes(1);
         expect(markStale).toHaveBeenCalledWith();
@@ -1934,9 +1934,9 @@ describe('ClaudianPlugin', () => {
         expect(invalidateSpy).toHaveBeenCalledTimes(1);
         expect(firstError).toBe(publicationError);
 
-        await plugin.applyEnvironmentVariables('provider:claude', 'ANTHROPIC_PROFILE=next');
+        await plugin.providerHost.applyEnvironmentVariables('provider:claude', 'ANTHROPIC_PROFILE=next');
 
-        expect(plugin.getEnvironmentVariablesForScope('provider:claude')).toBe('ANTHROPIC_PROFILE=next');
+        expect(plugin.providerHost.getEnvironmentVariablesForScope('provider:claude')).toBe('ANTHROPIC_PROFILE=next');
         expect(markStale).toHaveBeenCalledTimes(2);
         expect(plugin.executionLifecycleRegistry.getProviderGeneration('claude'))
           .toBe(initialGeneration + 2);
@@ -2067,7 +2067,7 @@ describe('ClaudianPlugin', () => {
       // onload persists the default-provider (kiro) migration once; isolate the
       // action's settings-write count from that provider-neutral startup write.
       (mockApp.vault.adapter.write as jest.Mock).mockClear();
-      const live = await plugin.createConversation({
+      const live = await chatHostOf(plugin).createConversation({
         providerId: 'claude',
         sessionId: 'live-session',
       });
@@ -2239,7 +2239,7 @@ describe('ClaudianPlugin', () => {
     it('invalidates sessions when env hash changes', async () => {
       await plugin.onload();
 
-      const conv = await plugin.createConversation({ providerId: 'claude', sessionId: 'session-123' });
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'session-123' });
       const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata');
       saveMetadataSpy.mockClear();
 
@@ -2253,7 +2253,7 @@ describe('ClaudianPlugin', () => {
     it('serializes overlapping environment invalidation writes', async () => {
       await plugin.onload();
       (plugin as any).sessionMetadata.loadedAll = true;
-      await plugin.createConversation({ providerId: 'claude', sessionId: 'overlapping-session' });
+      await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'overlapping-session' });
       let finishFirstWrite!: () => void;
       const firstWriteRelease = new Promise<void>((resolve) => {
         finishFirstWrite = resolve;
@@ -2302,7 +2302,7 @@ describe('ClaudianPlugin', () => {
     it('flushes already-invalidated sessions after an earlier environment write fails', async () => {
       await plugin.onload();
       (plugin as any).sessionMetadata.loadedAll = true;
-      await plugin.createConversation({ providerId: 'claude', sessionId: 'failed-overlap-session' });
+      await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'failed-overlap-session' });
       const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata')
         .mockRejectedValueOnce(new Error('metadata write failed'));
 
@@ -2415,7 +2415,7 @@ describe('ClaudianPlugin', () => {
       };
       jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([mockView as any]);
 
-      await plugin.applyEnvironmentVariables(
+      await plugin.providerHost.applyEnvironmentVariables(
         'provider:kiro',
         'KIRO_PROFILE=first-turn-reload',
       );
@@ -2427,7 +2427,7 @@ describe('ClaudianPlugin', () => {
 
     it('does not coordinate environment changes through open Kiro tabs', async () => {
       await plugin.onload();
-      const conversation = await plugin.createConversation({ providerId: 'kiro' });
+      const conversation = await chatHostOf(plugin).createConversation({ providerId: 'kiro' });
       const initialGeneration = plugin.executionLifecycleRegistry
         .getProviderGeneration('kiro');
       const mockView = {
@@ -2437,7 +2437,7 @@ describe('ClaudianPlugin', () => {
       };
       jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([mockView as any]);
 
-      await plugin.applyEnvironmentVariables(
+      await plugin.providerHost.applyEnvironmentVariables(
         'provider:kiro',
         'KIRO_PROFILE=streaming-first-turn',
       );
@@ -2478,7 +2478,7 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
       (plugin as any).sessionMetadata.loadedAll = false;
       const hostnameKey = getHostnameKey();
-      await plugin.applyProviderRuntimeSettings(['claude'], (settings) => {
+      await plugin.providerHost.applyProviderRuntimeSettings(['claude'], (settings) => {
         updateClaudeProviderSettings(settings, {
           cliPathsByHost: { [hostnameKey]: '/custom/claude' },
         });
@@ -2543,16 +2543,16 @@ describe('ClaudianPlugin', () => {
 
     it('advances the Kiro fingerprint while preserving reload-policy sessions', async () => {
       await plugin.onload();
-      const conversation = await plugin.createConversation({
+      const conversation = await chatHostOf(plugin).createConversation({
         providerId: 'kiro',
         sessionId: 'kiro-session-id',
       });
-      await plugin.updateConversation(conversation.id, {
+      await chatHostOf(plugin).updateConversation(conversation.id, {
         providerState: { sessionDirectory: '/tmp/kiro/session-id' },
       });
       const hostnameKey = getHostnameKey();
 
-      await plugin.applyProviderRuntimeSettings(['kiro'], (settings) => {
+      await plugin.providerHost.applyProviderRuntimeSettings(['kiro'], (settings) => {
         updateKiroProviderSettings(settings, {
           cliPathsByHost: { [hostnameKey]: '/custom/kiro' },
           enabled: true,
@@ -2561,7 +2561,7 @@ describe('ClaudianPlugin', () => {
 
       const kiroSettings = getKiroProviderSettings(plugin.settings);
       expect(kiroSettings.environmentHash).toBe(computeKiroEnvironmentHash(plugin.settings));
-      expect(plugin.getConversationSync(conversation.id)).toEqual(expect.objectContaining({
+      expect(chatHostOf(plugin).getConversationSync(conversation.id)).toEqual(expect.objectContaining({
         sessionId: 'kiro-session-id',
         providerState: { sessionDirectory: '/tmp/kiro/session-id' },
       }));
@@ -2575,16 +2575,16 @@ describe('ClaudianPlugin', () => {
     it('finishes durable invalidation when a post-commit apply hook fails', async () => {
       await plugin.onload();
       (plugin as any).sessionMetadata.loadedAll = true;
-      const conversation = await plugin.createConversation({
+      const conversation = await chatHostOf(plugin).createConversation({
         providerId: 'claude',
         sessionId: 'post-commit-thread',
       });
-      await plugin.updateConversation(conversation.id, {
+      await chatHostOf(plugin).updateConversation(conversation.id, {
         providerState: { providerSessionId: 'post-commit-thread' },
       });
       const hostnameKey = getHostnameKey();
 
-      await expect(plugin.applyProviderRuntimeSettings(
+      await expect(plugin.providerHost.applyProviderRuntimeSettings(
         ['claude'],
         (settings) => {
           updateClaudeProviderSettings(settings, {
@@ -2863,8 +2863,8 @@ describe('ClaudianPlugin', () => {
     it('should store the selected model in conversation metadata', async () => {
       await plugin.onload();
 
-      const conv = await plugin.createConversation({ providerId: 'claude', selectedModel: 'opus' });
-      const fetched = await plugin.getConversationById(conv.id);
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude', selectedModel: 'opus' });
+      const fetched = await chatHostOf(plugin).getConversationById(conv.id);
 
       expect(conv.selectedModel).toBe('opus');
       expect(fetched?.selectedModel).toBe('opus');
@@ -2873,7 +2873,7 @@ describe('ClaudianPlugin', () => {
     it('should lazily migrate missing selected model from usage metadata', async () => {
       await plugin.onload();
 
-      const conv = await plugin.createConversation({ providerId: 'claude' });
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
       delete (conv as { selectedModel?: string }).selectedModel;
       conv.usage = {
         model: 'opus',
@@ -2936,7 +2936,7 @@ describe('ClaudianPlugin', () => {
 
     it('should preserve a conversation when local Claude history is missing', async () => {
       await plugin.onload();
-      const conversation = await plugin.createConversation({
+      const conversation = await chatHostOf(plugin).createConversation({
         providerId: 'claude',
         sessionId: 'session-removed-after-startup',
       });
@@ -2955,7 +2955,7 @@ describe('ClaudianPlugin', () => {
 
     it('should preserve a conversation whose Claude session belongs to a previous vault path', async () => {
       await plugin.onload();
-      const conversation = await plugin.createConversation({
+      const conversation = await chatHostOf(plugin).createConversation({
         providerId: 'claude',
         sessionId: 'session-from-previous-vault-path',
       });
@@ -2984,7 +2984,7 @@ describe('ClaudianPlugin', () => {
 
     it('should restore resume metadata when relocated-state persistence fails', async () => {
       await plugin.onload();
-      const conversation = await plugin.createConversation({
+      const conversation = await chatHostOf(plugin).createConversation({
         providerId: 'claude',
         sessionId: 'session-relocation-save-failure',
       });
@@ -3077,7 +3077,7 @@ describe('ClaudianPlugin', () => {
   describe('handleMissingProviderSession', () => {
     it('preserves the record when the provider cannot verify a safe disposition', async () => {
       await plugin.onload();
-      const conv = await plugin.createConversation({
+      const conv = await chatHostOf(plugin).createConversation({
         providerId: 'kiro',
         sessionId: 'unverified-provider-session',
       });
@@ -3091,7 +3091,7 @@ describe('ClaudianPlugin', () => {
 
     it('removes the record when every provider transcript segment is missing', async () => {
       await plugin.onload();
-      const conv = await plugin.createConversation({ providerId: 'claude', sessionId: 'missing-current' });
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'missing-current' });
       jest.mocked(sdkSession.locateSDKSessions).mockResolvedValue(new Map([
         ['missing-current', { availability: 'missing' }],
       ]));
@@ -3105,8 +3105,8 @@ describe('ClaudianPlugin', () => {
 
     it('preserves the record and clears resume state when older history is inaccessible', async () => {
       await plugin.onload();
-      const conv = await plugin.createConversation({ providerId: 'claude', sessionId: 'missing-current' });
-      await plugin.updateConversation(conv.id, {
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'missing-current' });
+      await chatHostOf(plugin).updateConversation(conv.id, {
         providerState: {
           providerSessionId: 'missing-current',
           previousProviderSessionIds: ['temporarily-inaccessible'],
@@ -3131,7 +3131,7 @@ describe('ClaudianPlugin', () => {
 
     it('preserves metadata when the missing-session disposition cannot be read', async () => {
       await plugin.onload();
-      const conv = await plugin.createConversation({ providerId: 'claude', sessionId: 'missing-current' });
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'missing-current' });
       jest.mocked(sdkSession.locateSDKSessions).mockRejectedValueOnce(new Error('EACCES'));
 
       await expect(chatHostOf(plugin).handleMissingProviderSession(
@@ -3543,7 +3543,7 @@ describe('ClaudianPlugin', () => {
     it('should update conversation sessionId', async () => {
       await plugin.onload();
 
-      const conv = await plugin.createConversation({ providerId: 'claude' });
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
 
       await chatHostOf(plugin).updateConversation(conv.id, { sessionId: 'new-session-id' });
 
@@ -3634,7 +3634,7 @@ describe('ClaudianPlugin', () => {
 
       await plugin.loadSettings();
 
-      const loaded = await plugin.getConversationById('conv-saved-1');
+      const loaded = await chatHostOf(plugin).getConversationById('conv-saved-1');
       expect(loaded?.id).toBe('conv-saved-1');
       expect(loaded?.title).toBe('Saved Chat');
     });
@@ -3680,7 +3680,7 @@ describe('ClaudianPlugin', () => {
 
       await plugin.loadSettings();
 
-      const loaded = await plugin.getConversationById('conv-saved-1');
+      const loaded = await chatHostOf(plugin).getConversationById('conv-saved-1');
       expect(loaded?.sessionId).toBeNull();
 
       const sessionWrite = (mockApp.vault.adapter.write as jest.Mock).mock.calls.find(
@@ -3703,7 +3703,7 @@ describe('ClaudianPlugin', () => {
 
       await plugin.loadSettings();
 
-      expect(plugin.getConversationList()).toHaveLength(0);
+      expect(chatHostOf(plugin).getConversationList()).toHaveLength(0);
     });
   });
 
@@ -3750,7 +3750,7 @@ describe('ClaudianPlugin', () => {
 
       await plugin.loadSettings();
 
-      const loaded = await plugin.getConversationById('conv-multi-session');
+      const loaded = await chatHostOf(plugin).getConversationById('conv-multi-session');
       expect((loaded?.providerState as any)?.previousProviderSessionIds).toEqual(['session-A']);
       expect((loaded?.providerState as any)?.providerSessionId).toBe('session-B');
     });
@@ -3799,8 +3799,8 @@ describe('ClaudianPlugin', () => {
     it('should repair blank image data from Claude SDK history during hydration', async () => {
       await plugin.onload();
 
-      const conv = await plugin.createConversation({ providerId: 'claude' });
-      await plugin.updateConversation(conv.id, {
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
+      await chatHostOf(plugin).updateConversation(conv.id, {
         providerState: {
           providerSessionId: 'session-with-image',
         },
@@ -3864,8 +3864,8 @@ describe('ClaudianPlugin', () => {
     it('should load from forkSource.sessionId and truncate at forkSource.resumeAt for pending fork', async () => {
       await plugin.onload();
 
-      const conv = await plugin.createConversation({ providerId: 'claude' });
-      await plugin.updateConversation(conv.id, {
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
+      await chatHostOf(plugin).updateConversation(conv.id, {
         providerState: {
           forkSource: { sessionId: 'source-session-abc', resumeAt: 'asst-uuid-cutoff' },
           // No providerSessionId → isPendingFork returns true
@@ -3910,8 +3910,8 @@ describe('ClaudianPlugin', () => {
     it('should NOT use fork path when conversation has its own providerSessionId', async () => {
       await plugin.onload();
 
-      const conv = await plugin.createConversation({ providerId: 'claude' });
-      await plugin.updateConversation(conv.id, {
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
+      await chatHostOf(plugin).updateConversation(conv.id, {
         providerState: {
           forkSource: { sessionId: 'source-session', resumeAt: 'asst-uuid' },
           providerSessionId: 'own-session-id',
@@ -3940,8 +3940,8 @@ describe('ClaudianPlugin', () => {
     it('restores subagent data when Agent tool exists but subagent content block is missing', async () => {
       await plugin.onload();
 
-      const conv = await plugin.createConversation({ providerId: 'claude' });
-      await plugin.updateConversation(conv.id, {
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
+      await chatHostOf(plugin).updateConversation(conv.id, {
         providerState: {
           providerSessionId: 'session-subagent-recovery',
           subagentData: {
@@ -4018,8 +4018,8 @@ describe('ClaudianPlugin', () => {
     it('prefers richer SDK task result over stale cached subagent result', async () => {
       await plugin.onload();
 
-      const conv = await plugin.createConversation({ providerId: 'claude' });
-      await plugin.updateConversation(conv.id, {
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
+      await chatHostOf(plugin).updateConversation(conv.id, {
         providerState: {
           providerSessionId: 'session-subagent-merge',
           subagentData: {
@@ -4079,8 +4079,8 @@ describe('ClaudianPlugin', () => {
     it('keeps the richer cached async result when both SDK and cache are terminal', async () => {
       await plugin.onload();
 
-      const conv = await plugin.createConversation({ providerId: 'claude' });
-      await plugin.updateConversation(conv.id, {
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
+      await chatHostOf(plugin).updateConversation(conv.id, {
         providerState: {
           providerSessionId: 'session-subagent-cache-richer',
           subagentData: {
@@ -4146,8 +4146,8 @@ describe('ClaudianPlugin', () => {
     it('drops stale asyncStatus from cached sync subagents during recovery', async () => {
       await plugin.onload();
 
-      const conv = await plugin.createConversation({ providerId: 'claude' });
-      await plugin.updateConversation(conv.id, {
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
+      await chatHostOf(plugin).updateConversation(conv.id, {
         providerState: {
           providerSessionId: 'session-sync-subagent-cleanup',
           subagentData: {
@@ -4200,8 +4200,8 @@ describe('ClaudianPlugin', () => {
     it('prefers terminal SDK async status over stale cached running state', async () => {
       await plugin.onload();
 
-      const conv = await plugin.createConversation({ providerId: 'claude' });
-      await plugin.updateConversation(conv.id, {
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
+      await chatHostOf(plugin).updateConversation(conv.id, {
         providerState: {
           providerSessionId: 'session-async-sdk-terminal',
           subagentData: {
@@ -4268,8 +4268,8 @@ describe('ClaudianPlugin', () => {
     it('prefers cached terminal async status over SDK launch-only running state', async () => {
       await plugin.onload();
 
-      const conv = await plugin.createConversation({ providerId: 'claude' });
-      await plugin.updateConversation(conv.id, {
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
+      await chatHostOf(plugin).updateConversation(conv.id, {
         providerState: {
           providerSessionId: 'session-async-cache-terminal',
           subagentData: {
@@ -4337,8 +4337,8 @@ describe('ClaudianPlugin', () => {
     it('restores async subagent data and mode when Agent tool exists but async block is missing', async () => {
       await plugin.onload();
 
-      const conv = await plugin.createConversation({ providerId: 'claude' });
-      await plugin.updateConversation(conv.id, {
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
+      await chatHostOf(plugin).updateConversation(conv.id, {
         providerState: {
           providerSessionId: 'session-async-subagent-recovery',
           subagentData: {
@@ -4404,8 +4404,8 @@ describe('ClaudianPlugin', () => {
     it('hydrates async subagent tool calls from SDK subagent files on reload', async () => {
       await plugin.onload();
 
-      const conv = await plugin.createConversation({ providerId: 'claude' });
-      await plugin.updateConversation(conv.id, {
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
+      await chatHostOf(plugin).updateConversation(conv.id, {
         providerState: {
           providerSessionId: 'session-async-subagent-tools',
           subagentData: {
@@ -4484,8 +4484,8 @@ describe('ClaudianPlugin', () => {
     it('keeps async subagent renderer visible when task block and task tool call are both missing', async () => {
       await plugin.onload();
 
-      const conv = await plugin.createConversation({ providerId: 'claude' });
-      await plugin.updateConversation(conv.id, {
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
+      await chatHostOf(plugin).updateConversation(conv.id, {
         providerState: {
           providerSessionId: 'session-async-subagent-fallback',
           subagentData: {
