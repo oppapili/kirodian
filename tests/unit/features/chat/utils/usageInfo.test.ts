@@ -30,7 +30,7 @@ describe('usageInfo', () => {
 
   describe('projectContextUsageDisplay', () => {
     const context = (customContextLimits: Record<string, number> = {}, model = 'model-a') => ({
-      providerId: 'codex' as const,
+      providerId: 'kiro' as const,
       model,
       customContextLimits,
     });
@@ -63,14 +63,15 @@ describe('usageInfo', () => {
 
     it('matches custom limits by runtime model id for provider selection ids', () => {
       expect(projectContextUsageDisplay(
-        usage({ model: 'openai-codex/model-a' }),
-        context({ 'model-a': 100_000 }, 'openai-codex/model-a'),
+        usage({ model: 'claude-code/model-a' }),
+        { ...context({ 'model-a': 100_000 }, 'claude-code/model-a'), providerId: 'claude' as const },
       )).toMatchObject({ contextWindow: 100_000, percentage: 50 });
     });
 
     it('uses provider-supplied aliases only for custom-limit matching', () => {
       const displayContext = {
-        ...context({ 'model-a': 100_000 }, 'openai-codex/old-model-a'),
+        ...context({ 'model-a': 100_000 }, 'claude-code/old-model-a'),
+        providerId: 'claude' as const,
         normalizeCustomContextLimitModel: (model: string) => model === 'old-model-a' ? 'model-a' : model,
       };
 
@@ -79,19 +80,6 @@ describe('usageInfo', () => {
       expect(projectContextUsageDisplay(usage({ contextWindow: 200_000 }), displayContext))
         .toMatchObject({ contextWindow: 100_000, percentage: 50 });
     });
-
-    it.each<Record<string, number>>([{}, { 'opencode:anthropic/claude-sonnet-5': 100_000 }])(
-      'uses the native OpenCode report with its selected model ID and fallback %j',
-      customContextLimits => {
-        const raw = usage({ model: 'anthropic/claude-sonnet-5', contextWindow: 200_000 });
-        const model = 'opencode:anthropic/claude-sonnet-5';
-        expect(projectContextUsageDisplay(raw, { providerId: 'opencode', model, customContextLimits }))
-          .toMatchObject({ contextWindow: 200_000, percentage: 25 });
-        expect(clearReportedContextWindowForModel(raw, model, 'opencode')).toBe(raw);
-        expect(projectContextUsageDisplay(raw, { providerId: 'opencode', model: 'opencode:other/model' }))
-          .toBeNull();
-      },
-    );
 
     it('ignores invalid custom limits and reported windows', () => {
       for (const invalid of [0, -1, NaN, Infinity]) {

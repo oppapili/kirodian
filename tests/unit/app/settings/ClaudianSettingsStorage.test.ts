@@ -1,7 +1,5 @@
 import '@/providers';
 
-import { TEST_CODEX_CATALOG } from '@test/helpers/codexModels';
-
 import {
   CLAUDIAN_SETTINGS_PATH,
   ClaudianSettingsStorage,
@@ -10,13 +8,6 @@ import {
 import { DEFAULT_CLAUDIAN_SETTINGS as DEFAULT_SETTINGS } from '@/app/settings/defaultSettings';
 import type { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
 import { getClaudeProviderSettings } from '@/providers/claude/settings';
-import {
-  getCodexProviderSettings,
-  updateCodexProviderSettings,
-} from '@/providers/codex/settings';
-import { getGrokProviderSettings } from '@/providers/grok/settings';
-import { getOpencodeProviderSettings } from '@/providers/opencode/settings';
-import { getPiProviderSettings } from '@/providers/pi/settings';
 
 const mockGetHostnameKey = jest.fn(() => 'host-a');
 const mockGetLegacyDeviceSettingsKey = jest.fn<string | null, []>(() => null);
@@ -132,22 +123,6 @@ describe('ClaudianSettingsStorage', () => {
       expect(result.thinkingBudget).toBe(DEFAULT_SETTINGS.thinkingBudget);
     });
 
-    it('preserves an explicitly stored provider-qualified chat model selection', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        lastSelectedChatModel: {
-          providerId: 'codex',
-          model: 'codex/gpt-5',
-        },
-      }));
-
-      const result = await storage.load();
-
-      expect(result.lastSelectedChatModel).toEqual({
-        providerId: 'codex',
-        model: 'codex/gpt-5',
-      });
-    });
 
     it('preserves an explicitly stored null chat model selection', async () => {
       mockAdapter.exists.mockResolvedValue(true);
@@ -195,63 +170,8 @@ describe('ClaudianSettingsStorage', () => {
       expect(writtenContent.lastSelectedChatModel).toBeNull();
     });
 
-    it('migrates the live top-level model for the stored settings provider', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        settingsProvider: 'codex',
-        model: 'codex/gpt-5.7',
-        savedProviderModel: {
-          codex: 'codex/gpt-5.6',
-        },
-        providerConfigs: {
-          codex: { enabled: true },
-        },
-      }));
 
-      const result = await storage.load();
 
-      expect(result.lastSelectedChatModel).toEqual({
-        providerId: 'codex',
-        model: 'codex/gpt-5.7',
-      });
-      expect(mockAdapter.write).toHaveBeenCalled();
-    });
-
-    it('uses the saved provider model when the legacy live projection is empty', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        settingsProvider: 'codex',
-        model: '',
-        savedProviderModel: {
-          codex: 'codex/gpt-5.6',
-        },
-      }));
-
-      const result = await storage.load();
-
-      expect(result.lastSelectedChatModel).toEqual({
-        providerId: 'codex',
-        model: 'codex/gpt-5.6',
-      });
-    });
-
-    it('preserves a legacy seed for a disabled registered provider', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        settingsProvider: 'grok',
-        model: 'grok/kimi-coding',
-        providerConfigs: {
-          grok: { enabled: false },
-        },
-      }));
-
-      const result = await storage.load();
-
-      expect(result.lastSelectedChatModel).toEqual({
-        providerId: 'grok',
-        model: 'grok/kimi-coding',
-      });
-    });
 
     it('coerces a hidden Claude legacy selection to the default provider', async () => {
       // Claude is hidden post-migration: a legacy settingsProvider pointing at
@@ -432,20 +352,6 @@ describe('ClaudianSettingsStorage', () => {
       expect(getClaudeProviderSettings(result).cliPath).toBe('/legacy/path');
     });
 
-    it('should normalize codexCliPathsByHost from loaded data', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        codexCliPathsByHost: {
-          'host-a': '/custom/codex-a',
-          'host-b': '/custom/codex-b',
-        },
-      }));
-
-      const result = await storage.load();
-
-      expect(getCodexProviderSettings(result).cliPathsByHost['host-a']).toBe('/custom/codex-a');
-      expect(getCodexProviderSettings(result).cliPathsByHost['host-b']).toBe('/custom/codex-b');
-    });
 
     it('preserves hostname-scoped provider settings without assigning them to the current device', async () => {
       Object.defineProperty(process, 'platform', { value: 'win32' });
@@ -460,76 +366,15 @@ describe('ClaudianSettingsStorage', () => {
               'host-b': '/custom/claude-b',
             },
           },
-          codex: {
-            cliPathsByHost: {
-              'host-a': '/custom/codex-a',
-              'host-b': '/custom/codex-b',
-            },
-            installationMethodsByHost: {
-              'host-a': 'wsl',
-              'host-b': 'native-windows',
-            },
-            wslDistroOverridesByHost: {
-              'host-a': 'Ubuntu',
-              'host-b': 'Debian',
-            },
-          },
-          opencode: {
-            cliPathsByHost: {
-              'host-a': '/custom/opencode-a',
-              'host-b': '/custom/opencode-b',
-            },
-          },
-          pi: {
-            cliPathsByHost: {
-              'host-a': '/custom/pi-a',
-              'host-b': '/custom/pi-b',
-            },
-          },
         },
       }));
 
       const result = await storage.load();
       const claudeSettings = getClaudeProviderSettings(result);
-      const codexSettings = getCodexProviderSettings(result);
-      const opencodeSettings = getOpencodeProviderSettings(result);
-      const piSettings = getPiProviderSettings(result);
-      const persistedOpencodeConfig = result.providerConfigs.opencode as Record<string, unknown>;
-      const persistedPiConfig = result.providerConfigs.pi as Record<string, unknown>;
 
       expect(claudeSettings.cliPathsByHost).toEqual({
         'host-a': '/custom/claude-a',
         'host-b': '/custom/claude-b',
-      });
-      expect(codexSettings.cliPathsByHost).toEqual({
-        'host-a': '/custom/codex-a',
-        'host-b': '/custom/codex-b',
-      });
-      expect(codexSettings.installationMethod).toBe('native-windows');
-      expect(codexSettings.installationMethodsByHost).toEqual({
-        'host-a': 'wsl',
-        'host-b': 'native-windows',
-      });
-      expect(codexSettings.wslDistroOverride).toBe('');
-      expect(codexSettings.wslDistroOverridesByHost).toEqual({
-        'host-a': 'Ubuntu',
-        'host-b': 'Debian',
-      });
-      expect(opencodeSettings.cliPathsByHost).toEqual({
-        'host-a': '/custom/opencode-a',
-        'host-b': '/custom/opencode-b',
-      });
-      expect(piSettings.cliPathsByHost).toEqual({
-        'host-a': '/custom/pi-a',
-        'host-b': '/custom/pi-b',
-      });
-      expect(persistedOpencodeConfig.cliPathsByHost).toEqual({
-        'host-a': '/custom/opencode-a',
-        'host-b': '/custom/opencode-b',
-      });
-      expect(persistedPiConfig.cliPathsByHost).toEqual({
-        'host-a': '/custom/pi-a',
-        'host-b': '/custom/pi-b',
       });
       expect(mockAdapter.write).toHaveBeenCalledTimes(1);
     });
@@ -548,237 +393,28 @@ describe('ClaudianSettingsStorage', () => {
               'device:other': '/other/claude',
             },
           },
-          codex: {
-            cliPathsByHost: {
-              'device:legacy': '/legacy/codex',
-              'device-portable': '/portable/codex',
-            },
-            installationMethodsByHost: {
-              'device:legacy': 'wsl',
-            },
-          },
         },
       }));
 
       const result = await storage.load();
       const claudeSettings = getClaudeProviderSettings(result);
-      const codexSettings = getCodexProviderSettings(result);
       const persisted = JSON.parse(mockAdapter.write.mock.calls[0][1]);
 
       expect(claudeSettings.cliPathsByHost).toEqual({
         'device-portable': '/legacy/claude',
         'device:other': '/other/claude',
       });
-      expect(codexSettings.cliPathsByHost).toEqual({
-        'device-portable': '/portable/codex',
-      });
-      expect(codexSettings.installationMethodsByHost).toEqual({
-        'device-portable': 'wsl',
-      });
       expect(persisted.providerConfigs.claude.cliPathsByHost)
         .toEqual(claudeSettings.cliPathsByHost);
-      expect(persisted.providerConfigs.codex.cliPathsByHost)
-        .toEqual(codexSettings.cliPathsByHost);
     });
 
-    it('clears Codex Windows installation settings on non-Windows hosts during normalization', async () => {
-      Object.defineProperty(process, 'platform', { value: 'darwin' });
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        providerConfigs: {
-          codex: {
-            cliPathsByHost: {
-              'host-a': '/opt/homebrew/bin/codex',
-            },
-            installationMethodsByHost: {
-              'host-a': 'native-windows',
-              'host-b': 'wsl',
-            },
-            wslDistroOverridesByHost: {
-              'host-a': 'Ubuntu',
-              'host-b': 'Debian',
-            },
-          },
-        },
-      }));
 
-      const result = await storage.load();
-      const codexSettings = getCodexProviderSettings(result);
-      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
 
-      expect(codexSettings.cliPathsByHost).toEqual({
-        'host-a': '/opt/homebrew/bin/codex',
-      });
-      expect(codexSettings.installationMethodsByHost).toEqual({
-        'host-b': 'wsl',
-      });
-      expect(codexSettings.wslDistroOverridesByHost).toEqual({
-        'host-b': 'Debian',
-      });
-      expect(writtenContent.providerConfigs.codex.installationMethodsByHost).toEqual({
-        'host-b': 'wsl',
-      });
-      expect(writtenContent.providerConfigs.codex.wslDistroOverridesByHost).toEqual({
-        'host-b': 'Debian',
-      });
-    });
 
-    it('preserves Grok hostname-scoped CLI and catalog maps', async () => {
-      mockGetHostnameKey.mockReturnValue('device:current');
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        providerConfigs: {
-          grok: {
-            catalogsByHost: {
-              'host-a': {
-                defaultModelId: 'grok-4.5',
-                fingerprint: 'current',
-                models: [{ displayName: 'Grok 4.5', rawId: 'grok-4.5' }],
-                refreshedAt: 1,
-              },
-              'host-b': {
-                defaultModelId: null,
-                fingerprint: 'other',
-                models: [],
-                refreshedAt: 2,
-              },
-            },
-            cliPathsByHost: {
-              'host-a': '/custom/grok-a',
-              'host-b': '/custom/grok-b',
-            },
-            enabled: true,
-          },
-        },
-      }));
 
-      const result = await storage.load();
-      const grokSettings = getGrokProviderSettings(result);
-      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
 
-      expect(grokSettings.cliPathsByHost).toEqual({
-        'host-a': '/custom/grok-a',
-        'host-b': '/custom/grok-b',
-      });
-      expect(grokSettings.catalogsByHost).toEqual(expect.objectContaining({
-        'host-a': expect.objectContaining({ fingerprint: 'current' }),
-        'host-b': expect.objectContaining({ fingerprint: 'other' }),
-      }));
-      expect(writtenContent.providerConfigs.grok.cliPathsByHost).toEqual({
-        'host-a': '/custom/grok-a',
-        'host-b': '/custom/grok-b',
-      });
-      expect(writtenContent.providerConfigs.grok.selectedModelsByHost).toEqual(expect.objectContaining({
-        'host-a': expect.objectContaining({ fingerprint: 'current' }),
-        'host-b': expect.objectContaining({ fingerprint: 'other' }),
-      }));
-    });
 
-    it('strips legacy Codex installation scalar fields from non-Windows provider config', async () => {
-      Object.defineProperty(process, 'platform', { value: 'darwin' });
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        providerConfigs: {
-          codex: {
-            enabled: true,
-            installationMethod: 'wsl',
-            wslDistroOverride: 'Ubuntu',
-            cliPathsByHost: {
-              'host-a': '/opt/homebrew/bin/codex',
-            },
-          },
-        },
-      }));
 
-      const result = await storage.load();
-      const codexConfig = result.providerConfigs.codex as Record<string, unknown>;
-      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
-
-      expect(getCodexProviderSettings(result).installationMethod).toBe('native-windows');
-      expect(getCodexProviderSettings(result).wslDistroOverride).toBe('');
-      expect(codexConfig).not.toHaveProperty('installationMethod');
-      expect(codexConfig).not.toHaveProperty('wslDistroOverride');
-      expect(writtenContent.providerConfigs.codex).not.toHaveProperty('installationMethod');
-      expect(writtenContent.providerConfigs.codex).not.toHaveProperty('wslDistroOverride');
-    });
-
-    it('should preserve legacy codexCliPath field', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        codexCliPath: '/legacy/codex',
-      }));
-
-      const result = await storage.load();
-
-      expect(getCodexProviderSettings(result).cliPath).toBe('/legacy/codex');
-    });
-
-    it('defaults Codex installation method and WSL distro override when missing', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({}));
-
-      const result = await storage.load();
-
-      expect(getCodexProviderSettings(result).installationMethod).toBe('native-windows');
-      expect(getCodexProviderSettings(result).wslDistroOverride).toBe('');
-    });
-
-    it('loads a persisted Codex model catalog with hand-picked model IDs', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        providerConfigs: {
-          codex: {
-            enabled: true,
-            discoveredModels: TEST_CODEX_CATALOG,
-            visibleModels: ['gpt-5.4-mini'],
-          },
-        },
-      }));
-
-      const result = await storage.load();
-      const codexSettings = getCodexProviderSettings(result);
-
-      expect(codexSettings.discoveredModels).toEqual(TEST_CODEX_CATALOG);
-      expect(codexSettings.visibleModels).toEqual(['gpt-5.4-mini']);
-    });
-
-    it('normalizes invalid Codex installation fields from provider config', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        providerConfigs: {
-          codex: {
-            installationMethod: 'auto',
-            wslDistroOverride: 42,
-          },
-        },
-      }));
-
-      const result = await storage.load();
-
-      expect(getCodexProviderSettings(result).installationMethod).toBe('native-windows');
-      expect(getCodexProviderSettings(result).wslDistroOverride).toBe('');
-    });
-
-    it('does not inherit another host WSL selection from host-scoped provider config', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        providerConfigs: {
-          codex: {
-            installationMethodsByHost: {
-              'host-b': 'wsl',
-            },
-            wslDistroOverridesByHost: {
-              'host-b': 'Ubuntu',
-            },
-          },
-        },
-      }));
-
-      const result = await storage.load();
-
-      expect(getCodexProviderSettings(result).installationMethod).toBe('native-windows');
-      expect(getCodexProviderSettings(result).wslDistroOverride).toBe('');
-    });
 
     it('should remove legacy show1MModel from the stored file', async () => {
       mockAdapter.exists.mockResolvedValue(true);
@@ -975,10 +611,6 @@ describe('ClaudianSettingsStorage', () => {
       );
       const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
       expect(writtenContent.model).toBe('claude-opus-4-5');
-      expect(writtenContent.providerConfigs.codex).not.toHaveProperty('installationMethod');
-      expect(writtenContent.providerConfigs.codex.installationMethodsByHost).toEqual({});
-      expect(writtenContent.providerConfigs.codex).not.toHaveProperty('wslDistroOverride');
-      expect(writtenContent.providerConfigs.codex.wslDistroOverridesByHost).toEqual({});
     });
 
     it('should strip legacy slashCommands before writing', async () => {
@@ -995,64 +627,7 @@ describe('ClaudianSettingsStorage', () => {
       expect(writtenContent).not.toHaveProperty('slashCommands');
     });
 
-    it('persists only selected Codex metadata with hand-picked model IDs', async () => {
-      const settings = {
-        ...DEFAULT_SETTINGS,
-        providerConfigs: {
-          ...DEFAULT_SETTINGS.providerConfigs,
-          codex: {
-            ...DEFAULT_SETTINGS.providerConfigs.codex,
-            discoveredModels: TEST_CODEX_CATALOG,
-            visibleModels: ['gpt-5.4-mini'],
-          },
-        },
-      };
 
-      await storage.save(settings);
-
-      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
-      expect(writtenContent.providerConfigs.codex.selectedModels).toEqual([TEST_CODEX_CATALOG[1]]);
-      expect(writtenContent.providerConfigs.codex.visibleModels).toEqual(['gpt-5.4-mini']);
-      expect(getCodexProviderSettings(settings).discoveredModels).toEqual(TEST_CODEX_CATALOG);
-    });
-
-    it('preserves Codex model aliases and catalog across restart', async () => {
-      const settings = {
-        ...DEFAULT_SETTINGS,
-        providerConfigs: {
-          ...DEFAULT_SETTINGS.providerConfigs,
-          codex: {
-            ...DEFAULT_SETTINGS.providerConfigs.codex,
-            discoveredModels: TEST_CODEX_CATALOG,
-            modelAliases: {
-              'gpt-5.5': 'Primary',
-            },
-            visibleModels: null,
-          },
-        },
-      };
-
-      await storage.save(settings);
-      const persistedContent = mockAdapter.write.mock.calls[0][1];
-      const persistedSettings = JSON.parse(persistedContent);
-      expect(persistedSettings.providerConfigs.codex.selectedModels).toEqual(TEST_CODEX_CATALOG);
-      expect(persistedSettings.providerConfigs.codex.modelAliases).toEqual({
-        'gpt-5.5': 'Primary',
-      });
-
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(persistedContent);
-      const reloaded = await storage.load();
-
-      expect(getCodexProviderSettings(reloaded).modelAliases).toEqual({
-        'gpt-5.5': 'Primary',
-      });
-      expect(getCodexProviderSettings(reloaded).discoveredModels).toEqual(TEST_CODEX_CATALOG);
-      updateCodexProviderSettings(reloaded, { discoveredModels: TEST_CODEX_CATALOG as any });
-      expect(getCodexProviderSettings(reloaded).modelAliases).toEqual({
-        'gpt-5.5': 'Primary',
-      });
-    });
 
     it('deletes the legacy settings file after writing the new path', async () => {
       mockAdapter.exists.mockImplementation(async (path: string) => (

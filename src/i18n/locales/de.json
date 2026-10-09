@@ -92,8 +92,7 @@
     "tabs": {
       "general": "Allgemein",
       "providers": "Anbieter",
-      "claude": "Claude",
-      "codex": "Codex"
+      "claude": "Claude"
     },
     "display": "Anzeige",
     "conversations": "Unterhaltungen",
@@ -174,10 +173,6 @@
     "claudeSafeMode": {
       "name": "Sicherheitsmodus",
       "desc": "Berechtigungsmodus, der verwendet wird, wenn der Safe-Schalter aktiv ist."
-    },
-    "codexSafeMode": {
-      "name": "Sicherheitsmodus",
-      "desc": "Sandbox-Modus, der verwendet wird, wenn der Safe-Schalter aktiv ist."
     },
     "environment": "Umgebung",
     "customVariables": {
@@ -301,60 +296,6 @@
         "desc": "Standard verwendet Claudes üblichen Stil. Knapp beginnt mit Ergebnissen und verzichtet auf Einleitungen. Erfordert Claude Code 2.1.237 oder neuer.",
         "default": "Standard",
         "concise": "Knapp"
-      }
-    },
-    "codex": {
-      "installationMethod": {
-        "name": "Installationsmethode",
-        "desc": "Wie Kirodian Codex unter Windows starten soll. Native Windows verwendet einen Windows-Programmpfad. WSL startet die Linux-CLI in einer ausgewählten Distribution.",
-        "nativeWindows": "Natives Windows",
-        "wsl": "WSL"
-      },
-      "cliPath": {
-        "name": "Codex-CLI-Pfad",
-        "descUnix": "Benutzerdefinierter Pfad zur lokalen Codex-CLI. Leer lassen, um bekannte Codex-Installationen und dann PATH zu bevorzugen.",
-        "descWindows": "Benutzerdefinierter Pfad zur lokalen Codex-CLI. Leer lassen für automatische Erkennung über PATH. Verwende den nativen Windows-Programmpfad, normalerweise `codex.exe`.",
-        "descWsl": "Linux-seitiger Codex-Befehl oder absoluter Pfad zur Ausführung in WSL. Leer lassen für PATH-Suche in der ausgewählten Distribution.",
-        "validation": {
-          "wslWindowsPath": "Der WSL-Modus erwartet einen Linux-Befehl oder absoluten Linux-Pfad, keinen Windows-Programmpfad."
-        }
-      },
-      "wslDistroOverride": {
-        "name": "WSL-Distribution überschreiben",
-        "desc": "Optionale erweiterte Überschreibung. Leer lassen, um die Distribution möglichst aus einem WSL-Workspace-Pfad abzuleiten, sonst wird die Standard-WSL-Distribution verwendet."
-      },
-      "safeMode": {
-        "workspaceWrite": "Workspace schreiben",
-        "readOnly": "Nur lesen"
-      },
-      "responseStyle": {
-        "name": "Antwortstil",
-        "desc": "Wähle den Kommunikationsstil von Codex bei unterstützten Modellen. Gilt ab der nächsten Nachricht.",
-        "pragmatic": "Pragmatisch",
-        "friendly": "Freundlich"
-      },
-      "reasoningSummary": {
-        "name": "Reasoning-Zusammenfassung",
-        "desc": "Zeigt eine Zusammenfassung des Reasoning-Prozesses des Modells im Denkblock.",
-        "auto": "Automatisch",
-        "concise": "Kurz",
-        "detailed": "Ausführlich",
-        "off": "Aus"
-      },
-      "ultraEffort": {
-        "name": "Ultra-Denktiefe aktivieren",
-        "desc": "Ultra in der Auswahl für Codex-Modelle anzeigen, die es unterstützen. Ultra nutzt maximale Denktiefe mit automatischer Aufgabendelegation."
-      },
-      "skills": {
-        "name": "Codex-Fähigkeiten",
-        "desc": "Manage shared vault-level skills stored only in .agents/skills/.",
-        "hiddenName": "Ausgeblendete Fähigkeiten",
-        "hiddenDesc": "Blende bestimmte Codex-Fähigkeiten aus dem Dropdown aus. Gib Fähigkeitsnamen ohne führendes $ ein, einen pro Zeile.",
-        "hiddenPlaceholder": "analyze\nexplain\nfix"
-      },
-      "environment": {
-        "name": "Codex-Umgebung",
-        "desc": "Nur Codex-eigene Laufzeitvariablen. Verwende dies für OPENAI_*- und CODEX_*-Einstellungen. Wenn die Codex-Autoerkennung Hilfe braucht, füge das Installationsverzeichnis dem gemeinsamen PATH hinzu statt diesem Anbieterabschnitt."
       }
     },
     "agentSkills": {

@@ -12,7 +12,7 @@ HTMLElement.prototype.setText = function (text) { this.textContent = String(text
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
 
-const providers: ProviderId[] = ['claude', 'codex', 'grok', 'opencode', 'pi'];
+const providers: ProviderId[] = ['claude', 'kiro'];
 const timestamp = 1786528800000;
 
 function createRenderer(providerId: ProviderId, enabled = true) {
@@ -80,7 +80,7 @@ describe('message timestamp refresh', () => {
   });
 
   it('removes a user timestamp on refresh after disabling', () => {
-    const { renderer, messagesEl, settings } = createRenderer('codex');
+    const { renderer, messagesEl, settings } = createRenderer('kiro');
     const msg: ChatMessage = { id: 'user', role: 'user', content: 'Hello', timestamp };
     renderer.addMessage(msg);
     settings.showMessageTimestamps = false;

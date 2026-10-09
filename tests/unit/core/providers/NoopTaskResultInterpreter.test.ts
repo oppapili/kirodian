@@ -22,7 +22,7 @@ describe('NOOP_TASK_RESULT_INTERPRETER', () => {
   });
 
   it('is the shared registration singleton for providers without task-result semantics', () => {
-    for (const providerId of ['codex', 'grok', 'pi'] as const) {
+    for (const providerId of ['kiro'] as const) {
       expect(ProviderRegistry.getTaskResultInterpreter(providerId))
         .toBe(NOOP_TASK_RESULT_INTERPRETER);
     }

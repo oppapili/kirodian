@@ -8,10 +8,6 @@ import { SettingsCoordinator } from '@/app/settings/SettingsCoordinator';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
 import { getClaudeProviderSettings } from '@/providers/claude/settings';
-import { getCodexProviderSettings } from '@/providers/codex/settings';
-import { getGrokProviderSettings, updateCurrentGrokCatalog } from '@/providers/grok/settings';
-import { getOpencodeProviderSettings } from '@/providers/opencode/settings';
-import { getPiProviderSettings } from '@/providers/pi/settings';
 
 it.each(cases)('$id persists selected metadata without saving the available catalog', async ({ id, populate, read }) => {
   const settings = structuredClone(DEFAULT_CLAUDIAN_SETTINGS);
@@ -41,15 +37,8 @@ it.each(cases)('$id keeps an unavailable saved selection unchanged', ({ id: prov
   populate(settings);
   const current = settings.providerConfigs[providerId]!;
   current.visibleModels = [...current.visibleModels as string[], 'missing-model'];
-  if (providerId === 'pi') current.visibleModels = ['pi:anthropic/missing-model'];
-  if (providerId === 'grok') current.visibleModels = ['missing-model'];
-  if (providerId === 'codex') current.visibleModels = ['missing-model'];
   const decoded = {
     claude: getClaudeProviderSettings,
-    codex: getCodexProviderSettings,
-    grok: getGrokProviderSettings,
-    opencode: getOpencodeProviderSettings,
-    pi: getPiProviderSettings,
   }[providerId](settings);
   expect(decoded.visibleModels).toEqual(current.visibleModels);
   expect(settings.model).toBe(selected);
@@ -67,11 +56,7 @@ it.each(cases)('$id does not restore removed models from an older selected snaps
   const restored = await storage.load();
   const config = restored.providerConfigs[id]!;
   const selected = config.visibleModels;
-  if (id === 'grok') {
-    updateCurrentGrokCatalog(restored, { defaultModelId: null, fingerprint: 'new', refreshedAt: 20, models: [] });
-  } else {
-    config.discoveredModels = [];
-  }
+  config.discoveredModels = [];
   await storage.save(restored);
   const unavailable = await storage.load();
   expect(unavailable.providerConfigs[id]!.visibleModels).toEqual(selected);
@@ -90,25 +75,15 @@ it.each(cases)('$id keeps runtime catalog and selection intact when persistence 
 });
 
 it('materializes legacy implicit selections before a new catalog arrives', async () => {
-  for (const id of ['claude', 'codex', 'grok'] as const) {
+  for (const id of ['claude'] as const) {
     const settings = structuredClone(DEFAULT_CLAUDIAN_SETTINGS);
     cases.find(entry => entry.id === id)!.populate(settings);
     settings.providerConfigs[id]!.visibleModels = null;
     const normalized = structuredClone(settings);
     ProviderRegistry.getSettingsStorageAdapter(id).normalizeStored?.(normalized, settings);
     expect(Array.isArray(normalized.providerConfigs[id]!.visibleModels)).toBe(true);
-    expect(normalized.providerConfigs[id]!.visibleModels).toEqual(id === 'claude' ? ['haiku', 'sonnet', 'opus', 'fable'] : id === 'codex' ? ['gpt-5.5', 'unselected-catalog-entry'] : ['selected', 'unselected-catalog-entry']);
+    expect(normalized.providerConfigs[id]!.visibleModels).toEqual(['haiku', 'sonnet', 'opus', 'fable']);
   }
-});
-
-it.each(['codex', 'grok'] as const)('does not implicitly enable %s discovery on a fresh profile', async id => {
-  const storage = new ClaudianSettingsStorage({ exists: async () => false } as unknown as VaultFileAdapter);
-  const settings = await storage.load();
-  const selected = settings.providerConfigs[id]!.visibleModels;
-  expect(selected).toEqual([]);
-  cases.find(entry => entry.id === id)!.populate(settings);
-  settings.providerConfigs[id]!.visibleModels = selected;
-  expect(ProviderRegistry.getChatUIConfig(id).getModelOptions(settings)).toEqual([]);
 });
 
 it.each(cases)('$id removes deselected aliases, preferences and saved effort projections from disk', async ({ id, populate, selected }) => {
@@ -116,14 +91,8 @@ it.each(cases)('$id removes deselected aliases, preferences and saved effort pro
   populate(settings);
   const config = settings.providerConfigs[id]!;
   const selectedId = (config.visibleModels as string[])[0];
-  const removedId = id === 'pi' ? 'pi:anthropic/unselected-catalog-entry' : 'unselected-catalog-entry';
+  const removedId = 'unselected-catalog-entry';
   config.modelAliases = { [selectedId]: 'Keep alias', [removedId]: 'Remove alias' };
-  if (id === 'grok') config.preferredReasoningByModel = { [selectedId]: 'high', [removedId]: 'medium' };
-  if (id === 'pi' || id === 'opencode') config.preferredThinkingByModel = { [selectedId]: 'high', [removedId]: 'medium' };
-  if (id === 'opencode') config.thinkingOptionsByModel = {
-    [selectedId]: [{ label: 'High', value: 'high' }],
-    [removedId]: [{ label: 'Medium', value: 'medium' }],
-  };
   const ui = ProviderRegistry.getChatUIConfig(id);
   const removedSelection = ui.normalizeAvailableModelSelection?.(removedId, settings) ?? removedId;
   settings.savedProviderModel = { [id]: removedSelection };
@@ -200,11 +169,6 @@ it.each(cases.flatMap(entry => [false, true].map(unavailable => ({ ...entry, una
     if (unavailable) {
       const config = settings.providerConfigs[id]!;
       config.discoveredModels = [];
-      if (id === 'grok') {
-        for (const catalog of Object.values(config.catalogsByHost as Record<string, { models: unknown[] }>)) {
-          catalog.models = [];
-        }
-      }
     }
     let content = '';
     await new ClaudianSettingsStorage({
@@ -218,26 +182,6 @@ it.each(cases.flatMap(entry => [false, true].map(unavailable => ({ ...entry, una
   },
 );
 
-it('keeps xHigh for an explicitly selected Grok model while its capabilities are unavailable', async () => {
-  const settings = structuredClone(DEFAULT_CLAUDIAN_SETTINGS);
-  settings.providerConfigs.grok = { enabled: true, visibleModels: ['temporarily-unavailable'],
-    preferredReasoningByModel: { 'temporarily-unavailable': 'xhigh', deselected: 'max' } };
-  let content = '';
-  const storage = new ClaudianSettingsStorage({
-    exists: async () => Boolean(content),
-    read: async () => content,
-    write: async (_path: string, value: string) => { content = value; },
-    delete: async () => undefined,
-  } as unknown as VaultFileAdapter);
-  await storage.save(settings);
-  expect(JSON.parse(content).providerConfigs.grok.preferredReasoningByModel)
-    .toEqual({ 'temporarily-unavailable': 'xhigh' });
-  const restored = await storage.load();
-  expect(getGrokProviderSettings(restored).preferredReasoningByModel)
-    .toEqual({ 'temporarily-unavailable': 'xhigh' });
-});
-
-
 it('cleans context overrides by provider identity while preserving resolved aliases and snippet templates', async () => {
   const settings = structuredClone(DEFAULT_CLAUDIAN_SETTINGS);
   for (const { populate } of cases) populate(settings);
@@ -247,10 +191,6 @@ it('cleans context overrides by provider identity while preserving resolved alia
     'claude-sonnet-resolved': 128_000,
     'claude-code/sonnet': 128_000,
     Sonnet: 128_000,
-    selected: 128_000,
-    'grok/selected': 128_000,
-    'openai-codex/selected': 64_000,
-    'grok/gpt-5.5': 64_000,
     removed: 32_000,
   };
   settings.envSnippets = [{ id: 'template', name: 'Template', description: '', envVars: '',
@@ -266,7 +206,7 @@ it('cleans context overrides by provider identity while preserving resolved alia
   await storage.save(settings);
   const expected = {
     'claude-sonnet-resolved': 128_000, 'claude-code/sonnet': 128_000,
-    Sonnet: 128_000, selected: 128_000, 'grok/selected': 128_000,
+    Sonnet: 128_000,
   };
   expect(JSON.parse(content).customContextLimits).toEqual(expected);
   expect(JSON.parse(content).envSnippets).toEqual(settings.envSnippets);

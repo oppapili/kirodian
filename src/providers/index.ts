@@ -1,21 +1,13 @@
 import { ProviderRegistry } from '../core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '../core/providers/ProviderWorkspaceRegistry';
 import { claudeProviderRegistration } from './claude/registration';
-import { codexProviderRegistration } from './codex/registration';
-import { grokProviderRegistration } from './grok/registration';
 import { kiroProviderRegistration } from './kiro/registration';
-import { opencodeProviderRegistration } from './opencode/registration';
-import { piProviderRegistration } from './pi/registration';
 
 let builtInProvidersRegistered = false;
 
 export const BUILT_IN_PROVIDER_MODULES = [
   claudeProviderRegistration,
-  codexProviderRegistration,
-  grokProviderRegistration,
   kiroProviderRegistration,
-  opencodeProviderRegistration,
-  piProviderRegistration,
 ] as const;
 
 export function registerBuiltInProviders(): void {

@@ -1,7 +1,5 @@
 import '@/providers';
 
-import { TEST_CODEX_MODEL } from '@test/helpers/codexModels';
-
 import { getEnabledProviderForModel, getProviderForModel } from '@/core/providers/modelRouting';
 
 describe('getProviderForModel', () => {
@@ -16,26 +14,12 @@ describe('getProviderForModel', () => {
     expect(getProviderForModel('claude-opus-4-6-20250616')).toBe('claude');
   });
 
-  it('routes Codex default models to codex', () => {
-    expect(getProviderForModel(TEST_CODEX_MODEL)).toBe('codex');
-  });
-
   it('leaves unknown models unresolved', () => {
     expect(getProviderForModel('some-unknown-model')).toBeNull();
   });
 
-  it('routes models starting with gpt- to codex', () => {
-    expect(getProviderForModel('gpt-4o')).toBe('codex');
-    expect(getProviderForModel('gpt-custom')).toBe('codex');
-  });
-
-  it('routes models starting with o prefix to codex', () => {
-    expect(getProviderForModel('o3')).toBe('codex');
-    expect(getProviderForModel('o4-mini')).toBe('codex');
-  });
-
   it('does not claim a manual environment model', () => {
-    const settings = { environmentVariables: 'OPENAI_MODEL=my-custom-model' };
+    const settings = { environmentVariables: 'MANUAL_MODEL=my-custom-model' };
     expect(getProviderForModel('my-custom-model', settings)).toBeNull();
   });
 
@@ -45,50 +29,28 @@ describe('getProviderForModel', () => {
         claude: {
           customModels: 'deepseek-v4-pro',
         },
-        codex: {
-          enabled: true,
-          customModels: 'deepseek-v4-pro',
-        },
       },
     };
 
     expect(getProviderForModel('claude-code/deepseek-v4-pro', settings)).toBe('claude');
-    expect(getProviderForModel('openai-codex/deepseek-v4-pro', settings)).toBe('codex');
   });
 
-  it('does not claim retired manual model configuration', () => {
-    const settings = {
-      providerConfigs: {
-        codex: {
-          enabled: true,
-          customModels: 'my-custom-model',
-        },
-      },
-    };
-
-    expect(getProviderForModel('my-custom-model', settings)).toBeNull();
-  });
-
-  it('rejects ambiguous ownership and resolves within enabled providers only', () => {
+  it('resolves ambiguous ownership within enabled providers only', () => {
     const settings = {
       settingsProvider: 'claude',
       providerConfigs: {
         claude: {
-          environmentVariables: `ANTHROPIC_MODEL=${TEST_CODEX_MODEL}`,
-        },
-        codex: {
-          enabled: false,
+          environmentVariables: 'ANTHROPIC_MODEL=env-model',
         },
       },
     };
 
-    expect(getProviderForModel(TEST_CODEX_MODEL, settings)).toBeNull();
-    expect(getEnabledProviderForModel(TEST_CODEX_MODEL, settings)).toBe('claude');
+    expect(getEnabledProviderForModel('env-model', settings)).toBe('claude');
   });
 });
 
 it('leaves an unclaimed model unresolved instead of selecting the default provider', () => {
   expect(getProviderForModel('retired-endpoint-model', {
-    providerConfigs: { claude: { enabled: true }, codex: { enabled: true, visibleModels: [] } },
+    providerConfigs: { claude: { enabled: true } },
   })).toBeNull();
 });

@@ -238,7 +238,7 @@ describe('ConversationRepository hydration', () => {
 
   it('recovers from preserved metadata after live session state is invalidated', async () => {
     const recoverySource = createConversation('invalidated-session');
-    recoverySource.providerId = 'codex';
+    recoverySource.providerId = 'kiro';
     recoverySource.providerState = { threadId: 'thread-before-invalidation' };
     recoverySource.sessionId = 'thread-before-invalidation';
     const invalidated = {
@@ -247,7 +247,7 @@ describe('ConversationRepository hydration', () => {
       sessionId: null,
     };
     const recoverConversationModelSelection = jest.fn().mockResolvedValue(
-      'openai-codex/gpt-5.5',
+      'kiro/claude-sonnet-5',
     );
     jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
       hasConversationModelRecoverySource: (conversation: Conversation) => (
@@ -265,12 +265,12 @@ describe('ConversationRepository hydration', () => {
       '/vault',
       expect.any(Object),
     );
-    expect(invalidated.selectedModel).toBe('openai-codex/gpt-5.5');
+    expect(invalidated.selectedModel).toBe('kiro/claude-sonnet-5');
   });
 
   it('persists unresolved recovery locators for retry after restart', async () => {
     const recoverySource = createConversation('retry-after-restart');
-    recoverySource.providerId = 'codex';
+    recoverySource.providerId = 'kiro';
     recoverySource.sessionId = 'thread-before-invalidation';
     recoverySource.providerState = { threadId: 'thread-before-invalidation' };
     const invalidated: Conversation = {
@@ -280,7 +280,7 @@ describe('ConversationRepository hydration', () => {
     };
     const recoverConversationModelSelection = jest.fn()
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce('openai-codex/gpt-5.5');
+      .mockResolvedValueOnce('kiro/claude-sonnet-5');
     jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
       hasConversationModelRecoverySource: (conversation: Conversation) => (
         conversation.sessionId === 'thread-before-invalidation'
@@ -327,7 +327,7 @@ describe('ConversationRepository hydration', () => {
 
   it('retires an unresolved recovery locator when a fresh provider session is accepted', async () => {
     const recoverySource = createConversation('fresh-session-supersedes-recovery');
-    recoverySource.providerId = 'codex';
+    recoverySource.providerId = 'kiro';
     recoverySource.sessionId = 'old-thread';
     recoverySource.providerState = { threadId: 'old-thread' };
     const invalidated: Conversation = {
@@ -337,7 +337,7 @@ describe('ConversationRepository hydration', () => {
     };
     const recoverConversationModelSelection = jest.fn(async (conversation: Conversation) => (
       conversation.sessionId === 'fresh-thread'
-        ? 'openai-codex/gpt-5.6'
+        ? 'kiro/claude-sonnet-5-1'
         : null
     ));
     jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
@@ -356,7 +356,7 @@ describe('ConversationRepository hydration', () => {
       'binding-1',
       1,
       {
-        providerId: 'codex',
+        providerId: 'kiro',
         revision: 1,
         status: 'idle',
         providerSessionId: 'fresh-thread',
@@ -507,8 +507,8 @@ describe('ConversationRepository hydration', () => {
     const affected = createConversation('affected-model');
     affected.selectedModel = 'claude-code/retired-model';
     const unaffected = createConversation('unaffected-model');
-    unaffected.providerId = 'codex';
-    unaffected.selectedModel = 'openai-codex/retired-model';
+    unaffected.providerId = 'kiro';
+    unaffected.selectedModel = 'kiro/retired-model';
     const { repository, persistence } = createRepository(affected);
     repository.replaceAll([affected, unaffected]);
 
@@ -516,7 +516,7 @@ describe('ConversationRepository hydration', () => {
       .resolves.toEqual([]);
 
     expect(affected.selectedModel).toBe('claude-code/retired-model');
-    expect(unaffected.selectedModel).toBe('openai-codex/retired-model');
+    expect(unaffected.selectedModel).toBe('kiro/retired-model');
     expect(persistence.saveMetadata).not.toHaveBeenCalled();
   });
 

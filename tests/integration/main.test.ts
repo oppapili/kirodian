@@ -13,20 +13,15 @@ import { isVersionedRuntimeInputFingerprint } from '@/core/providers/settings/Ru
 import { TOOL_SUBAGENT } from '@/core/tools/toolNames';
 import { type Conversation, type SessionMetadata, VIEW_TYPE_CLAUDIAN } from '@/core/types';
 import * as sdkSession from '@/providers/claude/history/ClaudeHistoryStore';
-import { CodexModelCatalogCoordinator } from '@/providers/codex/runtime/CodexModelCatalogCoordinator';
 import {
-  getCodexProviderSettings,
-  updateCodexProviderSettings,
-} from '@/providers/codex/settings';
-import { computeGrokEnvironmentHash } from '@/providers/grok/env/GrokSettingsReconciler';
-import { GrokCLIResolver } from '@/providers/grok/runtime/GrokCLIResolver';
-import { GrokModelCatalogCoordinator } from '@/providers/grok/runtime/GrokModelCatalogCoordinator';
-import { GrokModelCatalogService } from '@/providers/grok/runtime/GrokModelCatalogService';
+  getClaudeProviderSettings,
+  updateClaudeProviderSettings,
+} from '@/providers/claude/settings';
+import { computeKiroEnvironmentHash } from '@/providers/kiro/env/KiroSettingsReconciler';
 import {
-  getGrokProviderSettings,
-  updateCurrentGrokCatalog,
-  updateGrokProviderSettings,
-} from '@/providers/grok/settings';
+  getKiroProviderSettings,
+  updateKiroProviderSettings,
+} from '@/providers/kiro/settings';
 import { getHostnameKey } from '@/utils/env';
 
 // Mock fs for ClaudianService
@@ -87,7 +82,7 @@ describe('ClaudianPlugin', () => {
   function mockMetadataSources(
     ...metadata: Array<{
       id: string;
-      providerId: 'claude' | 'codex';
+      providerId: 'claude' | 'kiro';
       title: string;
       createdAt: number;
       lastActivityAt: number;
@@ -541,16 +536,16 @@ describe('ClaudianPlugin', () => {
 
     it('recovers models from original metadata before persisting session invalidation', async () => {
       const metadata = {
-        id: 'codex-model-before-invalidation',
-        providerId: 'codex' as const,
-        title: 'Codex model before invalidation',
+        id: 'claude-model-before-invalidation',
+        providerId: 'claude' as const,
+        title: 'Claude model before invalidation',
         createdAt: 1,
         lastActivityAt: 2,
         sessionId: 'thread-before-invalidation',
-        providerState: { threadId: 'thread-before-invalidation' },
+        providerState: { providerSessionId: 'thread-before-invalidation' },
       };
       await plugin.onload();
-      (plugin as any).runtimeSettings.pendingEnvironmentInvalidationGenerations.set('codex', 1);
+      (plugin as any).runtimeSettings.pendingEnvironmentInvalidationGenerations.set('claude', 1);
       const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan')
         .mockResolvedValue({
           records: deviceMetadataRecords(metadata),
@@ -587,12 +582,12 @@ describe('ClaudianPlugin', () => {
       expect(registeredSources).toContainEqual(expect.objectContaining({
         id: metadata.id,
         sessionId: 'thread-before-invalidation',
-        providerState: { threadId: 'thread-before-invalidation' },
+        providerState: { providerSessionId: 'thread-before-invalidation' },
       }));
       expect(events).toEqual(['recover', 'persist:null']);
       expect(persistedRecoverySources).toEqual([{
         sessionId: 'thread-before-invalidation',
-        providerState: { threadId: 'thread-before-invalidation' },
+        providerState: { providerSessionId: 'thread-before-invalidation' },
       }]);
 
       scanSpy.mockRestore();
@@ -1657,7 +1652,7 @@ describe('ClaudianPlugin', () => {
     it('holds the execution lifecycle transition across the environment settings commit', async () => {
       await plugin.onload();
       const events: string[] = [];
-      const unregister = plugin.executionLifecycleRegistry.registerTransitionHook('grok', {
+      const unregister = plugin.executionLifecycleRegistry.registerTransitionHook('claude', {
         beforeTransition: () => {
           events.push('before');
         },
@@ -1669,10 +1664,10 @@ describe('ClaudianPlugin', () => {
         events.push('write');
       });
 
-      await plugin.applyEnvironmentVariables('provider:grok', 'GROK_PROFILE=new');
+      await plugin.applyEnvironmentVariables('provider:claude', 'ANTHROPIC_PROFILE=new');
 
       expect(events).toEqual(['before', 'write', 'after']);
-      expect(plugin.getEnvironmentVariablesForScope('provider:grok')).toBe('GROK_PROFILE=new');
+      expect(plugin.getEnvironmentVariablesForScope('provider:claude')).toBe('ANTHROPIC_PROFILE=new');
       unregister();
     });
 
@@ -1702,13 +1697,13 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
       const cliResolver = {
         reset: jest.fn(),
-        resolveFromSettings: jest.fn().mockReturnValue('/owned/codex'),
+        resolveFromSettings: jest.fn().mockReturnValue('/owned/claude'),
       };
-      ProviderWorkspaceRegistry.setServices('codex', { cliResolver });
+      ProviderWorkspaceRegistry.setServices('claude', { cliResolver });
 
-      await expect(plugin.getResolvedProviderCliPath('codex', {
+      await expect(plugin.getResolvedProviderCliPath('claude', {
         providerTransitionOwner: true,
-      })).resolves.toBe('/owned/codex');
+      })).resolves.toBe('/owned/claude');
       expect(cliResolver.resolveFromSettings).toHaveBeenCalledWith(
         plugin.settings,
         { providerTransitionOwner: true },
@@ -1717,110 +1712,23 @@ describe('ClaudianPlugin', () => {
 
     it('does not initialize a cold provider for transition-owner CLI resolution', async () => {
       await plugin.onload();
-      ProviderWorkspaceRegistry.setServices('grok', undefined);
+      ProviderWorkspaceRegistry.setServices('claude', undefined);
       const initialize = jest.fn(async () => ({
         cliResolver: {
           reset: jest.fn(),
-          resolveFromSettings: jest.fn().mockReturnValue('/cold/grok'),
+          resolveFromSettings: jest.fn().mockReturnValue('/cold/claude'),
         },
       }));
-      ProviderWorkspaceRegistry.register('grok', { initialize });
+      ProviderWorkspaceRegistry.register('claude', { initialize });
 
-      await expect(plugin.getResolvedProviderCliPath('grok', {
+      await expect(plugin.getResolvedProviderCliPath('claude', {
         providerTransitionOwner: true,
       })).rejects.toThrow('requires initialized workspace services');
       expect(initialize).not.toHaveBeenCalled();
     });
 
-    it('refreshes an initialized Grok catalog through its owned CLI path while gated', async () => {
-      await plugin.onload();
-      updateGrokProviderSettings(plugin.settings, {
-        cliPath: process.execPath,
-        enabled: true,
-      });
-      const runner = {
-        run: jest.fn(async ({ args }: { args: string[] }) => (
-          args[0] === '--version'
-            ? { exitCode: 0, stdout: 'grok 1.0' }
-            : {
-              exitCode: 0,
-              stdout: 'Default model: grok-4.5\nAvailable models:\n  grok-4.5\n',
-            }
-        )),
-      };
-      const service = new GrokModelCatalogService(plugin as any, {
-        runner,
-        probe: { discover: async () => { throw new Error('Method not found'); } },
-      });
-      const coordinator = new GrokModelCatalogCoordinator(plugin as any, service);
-      const cliResolver = new GrokCLIResolver();
-      ProviderWorkspaceRegistry.setServices('grok', {
-        cliResolver,
-      });
-
-      const refresh = coordinator.refresh({
-        providerTransitionOwner: true,
-      });
-      let refreshed = false;
-      void refresh.then(() => { refreshed = true; });
-      await new Promise(resolve => setImmediate(resolve));
-      expect(refreshed).toBe(true);
-      expect(runner.run).toHaveBeenCalled();
-
-      await refresh;
-    });
-
-    it('computes an initialized Codex catalog fingerprint through owned CLI while gated', async () => {
-      await plugin.onload();
-      updateCodexProviderSettings(plugin.settings, { enabled: true });
-      const discoveredModel = {
-        defaultReasoningEffort: 'medium',
-        defaultServiceTier: null,
-        description: 'Owned model',
-        displayName: 'Owned model',
-        inputModalities: ['text'] as const,
-        isDefault: true,
-        model: 'owned-model',
-        serviceTiers: [],
-        supportedReasoningEfforts: [],
-      };
-      const discovery = {
-        discoverModels: jest.fn().mockResolvedValue({
-          kind: 'completed',
-          models: [discoveredModel],
-        }),
-      };
-      const coordinator = new CodexModelCatalogCoordinator(plugin as any, discovery);
-      const cliResolver = {
-        reset: jest.fn(),
-        resolveFromSettings: jest.fn().mockReturnValue('/owned/codex'),
-      };
-      ProviderWorkspaceRegistry.setServices('codex', {
-        cliResolver,
-      });
-
-      const refresh = coordinator.refresh({
-        providerTransitionOwner: true,
-      });
-      let refreshed = false;
-      void refresh.then(() => { refreshed = true; });
-      await new Promise(resolve => setImmediate(resolve));
-      expect(refreshed).toBe(true);
-      expect(discovery.discoverModels).toHaveBeenCalledWith(
-        expect.any(AbortSignal),
-        { providerTransitionOwner: true },
-      );
-      expect(cliResolver.resolveFromSettings).toHaveBeenCalled();
-
-      await refresh;
-    });
-
     it('recovers the committed environment before surfacing a post-commit publication failure', async () => {
       await plugin.onload();
-      updateGrokProviderSettings(plugin.settings, {
-        enabled: true,
-        environmentVariables: 'GROK_PROFILE=old',
-      });
       const publicationError = new Error('post-commit publication failed');
       const invalidateSpy = jest.spyOn(
         ProviderSettingsCoordinator,
@@ -1829,10 +1737,10 @@ describe('ClaudianPlugin', () => {
         throw publicationError;
       });
       const markStale = jest.fn();
-      const unregister = plugin.executionLifecycleRegistry.registerTransitionHook('grok', {
+      const unregister = plugin.executionLifecycleRegistry.registerTransitionHook('claude', {
         beforeTransition: () => markStale(),
       });
-      ProviderWorkspaceRegistry.setServices('grok', {
+      ProviderWorkspaceRegistry.setServices('claude', {
         modelCatalog: { markStale } as any,
       });
       const invalidateProviderCommandCaches = jest.fn();
@@ -1842,30 +1750,30 @@ describe('ClaudianPlugin', () => {
         refreshModelSelector,
       } as any]);
       const initialGeneration = plugin.executionLifecycleRegistry
-        .getProviderGeneration('grok');
+        .getProviderGeneration('claude');
 
       try {
         const firstError = await plugin.applyEnvironmentVariables(
-          'provider:grok',
-          'GROK_PROFILE=committed',
+          'provider:claude',
+          'ANTHROPIC_PROFILE=committed',
         ).catch(error => error);
 
-        expect(plugin.getEnvironmentVariablesForScope('provider:grok'))
-          .toBe('GROK_PROFILE=committed');
+        expect(plugin.getEnvironmentVariablesForScope('provider:claude'))
+          .toBe('ANTHROPIC_PROFILE=committed');
         expect(markStale).toHaveBeenCalledTimes(1);
         expect(markStale).toHaveBeenCalledWith();
-        expect(invalidateProviderCommandCaches).toHaveBeenCalledWith(['grok']);
+        expect(invalidateProviderCommandCaches).toHaveBeenCalledWith(['claude']);
         expect(refreshModelSelector).toHaveBeenCalledTimes(1);
-        expect(plugin.executionLifecycleRegistry.getProviderGeneration('grok'))
+        expect(plugin.executionLifecycleRegistry.getProviderGeneration('claude'))
           .toBe(initialGeneration + 1);
         expect(invalidateSpy).toHaveBeenCalledTimes(1);
         expect(firstError).toBe(publicationError);
 
-        await plugin.applyEnvironmentVariables('provider:grok', 'GROK_PROFILE=next');
+        await plugin.applyEnvironmentVariables('provider:claude', 'ANTHROPIC_PROFILE=next');
 
-        expect(plugin.getEnvironmentVariablesForScope('provider:grok')).toBe('GROK_PROFILE=next');
+        expect(plugin.getEnvironmentVariablesForScope('provider:claude')).toBe('ANTHROPIC_PROFILE=next');
         expect(markStale).toHaveBeenCalledTimes(2);
-        expect(plugin.executionLifecycleRegistry.getProviderGeneration('grok'))
+        expect(plugin.executionLifecycleRegistry.getProviderGeneration('claude'))
           .toBe(initialGeneration + 2);
         expect(invalidateSpy).toHaveBeenCalledTimes(2);
       } finally {
@@ -1987,64 +1895,6 @@ describe('ClaudianPlugin', () => {
       } finally {
         saveMetadataSpy.mockRestore();
       }
-    });
-
-    it('restores the committed Grok context before releasing a failed settings transition', async () => {
-      await plugin.onload();
-      // onload persists the default-provider (kiro) migration once; isolate the
-      // action's write count from that provider-neutral startup write.
-      (mockApp.vault.adapter.write as jest.Mock).mockClear();
-      updateGrokProviderSettings(plugin.settings, {
-        enabled: true,
-        environmentVariables: 'GROK_PROFILE=old',
-      });
-      updateCurrentGrokCatalog(plugin.settings, {
-        defaultModelId: 'old-model',
-        fingerprint: 'old-catalog',
-        models: [{
-          displayName: 'Old model',
-          rawId: 'old-model',
-          reasoningEfforts: [],
-          supportsReasoning: false,
-        }],
-        refreshedAt: 1,
-      });
-      updateGrokProviderSettings(plugin.settings, {
-        environmentHash: computeGrokEnvironmentHash(plugin.settings),
-      });
-      const committed = structuredClone(getGrokProviderSettings(plugin.settings));
-      let contextAtRelease: ReturnType<typeof getGrokProviderSettings> | null = null;
-      const unregister = plugin.executionLifecycleRegistry.registerTransitionHook('grok', {
-        afterTransition() {
-          contextAtRelease = structuredClone(getGrokProviderSettings(plugin.settings));
-        },
-      });
-      const writeError = new Error('settings write failed');
-      mockApp.vault.adapter.write.mockRejectedValueOnce(writeError);
-
-      await expect(plugin.applyEnvironmentVariables(
-        'provider:grok',
-        'GROK_PROFILE=new',
-      )).rejects.toBe(writeError);
-
-      expect(mockApp.vault.adapter.write).toHaveBeenCalledTimes(1);
-      expect(contextAtRelease).toEqual(committed);
-      expect(getGrokProviderSettings(plugin.settings)).toEqual(committed);
-      expect(plugin.getEnvironmentVariablesForScope('provider:grok')).toBe('GROK_PROFILE=old');
-      expect(getGrokProviderSettings(plugin.settings).currentCatalog).toEqual(
-        committed.currentCatalog,
-      );
-
-      expect(plugin.getEnvironmentVariablesForScope('provider:grok')).toBe('GROK_PROFILE=old');
-
-      await plugin.applyEnvironmentVariables('provider:grok', 'GROK_PROFILE=new');
-
-      expect(mockApp.vault.adapter.write).toHaveBeenCalledTimes(2);
-      expect(plugin.getEnvironmentVariablesForScope('provider:grok')).toBe('GROK_PROFILE=new');
-      expect(getGrokProviderSettings(plugin.settings).environmentHash)
-        .not.toBe(committed.environmentHash);
-      expect(getGrokProviderSettings(plugin.settings).currentCatalog?.models[0].rawId).toBe('old-model');
-      unregister();
     });
 
     it('does not leak failed Claude invalidation into live or deferred conversations', async () => {
@@ -2387,72 +2237,10 @@ describe('ClaudianPlugin', () => {
       expect(mockView.getTabManager).not.toHaveBeenCalled();
     });
 
-    it('reloads preserved sessions while resetting only invalidation-policy providers', async () => {
-      await plugin.onload();
-
-      const reloadConversation = await plugin.createConversation({
-        providerId: 'claude',
-        sessionId: 'preserved-session',
-      });
-      await plugin.updateConversation(reloadConversation.id, {
-        providerState: { providerSessionId: 'preserved-provider-session' },
-      });
-      const invalidatedConversation = await plugin.createConversation({
-        providerId: 'codex',
-        sessionId: 'invalidated-session',
-      });
-      await plugin.updateConversation(invalidatedConversation.id, {
-        providerState: { threadId: 'invalidated-thread' },
-      });
-
-      const claudeReconciler = ProviderRegistry.getSettingsReconciler('claude');
-      const reconcileSpy = jest.spyOn(claudeReconciler, 'reconcileModelWithEnvironment')
-        .mockReturnValue({ changed: true, invalidatedConversations: [] });
-      claudeReconciler.environmentSessionPolicy = 'reload';
-      const stagePendingSpy = jest.spyOn((plugin as any).runtimeSettings, 'stagePendingSessionInvalidations');
-      const getTabManager = jest.fn();
-      const mockView = {
-        getTabManager,
-        invalidateProviderCommandCaches: jest.fn(),
-        refreshModelSelector: jest.fn(),
-      };
-      jest.spyOn(plugin, 'getAllViews').mockReturnValue([mockView as any]);
-
-      try {
-        await plugin.applyEnvironmentVariables(
-          'shared',
-          [
-            'ANTHROPIC_BASE_URL=https://reload.example.com',
-            'OPENAI_BASE_URL=https://invalidate.example.com',
-          ].join('\n'),
-        );
-      } finally {
-        delete claudeReconciler.environmentSessionPolicy;
-        reconcileSpy.mockRestore();
-      }
-
-      const preserved = await plugin.getConversationById(reloadConversation.id);
-      const invalidated = await plugin.getConversationById(invalidatedConversation.id);
-      expect(stagePendingSpy).toHaveBeenCalledWith(
-        expect.anything(),
-        ['codex'],
-      );
-      expect(stagePendingSpy).toHaveBeenCalledTimes(1);
-      expect(preserved).toEqual(expect.objectContaining({
-        sessionId: 'preserved-session',
-        providerState: { providerSessionId: 'preserved-provider-session' },
-      }));
-      expect(invalidated).toEqual(expect.objectContaining({
-        sessionId: null,
-        providerState: undefined,
-      }));
-      expect(getTabManager).not.toHaveBeenCalled();
-    });
-
-    it('does not touch an initialized blank Grok tab during an environment transition', async () => {
+    it('does not touch an initialized blank Kiro tab during an environment transition', async () => {
       await plugin.onload();
       const initialGeneration = plugin.executionLifecycleRegistry
-        .getProviderGeneration('grok');
+        .getProviderGeneration('kiro');
 
       const mockView = {
         getTabManager: jest.fn(),
@@ -2462,20 +2250,20 @@ describe('ClaudianPlugin', () => {
       jest.spyOn(plugin, 'getAllViews').mockReturnValue([mockView as any]);
 
       await plugin.applyEnvironmentVariables(
-        'provider:grok',
-        'GROK_PROFILE=first-turn-reload',
+        'provider:kiro',
+        'KIRO_PROFILE=first-turn-reload',
       );
 
-      expect(plugin.executionLifecycleRegistry.getProviderGeneration('grok'))
+      expect(plugin.executionLifecycleRegistry.getProviderGeneration('kiro'))
         .toBe(initialGeneration + 1);
       expect(mockView.getTabManager).not.toHaveBeenCalled();
     });
 
-    it('does not coordinate environment changes through open Grok tabs', async () => {
+    it('does not coordinate environment changes through open Kiro tabs', async () => {
       await plugin.onload();
-      const conversation = await plugin.createConversation({ providerId: 'grok' });
+      const conversation = await plugin.createConversation({ providerId: 'kiro' });
       const initialGeneration = plugin.executionLifecycleRegistry
-        .getProviderGeneration('grok');
+        .getProviderGeneration('kiro');
       const mockView = {
         getTabManager: jest.fn(),
         invalidateProviderCommandCaches: jest.fn(),
@@ -2484,11 +2272,11 @@ describe('ClaudianPlugin', () => {
       jest.spyOn(plugin, 'getAllViews').mockReturnValue([mockView as any]);
 
       await plugin.applyEnvironmentVariables(
-        'provider:grok',
-        'GROK_PROFILE=streaming-first-turn',
+        'provider:kiro',
+        'KIRO_PROFILE=streaming-first-turn',
       );
 
-      expect(plugin.executionLifecycleRegistry.getProviderGeneration('grok'))
+      expect(plugin.executionLifecycleRegistry.getProviderGeneration('kiro'))
         .toBe(initialGeneration + 1);
       expect(mockView.getTabManager).not.toHaveBeenCalled();
       expect(plugin.getConversationSync(conversation.id)?.sessionId).toBeNull();
@@ -2500,43 +2288,43 @@ describe('ClaudianPlugin', () => {
       const settingsPath = '.claudian/claudian-settings.json';
       const deferredMetadata = {
         id: 'runtime-settings-restart-session',
-        providerId: 'codex' as const,
+        providerId: 'claude' as const,
         title: 'Runtime settings restart session',
         createdAt: 1,
         lastActivityAt: 2,
-        sessionId: 'codex-thread-id',
-        providerState: { threadId: 'codex-thread-id' },
+        sessionId: 'claude-session-id',
+        providerState: { providerSessionId: 'claude-session-id' },
       };
       const files = installVaultFiles({
         [settingsPath]: JSON.stringify({
           model: '',
           providerConfigs: {
-            codex: {
+            claude: {
               enabled: true,
               environmentHash: '',
               environmentVariables: '',
             },
           },
-          settingsProvider: 'codex',
+          settingsProvider: 'claude',
         }),
       });
 
       await plugin.onload();
       (plugin as any).sessionMetadata.loadedAll = false;
       const hostnameKey = getHostnameKey();
-      await plugin.applyProviderRuntimeSettings(['codex'], (settings) => {
-        updateCodexProviderSettings(settings, {
-          cliPathsByHost: { [hostnameKey]: '/custom/codex' },
+      await plugin.applyProviderRuntimeSettings(['claude'], (settings) => {
+        updateClaudeProviderSettings(settings, {
+          cliPathsByHost: { [hostnameKey]: '/custom/claude' },
         });
       });
 
       const firstRunSettings = JSON.parse(files.get(settingsPath) ?? '{}');
-      const fingerprint = firstRunSettings.providerConfigs.codex.environmentHash;
-      expect(firstRunSettings.providerConfigs.codex.cliPathsByHost).toEqual({
-        [hostnameKey]: '/custom/codex',
+      const fingerprint = firstRunSettings.providerConfigs.claude.environmentHash;
+      expect(firstRunSettings.providerConfigs.claude.cliPathsByHost).toEqual({
+        [hostnameKey]: '/custom/claude',
       });
       expect(isVersionedRuntimeInputFingerprint(fingerprint)).toBe(true);
-      expect(firstRunSettings.pendingProviderSessionInvalidations?.codex)
+      expect(firstRunSettings.pendingProviderSessionInvalidations?.claude)
         .toEqual(expect.any(Number));
 
       plugin.onunload();
@@ -2576,45 +2364,45 @@ describe('ClaudianPlugin', () => {
 
       expect(restartedConversation).toEqual(expect.objectContaining({
         sessionId: null,
-        providerState: undefined,
+        providerState: { previousProviderSessionIds: ['claude-session-id'] },
       }));
       expect(persistedMetadata).toEqual(expect.objectContaining({
         sessionId: null,
+        providerState: { previousProviderSessionIds: ['claude-session-id'] },
       }));
-      expect(persistedMetadata).not.toHaveProperty('providerState');
-      expect(restartedSettings.providerConfigs.codex.environmentHash).toBe(fingerprint);
-      expect(restartedSettings.pendingProviderSessionInvalidations?.codex).toBeUndefined();
+      expect(restartedSettings.providerConfigs.claude.environmentHash).toBe(fingerprint);
+      expect(restartedSettings.pendingProviderSessionInvalidations?.claude).toBeUndefined();
       expect(invalidationWrites).toHaveLength(1);
     });
 
-    it('advances the Grok fingerprint while preserving reload-policy sessions', async () => {
+    it('advances the Kiro fingerprint while preserving reload-policy sessions', async () => {
       await plugin.onload();
       const conversation = await plugin.createConversation({
-        providerId: 'grok',
-        sessionId: 'grok-session-id',
+        providerId: 'kiro',
+        sessionId: 'kiro-session-id',
       });
       await plugin.updateConversation(conversation.id, {
-        providerState: { sessionDirectory: '/tmp/grok/session-id' },
+        providerState: { sessionDirectory: '/tmp/kiro/session-id' },
       });
       const hostnameKey = getHostnameKey();
 
-      await plugin.applyProviderRuntimeSettings(['grok'], (settings) => {
-        updateGrokProviderSettings(settings, {
-          cliPathsByHost: { [hostnameKey]: '/custom/grok' },
+      await plugin.applyProviderRuntimeSettings(['kiro'], (settings) => {
+        updateKiroProviderSettings(settings, {
+          cliPathsByHost: { [hostnameKey]: '/custom/kiro' },
           enabled: true,
         });
       });
 
-      const grokSettings = getGrokProviderSettings(plugin.settings);
-      expect(grokSettings.environmentHash).toBe(computeGrokEnvironmentHash(plugin.settings));
+      const kiroSettings = getKiroProviderSettings(plugin.settings);
+      expect(kiroSettings.environmentHash).toBe(computeKiroEnvironmentHash(plugin.settings));
       expect(plugin.getConversationSync(conversation.id)).toEqual(expect.objectContaining({
-        sessionId: 'grok-session-id',
-        providerState: { sessionDirectory: '/tmp/grok/session-id' },
+        sessionId: 'kiro-session-id',
+        providerState: { sessionDirectory: '/tmp/kiro/session-id' },
       }));
       expect(ProviderSettingsCoordinator.reconcileProviders(
         plugin.settings,
         [conversation],
-        ['grok'],
+        ['kiro'],
       ).changed).toBe(false);
     });
 
@@ -2622,19 +2410,19 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
       (plugin as any).sessionMetadata.loadedAll = true;
       const conversation = await plugin.createConversation({
-        providerId: 'codex',
+        providerId: 'claude',
         sessionId: 'post-commit-thread',
       });
       await plugin.updateConversation(conversation.id, {
-        providerState: { threadId: 'post-commit-thread' },
+        providerState: { providerSessionId: 'post-commit-thread' },
       });
       const hostnameKey = getHostnameKey();
 
       await expect(plugin.applyProviderRuntimeSettings(
-        ['codex'],
+        ['claude'],
         (settings) => {
-          updateCodexProviderSettings(settings, {
-            cliPathsByHost: { [hostnameKey]: '/custom/post-commit-codex' },
+          updateClaudeProviderSettings(settings, {
+            cliPathsByHost: { [hostnameKey]: '/custom/post-commit-claude' },
           });
         },
         () => {
@@ -2642,16 +2430,16 @@ describe('ClaudianPlugin', () => {
         },
       )).rejects.toThrow('resolver reset failed');
 
-      const codexSettings = getCodexProviderSettings(plugin.settings);
-      expect(codexSettings.cliPathsByHost).toEqual({
-        [hostnameKey]: '/custom/post-commit-codex',
+      const claudeSettings = getClaudeProviderSettings(plugin.settings);
+      expect(claudeSettings.cliPathsByHost).toEqual({
+        [hostnameKey]: '/custom/post-commit-claude',
       });
       expect(isVersionedRuntimeInputFingerprint(
-        codexSettings.environmentHash,
+        claudeSettings.environmentHash,
       )).toBe(true);
       expect(plugin.getConversationSync(conversation.id)).toEqual(expect.objectContaining({
         sessionId: null,
-        providerState: undefined,
+        providerState: { previousProviderSessionIds: ['post-commit-thread'] },
       }));
       expect(plugin.settings.pendingProviderSessionInvalidations.codex).toBeUndefined();
     });
@@ -2874,19 +2662,6 @@ describe('ClaudianPlugin', () => {
 
       expect(conv.selectedModel).toBe('opus');
       expect(fetched?.selectedModel).toBe('opus');
-    });
-
-    it('should preserve custom selected models that are not in picker options', async () => {
-      await plugin.onload();
-
-      const conv = await plugin.createConversation({
-        providerId: 'codex',
-        selectedModel: 'gpt-5.4-experimental',
-      });
-      const fetched = await plugin.getConversationById(conv.id);
-
-      expect(conv.selectedModel).toBe('gpt-5.4-experimental');
-      expect(fetched?.selectedModel).toBe('gpt-5.4-experimental');
     });
 
     it('should lazily migrate missing selected model from usage metadata', async () => {
@@ -3143,7 +2918,7 @@ describe('ClaudianPlugin', () => {
     it('preserves the record when the provider cannot verify a safe disposition', async () => {
       await plugin.onload();
       const conv = await plugin.createConversation({
-        providerId: 'codex',
+        providerId: 'kiro',
         sessionId: 'unverified-provider-session',
       });
 
@@ -3517,67 +3292,6 @@ describe('ClaudianPlugin', () => {
   });
 
   describe('loadSettings with conversations', () => {
-    it('migrates a legacy Codex fingerprint before reconciling persisted sessions', async () => {
-      const timestamp = Date.now();
-      const metadataPath = '.claudian/sessions/conv-codex-legacy.meta.json';
-      const sessionMetadata = {
-        id: 'conv-codex-legacy',
-        providerId: 'codex',
-        title: 'Legacy Codex Chat',
-        createdAt: timestamp,
-        lastActivityAt: timestamp,
-        sessionId: 'codex-thread-123',
-        selectedModel: 'openai-codex/gpt-5',
-        providerState: {
-          threadId: 'codex-thread-123',
-          sessionFilePath: 'C:\\Users\\tester\\.codex\\sessions\\codex-thread-123.jsonl',
-        },
-      };
-
-      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => (
-        path === '.claudian/claudian-settings.json'
-        || path === '.claudian/sessions'
-        || path === metadataPath
-      ));
-      mockApp.vault.adapter.list.mockImplementation(async (path: string) => (
-        path === '.claudian/sessions'
-          ? { files: [metadataPath], folders: [] }
-          : { files: [], folders: [] }
-      ));
-      mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
-        if (path === '.claudian/claudian-settings.json') {
-          return JSON.stringify({
-            providerConfigs: {
-              codex: {
-                cliPath: 'C:\\Users\\tester\\codex.exe',
-                enabled: true,
-                environmentHash: '',
-                environmentVariables: '',
-              },
-            },
-          });
-        }
-        if (path === metadataPath) {
-          return JSON.stringify(sessionMetadata);
-        }
-        return '';
-      });
-
-      await plugin.loadSettings();
-
-      expect(plugin.getCachedConversation(sessionMetadata.id)).toMatchObject({
-        sessionId: sessionMetadata.sessionId,
-        providerState: sessionMetadata.providerState,
-      });
-      expect(isVersionedRuntimeInputFingerprint(
-        getCodexProviderSettings(plugin.settings).environmentHash,
-      )).toBe(true);
-      expect(mockApp.vault.adapter.write).not.toHaveBeenCalledWith(
-        metadataPath,
-        expect.any(String),
-      );
-    });
-
     it('should preserve Claude metadata during startup when local native history is missing', async () => {
       const timestamp = Date.now();
       const sessionMeta = JSON.stringify({

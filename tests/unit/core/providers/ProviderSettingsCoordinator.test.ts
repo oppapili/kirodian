@@ -1,9 +1,7 @@
 import '@/providers';
 
 import { claudeCatalogFixture } from '@test/helpers/claudeModels';
-import { TEST_CODEX_CATALOG, TEST_CODEX_MODEL } from '@test/helpers/codexModels';
 
-import { getProviderSettingsSnapshotWithModel } from '@/core/providers/conversationModel';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import type { ProviderSettingsReconciler } from '@/core/providers/types';
@@ -11,194 +9,12 @@ import type { Conversation } from '@/core/types';
 import { DEFAULT_CLAUDE_PROVIDER_SETTINGS } from '@/providers/claude/settings';
 
 describe('ProviderSettingsCoordinator', () => {
-  describe('conversation model projection', () => {
-    it('preserves a valid explicit reasoning choice when reading an existing conversation', () => {
-      const settings: Record<string, unknown> = {
-        settingsProvider: 'codex',
-        model: TEST_CODEX_MODEL,
-        effortLevel: 'low',
-        serviceTier: 'default',
-        savedProviderModel: { codex: TEST_CODEX_MODEL },
-        savedProviderEffort: { codex: 'low' },
-        providerConfigs: {
-          codex: {
-            enabled: true,
-            discoveredModels: TEST_CODEX_CATALOG,
-          },
-        },
-      };
-
-      const snapshot = getProviderSettingsSnapshotWithModel(
-        settings,
-        'codex',
-        TEST_CODEX_MODEL,
-      );
-
-      expect(snapshot.effortLevel).toBe('low');
-      expect(settings.effortLevel).toBe('low');
-    });
-
-    it('preserves an opted-in ultra effort across Codex provider and conversation projections', () => {
-      const ultraModel = {
-        ...TEST_CODEX_CATALOG[0],
-        model: 'gpt-5.6-sol',
-        supportedReasoningEfforts: [
-          { value: 'max', description: 'Maximum reasoning' },
-          { value: 'ultra', description: 'Automatic task delegation' },
-        ],
-        defaultReasoningEffort: 'max',
-      };
+  describe('normalizeProviderSelection', () => {
+    it('falls back to the default provider when the stored provider is disabled', () => {
       const settings: Record<string, unknown> = {
         settingsProvider: 'claude',
-        model: 'haiku',
-        effortLevel: 'high',
-        serviceTier: 'default',
-        savedProviderModel: { codex: ultraModel.model },
-        savedProviderEffort: { codex: 'ultra' },
-        savedProviderServiceTier: { codex: 'default' },
         providerConfigs: {
-          codex: {
-            enabled: true,
-            enableUltraEffort: true,
-            discoveredModels: [ultraModel],
-          },
-        },
-      };
-
-      const conversationSnapshot = getProviderSettingsSnapshotWithModel(
-        settings,
-        'codex',
-        ultraModel.model,
-      );
-      ProviderSettingsCoordinator.projectProviderState(settings, 'codex');
-
-      expect(conversationSnapshot.effortLevel).toBe('ultra');
-      expect(settings.effortLevel).toBe('ultra');
-    });
-
-    it.each([
-      {
-        caseName: 'legacy Fast with no catalog default',
-        storedServiceTier: 'fast',
-        defaultServiceTier: null,
-        expectedServiceTier: 'priority',
-      },
-      {
-        caseName: 'explicit Standard with a Fast catalog default',
-        storedServiceTier: 'default',
-        defaultServiceTier: 'priority',
-        expectedServiceTier: 'default',
-      },
-    ])('canonicalizes $caseName for a model snapshot', ({
-      storedServiceTier,
-      defaultServiceTier,
-      expectedServiceTier,
-    }) => {
-      const discoveredModels = TEST_CODEX_CATALOG.map(model => model.model === TEST_CODEX_MODEL
-        ? { ...model, defaultServiceTier }
-        : model);
-      const settings: Record<string, unknown> = {
-        settingsProvider: 'codex',
-        model: TEST_CODEX_MODEL,
-        effortLevel: 'medium',
-        serviceTier: storedServiceTier,
-        providerConfigs: {
-          codex: {
-            enabled: true,
-            discoveredModels,
-          },
-        },
-      };
-
-      const conversationSnapshot = getProviderSettingsSnapshotWithModel(
-        settings,
-        'codex',
-        TEST_CODEX_MODEL,
-      );
-
-      expect(conversationSnapshot.serviceTier).toBe(expectedServiceTier);
-    });
-
-    it('uses a Pi conversation model preference before normalizing against the saved provider model', () => {
-      const deepSeekModel = 'pi:deepseek/deepseek-reasoner';
-      const gptModel = 'pi:openai/gpt-5';
-      const settings: Record<string, unknown> = {
-        effortLevel: 'minimal',
-        model: deepSeekModel,
-        providerConfigs: {
-          pi: {
-            discoveredModels: [
-              {
-                encodedId: deepSeekModel,
-                id: 'deepseek-reasoner',
-                input: ['text'],
-                label: 'DeepSeek Reasoner',
-                provider: 'deepseek',
-                reasoning: true,
-                thinkingLevels: ['off', 'high'],
-              },
-              {
-                encodedId: gptModel,
-                id: 'gpt-5',
-                input: ['text'],
-                label: 'GPT-5',
-                provider: 'openai',
-                reasoning: true,
-                thinkingLevels: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'],
-              },
-            ],
-            enabled: true,
-            preferredThinkingByModel: {
-              [deepSeekModel]: 'high',
-              [gptModel]: 'minimal',
-            },
-            visibleModels: [deepSeekModel, gptModel],
-          },
-        },
-        savedProviderEffort: { pi: 'minimal' },
-        savedProviderModel: { pi: deepSeekModel },
-        serviceTier: 'default',
-        settingsProvider: 'pi',
-      };
-
-      const snapshot = getProviderSettingsSnapshotWithModel(settings, 'pi', gptModel);
-
-      expect(snapshot.model).toBe(gptModel);
-      expect(snapshot.effortLevel).toBe('minimal');
-    });
-  });
-
-  describe('selected model snapshot', () => {
-    it('clamps reasoning and service tier values to the selected model metadata', () => {
-      const settings: Record<string, unknown> = {
-        model: TEST_CODEX_MODEL,
-        effortLevel: 'unsupported',
-        serviceTier: 'priority',
-        providerConfigs: {
-          codex: {
-            enabled: true,
-            discoveredModels: TEST_CODEX_CATALOG,
-          },
-        },
-      };
-
-      const snapshot = getProviderSettingsSnapshotWithModel(settings, 'codex', 'gpt-5.4-mini');
-
-      expect(snapshot.model).toBe('openai-codex/gpt-5.4-mini');
-      expect(snapshot.effortLevel).toBe('high');
-      expect(snapshot.serviceTier).toBe('default');
-      expect(settings.model).toBe(TEST_CODEX_MODEL);
-      expect(settings.effortLevel).toBe('unsupported');
-      expect(settings.serviceTier).toBe('priority');
-    });
-  });
-
-  describe('normalizeProviderSelection', () => {
-    it('falls back to the default provider when codex is disabled', () => {
-      const settings: Record<string, unknown> = {
-        settingsProvider: 'codex',
-        providerConfigs: {
-          codex: { enabled: false },
+          claude: { enabled: false },
           kiro: { enabled: true },
         },
       };
@@ -213,7 +29,6 @@ describe('ProviderSettingsCoordinator', () => {
       const settings: Record<string, unknown> = {
         settingsProvider: 'mystery-provider',
         providerConfigs: {
-          codex: { enabled: true, discoveredModels: TEST_CODEX_CATALOG },
           kiro: { enabled: true },
         },
       };
@@ -244,7 +59,7 @@ describe('ProviderSettingsCoordinator', () => {
       const settings: Record<string, unknown> = {
         settingsProvider: 'kiro',
         providerConfigs: {
-          codex: { enabled: false },
+          claude: { enabled: false },
           kiro: { enabled: true },
         },
       };
@@ -257,7 +72,7 @@ describe('ProviderSettingsCoordinator', () => {
       const settings: Record<string, unknown> = {
         providerConfigs: {
           claude: { ...DEFAULT_CLAUDE_PROVIDER_SETTINGS, enabled: true },
-          codex: { enabled: false },
+          kiro: { enabled: false },
         },
       };
 
@@ -281,7 +96,7 @@ describe('ProviderSettingsCoordinator', () => {
         titleGenerationModel: '',
         providerConfigs: {
           claude: { ...DEFAULT_CLAUDE_PROVIDER_SETTINGS, enabled: true },
-          codex: { enabled: false },
+          kiro: { enabled: false },
         },
       };
 
@@ -299,21 +114,19 @@ describe('ProviderSettingsCoordinator', () => {
 
     it('atomically disables a provider and preserves dependent title selections', () => {
       const settings: Record<string, unknown> = {
-        settingsProvider: 'codex',
-        titleGenerationModel: TEST_CODEX_MODEL,
+        settingsProvider: 'kiro',
+        titleGenerationModel: 'kiro-model',
         providerConfigs: {
-          codex: {
-            discoveredModels: TEST_CODEX_CATALOG,
-            enabled: true,
-          },
+          kiro: { enabled: true },
+          claude: { ...DEFAULT_CLAUDE_PROVIDER_SETTINGS, enabled: true },
         },
       };
 
-      ProviderSettingsCoordinator.applyProviderEnablement(settings, 'codex', false);
+      ProviderSettingsCoordinator.applyProviderEnablement(settings, 'kiro', false);
 
-      expect(ProviderRegistry.isEnabled('codex', settings)).toBe(false);
+      expect(ProviderRegistry.isEnabled('kiro', settings)).toBe(false);
       expect(settings.settingsProvider).toBe('claude');
-      expect(settings.titleGenerationModel).toBe(TEST_CODEX_MODEL);
+      expect(settings.titleGenerationModel).toBe('kiro-model');
     });
 
     it('disables Claude and selects another enabled provider', () => {
@@ -324,16 +137,9 @@ describe('ProviderSettingsCoordinator', () => {
         serviceTier: 'default',
         thinkingBudget: 'off',
         titleGenerationModel: 'sonnet',
-        savedProviderModel: { codex: TEST_CODEX_MODEL },
-        savedProviderEffort: { codex: 'medium' },
-        savedProviderServiceTier: { codex: 'default' },
-        savedProviderThinkingBudget: { codex: 'off' },
         providerConfigs: {
           claude: { ...DEFAULT_CLAUDE_PROVIDER_SETTINGS, enabled: true },
-          codex: {
-            discoveredModels: TEST_CODEX_CATALOG,
-            enabled: true,
-          },
+          kiro: { enabled: true },
         },
       };
 
@@ -345,8 +151,7 @@ describe('ProviderSettingsCoordinator', () => {
 
       expect(accepted).toBe(true);
       expect(ProviderRegistry.isEnabled('claude', settings)).toBe(false);
-      expect(settings.settingsProvider).toBe('codex');
-      expect(settings.model).toBe(`openai-codex/${TEST_CODEX_MODEL}`);
+      expect(settings.settingsProvider).toBe('kiro');
       expect(settings.titleGenerationModel).toBe('sonnet');
     });
   });
@@ -359,7 +164,7 @@ describe('ProviderSettingsCoordinator', () => {
       );
 
       const claudeConv = { providerId: 'claude', messages: [] } as unknown as Conversation;
-      const otherConv = { providerId: 'codex', messages: [] } as unknown as Conversation;
+      const otherConv = { providerId: 'kiro', messages: [] } as unknown as Conversation;
       const settings: Record<string, unknown> = { model: 'haiku' };
 
       ProviderSettingsCoordinator.reconcileProviders(
@@ -441,23 +246,6 @@ describe('ProviderSettingsCoordinator', () => {
     });
   });
 
-  describe('normalizeAllModelVariants', () => {
-    it('preserves the active Codex model when it is absent from discovery', () => {
-      const settings: Record<string, unknown> = {
-        settingsProvider: 'codex',
-        model: 'gpt-5.4',
-        providerConfigs: {
-          codex: { enabled: true, discoveredModels: TEST_CODEX_CATALOG },
-        },
-        savedProviderModel: { codex: 'gpt-5.4' },
-      };
-
-      expect(ProviderSettingsCoordinator.normalizeAllModelVariants(settings)).toBe(true);
-      expect(settings.model).toBe('gpt-5.4');
-      expect(settings.savedProviderModel).toEqual({ codex: 'gpt-5.4' });
-    });
-  });
-
   describe('reconcileTitleGenerationModelSelection', () => {
     it('stores a Claude title model without inferring environment provenance', () => {
       const settings: Record<string, unknown> = {
@@ -515,10 +303,10 @@ describe('ProviderSettingsCoordinator', () => {
 
     it('preserves stale provider-qualified custom title models', () => {
       const settings: Record<string, unknown> = {
-        titleGenerationModel: 'openai-codex/my-custom-model',
+        titleGenerationModel: 'legacy-provider/my-custom-model',
         providerConfigs: {
-          codex: {
-            enabled: true,
+          claude: {
+            ...DEFAULT_CLAUDE_PROVIDER_SETTINGS,
             customModels: '',
           },
         },
@@ -527,32 +315,15 @@ describe('ProviderSettingsCoordinator', () => {
       expect(
         ProviderSettingsCoordinator.reconcileTitleGenerationModelSelection(settings),
       ).toBe(false);
-      expect(settings.titleGenerationModel).toBe('openai-codex/my-custom-model');
-    });
-
-    it('preserves title models owned by a disabled provider', () => {
-      const settings: Record<string, unknown> = {
-        titleGenerationModel: TEST_CODEX_MODEL,
-        providerConfigs: {
-          codex: {
-            discoveredModels: TEST_CODEX_CATALOG,
-            enabled: false,
-          },
-        },
-      };
-
-      expect(
-        ProviderSettingsCoordinator.reconcileTitleGenerationModelSelection(settings),
-      ).toBe(false);
-      expect(settings.titleGenerationModel).toBe(TEST_CODEX_MODEL);
+      expect(settings.titleGenerationModel).toBe('legacy-provider/my-custom-model');
     });
 
     it('preserves unavailable raw custom title IDs', () => {
       const settings: Record<string, unknown> = {
         titleGenerationModel: 'my-custom-model',
         providerConfigs: {
-          codex: {
-            enabled: true,
+          claude: {
+            ...DEFAULT_CLAUDE_PROVIDER_SETTINGS,
             customModels: 'my-custom-model',
           },
         },
@@ -568,14 +339,13 @@ describe('ProviderSettingsCoordinator', () => {
   describe('Claude environment reconciliation', () => {
     it('preserves an inactive Claude selection across environment changes', () => {
       const settings: Record<string, unknown> = {
-        settingsProvider: 'codex',
-        model: TEST_CODEX_MODEL,
+        settingsProvider: 'kiro',
+        model: 'haiku',
         effortLevel: 'high',
         serviceTier: 'default',
         thinkingBudget: 'off',
         savedProviderModel: {
           claude: 'claude-code/fable-v1',
-          codex: TEST_CODEX_MODEL,
         },
         providerConfigs: {
           claude: {
@@ -589,10 +359,7 @@ describe('ProviderSettingsCoordinator', () => {
               'ANTHROPIC_DEFAULT_HAIKU_MODEL=haiku-v1',
             ].join('|'),
           },
-          codex: {
-            enabled: true,
-            discoveredModels: TEST_CODEX_CATALOG,
-          },
+          kiro: { enabled: true },
         },
       };
 
@@ -636,7 +403,7 @@ describe('ProviderSettingsCoordinator', () => {
   });
 
   describe('projectActiveProviderState', () => {
-    it.each(['claude', 'codex', 'grok', 'opencode'] as const)(
+    it.each(['claude', 'kiro'] as const)(
       'projects legacy plan permissions as Safe for %s',
       (providerId) => {
         for (const permissionMode of ['plan', 'yolo']) {
@@ -651,7 +418,7 @@ describe('ProviderSettingsCoordinator', () => {
       },
     );
 
-    it.each(['claude', 'codex', 'grok', 'opencode'] as const)(
+    it.each(['claude', 'kiro'] as const)(
       'projects an unsaved legacy plan selection as Safe for %s',
       (providerId) => {
         const snapshot = ProviderSettingsCoordinator.getProviderSettingsSnapshot({
@@ -662,66 +429,14 @@ describe('ProviderSettingsCoordinator', () => {
       },
     );
 
-    it('projects saved model and effort for the settings provider', () => {
-      const settings: Record<string, unknown> = {
-        settingsProvider: 'codex',
-        providerConfigs: {
-          codex: { enabled: true, discoveredModels: TEST_CODEX_CATALOG },
-        },
-        permissionMode: 'yolo',
-        model: 'haiku',
-        effortLevel: 'high',
-        serviceTier: 'default',
-        thinkingBudget: 'off',
-        savedProviderModel: { codex: TEST_CODEX_MODEL, claude: 'haiku' },
-        savedProviderEffort: { codex: 'medium', claude: 'high' },
-        savedProviderServiceTier: { codex: 'fast', claude: 'default' },
-        savedProviderThinkingBudget: { codex: '1024', claude: 'off' },
-        savedProviderPermissionMode: { codex: 'normal', claude: 'yolo' },
-      };
-
-      ProviderSettingsCoordinator.projectActiveProviderState(settings);
-
-      expect(settings.model).toBe(`openai-codex/${TEST_CODEX_MODEL}`);
-      expect(settings.effortLevel).toBe('medium');
-      expect(settings.serviceTier).toBe('fast');
-      expect(settings.thinkingBudget).toBe('off');
-      expect(settings.permissionMode).toBe('normal');
-    });
-
-    it('preserves a saved unavailable Codex model when projecting provider state', () => {
-      const settings: Record<string, unknown> = {
-        settingsProvider: 'claude',
-        model: 'haiku',
-        effortLevel: 'high',
-        serviceTier: 'default',
-        thinkingBudget: 'off',
-        providerConfigs: {
-          codex: { enabled: true, discoveredModels: TEST_CODEX_CATALOG },
-        },
-        savedProviderModel: { claude: 'haiku', codex: 'gpt-5.4' },
-        savedProviderEffort: { claude: 'high', codex: 'medium' },
-        savedProviderServiceTier: { claude: 'default', codex: 'fast' },
-        savedProviderThinkingBudget: { claude: 'off', codex: 'off' },
-      };
-
-      const snapshot = ProviderSettingsCoordinator.getProviderSettingsSnapshot(settings, 'codex');
-
-      expect(snapshot.model).toBe('gpt-5.4');
-      expect(snapshot.serviceTier).toBe('fast');
-    });
-
     it('rejects arrays as provider projection maps when creating a snapshot', () => {
-      const arrayProjection = Object.assign([], { codex: 'array-owned-value' });
+      const arrayProjection = Object.assign([], { claude: 'array-owned-value' });
       const settings: Record<string, unknown> = {
         settingsProvider: 'claude',
         model: 'haiku',
         effortLevel: 'high',
         serviceTier: 'default',
         thinkingBudget: 'off',
-        providerConfigs: {
-          codex: { enabled: true, discoveredModels: TEST_CODEX_CATALOG },
-        },
         savedProviderModel: arrayProjection,
         savedProviderEffort: arrayProjection,
         savedProviderServiceTier: arrayProjection,
@@ -729,7 +444,7 @@ describe('ProviderSettingsCoordinator', () => {
         savedProviderPermissionMode: arrayProjection,
       };
 
-      const snapshot = ProviderSettingsCoordinator.getProviderSettingsSnapshot(settings, 'codex');
+      const snapshot = ProviderSettingsCoordinator.getProviderSettingsSnapshot(settings, 'claude');
 
       expect(snapshot.savedProviderModel).toEqual({});
       expect(snapshot.savedProviderEffort).toEqual({});
@@ -811,200 +526,6 @@ describe('ProviderSettingsCoordinator', () => {
 
       expect(settings.model).toBe('claude-code/claude-sonnet-4-5');
       expect(settings.effortLevel).toBe('high');
-    });
-  });
-
-  describe('persistProjectedProviderState', () => {
-    it('stores the current top-level projection for the settings provider', () => {
-      const settings: Record<string, unknown> = {
-        settingsProvider: 'codex',
-        providerConfigs: {
-          codex: { enabled: true, discoveredModels: TEST_CODEX_CATALOG },
-        },
-        permissionMode: 'normal',
-        model: TEST_CODEX_MODEL,
-        effortLevel: 'low',
-        serviceTier: 'fast',
-        thinkingBudget: 'off',
-        savedProviderModel: { claude: 'haiku' },
-        savedProviderEffort: { claude: 'high' },
-        savedProviderServiceTier: { claude: 'default' },
-        savedProviderThinkingBudget: { claude: 'off' },
-        savedProviderPermissionMode: { claude: 'yolo' },
-      };
-
-      ProviderSettingsCoordinator.persistProjectedProviderState(settings);
-
-      expect(settings.savedProviderModel).toEqual({
-        claude: 'haiku',
-        codex: `openai-codex/${TEST_CODEX_MODEL}`,
-      });
-      expect(settings.savedProviderEffort).toEqual({
-        claude: 'high',
-        codex: 'low',
-      });
-      expect(settings.savedProviderServiceTier).toEqual({
-        claude: 'default',
-        codex: 'fast',
-      });
-      expect(settings.savedProviderPermissionMode).toEqual({
-        claude: 'yolo',
-        codex: 'normal',
-      });
-    });
-  });
-
-  describe('projectProviderState', () => {
-    it('seeds a provider projection from provider defaults when no saved values exist', () => {
-      const settings: Record<string, unknown> = {
-        settingsProvider: 'claude',
-        providerConfigs: {
-          codex: {
-            enabled: true,
-            discoveredModels: TEST_CODEX_CATALOG,
-            environmentVariables: '',
-          },
-        },
-        model: 'haiku',
-        effortLevel: 'high',
-        serviceTier: 'default',
-        thinkingBudget: 'off',
-        savedProviderModel: {},
-        savedProviderEffort: {},
-        savedProviderServiceTier: {},
-        savedProviderThinkingBudget: {},
-      };
-
-      ProviderSettingsCoordinator.projectProviderState(settings, 'codex');
-
-      expect(settings.model).toBe(`openai-codex/${TEST_CODEX_MODEL}`);
-      expect(settings.effortLevel).toBe('high');
-      expect(settings.serviceTier).toBe('default');
-    });
-
-    it('preserves saved service tier when the projected model hides the toggle', () => {
-      const settings: Record<string, unknown> = {
-        settingsProvider: 'codex',
-        providerConfigs: {
-          codex: {
-            enabled: true,
-            environmentVariables: '',
-          },
-        },
-        model: 'gpt-5.4-mini',
-        effortLevel: 'medium',
-        serviceTier: 'default',
-        thinkingBudget: 'off',
-        savedProviderModel: { codex: 'gpt-5.4-mini' },
-        savedProviderEffort: { codex: 'medium' },
-        savedProviderServiceTier: { codex: 'fast' },
-        savedProviderThinkingBudget: { codex: 'off' },
-      };
-
-      ProviderSettingsCoordinator.projectProviderState(settings, 'codex');
-
-      expect(settings.model).toBe('gpt-5.4-mini');
-      expect(settings.serviceTier).toBe('fast');
-    });
-
-    it('derives OpenCode permission mode from the managed selected mode when no provider snapshot exists yet', () => {
-      const settings: Record<string, unknown> = {
-        settingsProvider: 'claude',
-        permissionMode: 'yolo',
-        providerConfigs: {
-          opencode: {
-            enabled: true,
-            selectedMode: 'claudian-safe',
-          },
-        },
-        model: 'haiku',
-        effortLevel: 'high',
-        serviceTier: 'default',
-        thinkingBudget: 'off',
-        savedProviderModel: {},
-        savedProviderEffort: {},
-        savedProviderServiceTier: {},
-        savedProviderThinkingBudget: {},
-        savedProviderPermissionMode: {},
-      };
-
-      ProviderSettingsCoordinator.projectProviderState(settings, 'opencode');
-
-      expect(settings.permissionMode).toBe('normal');
-    });
-
-    it('prefers the active OpenCode selected mode over a stale top-level permission projection', () => {
-      const settings: Record<string, unknown> = {
-        settingsProvider: 'opencode',
-        permissionMode: 'normal',
-        providerConfigs: {
-          opencode: {
-            enabled: true,
-            selectedMode: 'build',
-          },
-        },
-        model: 'haiku',
-        effortLevel: 'high',
-        serviceTier: 'default',
-        thinkingBudget: 'off',
-        savedProviderModel: {},
-        savedProviderEffort: {},
-        savedProviderServiceTier: {},
-        savedProviderThinkingBudget: {},
-        savedProviderPermissionMode: {},
-      };
-
-      ProviderSettingsCoordinator.projectProviderState(settings, 'opencode');
-
-      expect(settings.permissionMode).toBe('yolo');
-    });
-  });
-
-  describe('provider-scoped reconciliation', () => {
-    it('updates the inactive provider snapshot without clobbering the active projection', () => {
-      const codexConv = {
-        providerId: 'codex',
-        sessionId: 'thread-1',
-        messages: [],
-      } as unknown as Conversation;
-
-      const settings: Record<string, unknown> = {
-        settingsProvider: 'kiro',
-        providerConfigs: {
-          kiro: { enabled: true },
-          codex: {
-            enabled: true,
-            discoveredModels: TEST_CODEX_CATALOG,
-            environmentVariables: `OPENAI_MODEL=${TEST_CODEX_MODEL}`,
-          },
-        },
-        model: 'haiku',
-        effortLevel: 'high',
-        serviceTier: 'default',
-        thinkingBudget: 'off',
-        savedProviderModel: { claude: 'haiku', codex: TEST_CODEX_MODEL },
-        savedProviderEffort: { claude: 'high', codex: 'medium' },
-        savedProviderServiceTier: { claude: 'default', codex: 'fast' },
-        savedProviderThinkingBudget: { claude: 'off', codex: 'off' },
-      };
-
-      const result = ProviderSettingsCoordinator.reconcileProviders(
-        settings, [codexConv], ProviderRegistry.getRegisteredProviderIds(),
-      );
-
-      expect(result.changed).toBe(true);
-      expect(codexConv.sessionId).toBeNull();
-      expect(codexConv.providerState).toBeUndefined();
-      expect(settings.model).toBe('haiku');
-      expect(settings.savedProviderModel).toEqual({
-        claude: 'haiku',
-        codex: `openai-codex/${TEST_CODEX_MODEL}`,
-        kiro: 'haiku',
-      });
-      expect(settings.savedProviderServiceTier).toEqual({
-        claude: 'default',
-        codex: 'fast',
-      });
     });
   });
 });

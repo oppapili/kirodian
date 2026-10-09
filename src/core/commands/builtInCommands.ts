@@ -61,12 +61,6 @@ export const BUILT_IN_COMMANDS: BuiltInCommand[] = [
     requiredCapability: 'supportsFork',
   },
   {
-    name: 'fast',
-    description: 'Toggle fast mode',
-    action: 'fast',
-    supportedProviderIds: ['codex'],
-  },
-  {
     name: 'side',
     aliases: ['btw'],
     description: 'Ask a temporary side question from the latest reply',

@@ -563,14 +563,14 @@ export default class ClaudianPlugin extends Plugin {
   }
 
   async notifyAgentSkillsChanged(): Promise<void> {
-    const providerIds: ProviderId[] = ['codex', 'grok', 'pi', 'opencode'];
-    const generation = ++this.agentSkillResourceGeneration;
-
-    for (const view of this.getAllViews()) {
-      view.invalidateProviderResources(providerIds, generation);
-    }
-
-    await ProviderWorkspaceRegistry.getIfInitialized('codex')?.commandCatalog?.refresh();
+    // Bumping the shared generation is still meaningful for the remaining
+    // providers: TabManager's #getProviderResourceGeneration falls back to this
+    // value for any provider whose resources were never explicitly invalidated,
+    // so skill changes still invalidate their command discovery. The removed
+    // providers (codex/grok/pi/opencode) were the only ones ever listed for the
+    // explicit per-view invalidation and the codex command-catalog refresh;
+    // with them gone that work is a no-op, so only the generation bump remains.
+    ++this.agentSkillResourceGeneration;
   }
 
   async mutateSettingsConditionally(

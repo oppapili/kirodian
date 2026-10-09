@@ -2,10 +2,6 @@ import type { ProviderId } from './types';
 
 const PROVIDER_MODEL_SELECTION_PREFIXES: Partial<Record<ProviderId, string>> = {
   claude: 'claude-code/',
-  codex: 'openai-codex/',
-  grok: 'grok/',
-  opencode: 'opencode:',
-  pi: 'pi/',
 };
 
 export interface ProviderModelSelection {

@@ -14,14 +14,15 @@ HTMLElement.prototype.appendText = function (text) { this.append(document.create
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
 
-function setup(providerId = 'claude') {
+function setup(providerId = 'claude', capabilityOverride: Record<string, unknown> = {}) {
   const messagesEl = document.body.createDiv();
   const fork = jest.fn().mockResolvedValue(undefined);
   const settings = { mediaFolder: '', showMessageTimestamps: true };
   const renderer = new MessageRenderer(
     { app: {}, settings } as any,
     { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any,
-    messagesEl, undefined, fork, () => ProviderRegistry.getCapabilities(providerId),
+    messagesEl, undefined, fork,
+    () => ({ ...ProviderRegistry.getCapabilities(providerId), ...capabilityOverride }),
   );
   return { renderer, messagesEl, fork, settings };
 }
@@ -202,7 +203,7 @@ it('offers fork on the final live response of a multi-message turn', async () =>
 
 
 it('offers full-session fork only on the latest reply and removes it when another turn starts', async () => {
-  const { renderer, messagesEl, fork } = setup('opencode');
+  const { renderer, messagesEl, fork } = setup('claude', { forkMode: 'full-session' });
   const latest: ChatMessage = { id: 'a3', role: 'assistant', content: 'Latest answer', timestamp: 7,
     assistantMessageId: 'native-a3' };
   renderer.renderMessages([...messages, { id: 'u2', role: 'user', content: 'Next', timestamp: 6 }, latest], () => 'Hello');
@@ -343,7 +344,7 @@ it('keeps requested work on both sides of a mid-response notification in its own
 });
 
 
-it.each(['claude', 'pi', 'opencode', 'codex'])('shows native throughput for %s on replay', async (provider) => {
+it.each(['claude'])('shows native throughput for %s on replay', async (provider) => {
   const { renderer, messagesEl } = setup(provider);
   const response = { ...messages[2], turnStats: { outputTokens: 125, durationMs: 2500 } };
   renderer.renderMessages([messages[0], response], () => 'Hello');
@@ -357,7 +358,7 @@ it.each(['claude', 'pi', 'opencode', 'codex'])('shows native throughput for %s o
 });
 
 it.each([
-  ['grok', { outputTokens: 125, durationMs: 2500 }],
+  ['kiro', { outputTokens: 125, durationMs: 2500 }],
   ['claude', undefined],
 ])('omits unavailable or unsupported throughput (%s, %j)', (provider, turnStats) => {
   const { renderer, messagesEl } = setup(provider as string);
