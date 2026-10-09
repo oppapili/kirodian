@@ -1588,7 +1588,7 @@ describe('ClaudianPlugin', () => {
         }),
       });
 
-      await plugin.loadSettings();
+      await plugin.onload();
 
       expect(mockApp.vault.adapter.remove).toHaveBeenCalledWith('.claude/mcp.json');
       expect(files.has('.claude/mcp.json')).toBe(false);
@@ -1600,7 +1600,7 @@ describe('ClaudianPlugin', () => {
       ));
       mockApp.vault.adapter.remove.mockRejectedValue(new Error('permission denied'));
 
-      await expect(plugin.loadSettings()).resolves.toBeUndefined();
+      await expect(plugin.onload()).resolves.toBeUndefined();
 
       expect(plugin.settings).toBeDefined();
       expect(Notice).toHaveBeenCalledWith('Failed to remove obsolete Claude configuration');
@@ -1620,7 +1620,7 @@ describe('ClaudianPlugin', () => {
         return '';
       });
 
-      await plugin.loadSettings();
+      await plugin.onload();
 
       expect(plugin.settings.userName).toBe('TestUser');
       expect(plugin.settings.hiddenCommands).toEqual(DEFAULT_SETTINGS.hiddenCommands);
@@ -1637,7 +1637,7 @@ describe('ClaudianPlugin', () => {
         return '';
       });
 
-      await plugin.loadSettings();
+      await plugin.onload();
 
       expect(plugin.settings.maxWarmAgentProcesses).toBe(5);
       const writeCall = (mockApp.vault.adapter.write as jest.Mock).mock.calls.filter(
@@ -1661,7 +1661,7 @@ describe('ClaudianPlugin', () => {
         return '';
       });
 
-      await plugin.loadSettings();
+      await plugin.onload();
 
       expect('enableBlocklist' in plugin.settings).toBe(false);
       expect('blockedCommands' in plugin.settings).toBe(false);
@@ -1683,7 +1683,7 @@ describe('ClaudianPlugin', () => {
       mockApp.vault.adapter.exists.mockResolvedValue(false);
       (plugin.loadData as jest.Mock).mockResolvedValue(null);
 
-      await plugin.loadSettings();
+      await plugin.onload();
 
       // Compare persisted values; provider discovery may attach transient symbol metadata.
       // The default chat provider is kiro, so loading an empty store seeds the
@@ -1696,7 +1696,7 @@ describe('ClaudianPlugin', () => {
       mockApp.vault.adapter.exists.mockResolvedValue(false);
       (plugin.loadData as jest.Mock).mockResolvedValue({});
 
-      await plugin.loadSettings();
+      await plugin.onload();
 
       // Compare persisted values; provider discovery may attach transient symbol metadata.
       // The default chat provider is kiro, so loading an empty store seeds the
@@ -1715,7 +1715,7 @@ describe('ClaudianPlugin', () => {
         return '';
       });
 
-      await plugin.loadSettings();
+      await plugin.onload();
 
       expect(plugin.settings.chatViewPlacement).toBe('main-tab');
       const writeCall = (mockApp.vault.adapter.write as jest.Mock).mock.calls.find(
@@ -1742,8 +1742,8 @@ describe('ClaudianPlugin', () => {
         return '';
       });
 
-      const saveSpy = jest.spyOn(plugin, 'saveSettings');
-      await plugin.loadSettings();
+      const saveSpy = jest.spyOn(storageOf(plugin), 'saveClaudianSettings');
+      await plugin.onload();
 
       expect(plugin.settings.model).toBe(DEFAULT_SETTINGS.model);
       expect(saveSpy).toHaveBeenCalled();
@@ -3589,31 +3589,6 @@ describe('ClaudianPlugin', () => {
   });
 
   describe('loadSettings with conversations', () => {
-    it('should preserve Claude metadata during startup when local native history is missing', async () => {
-      const timestamp = Date.now();
-      const sessionMeta = JSON.stringify({
-        id: 'conv-stale-1',
-        providerId: 'claude',
-        title: 'Stale Chat',
-        createdAt: timestamp,
-        lastActivityAt: timestamp,
-        sessionId: 'missing-session',
-      });
-
-      const pin = chatHostOf(plugin).conversationLifecycle.setPinned(['stale-session'], true);
-      await chatHostOf(plugin).mutateSettings((settings) => { settings.sessionAutoArchiveAfter = '7d'; });
-      await new Promise(resolve => setImmediate(resolve));
-      releasePinWrite();
-      await pin;
-      await new Promise(resolve => setImmediate(resolve));
-
-      const stale = chatHostOf(plugin).getConversationList().find(({ id }) => id === 'stale-session');
-      expect(stale).toMatchObject({ isPinned: true });
-      expect(stale?.isArchived).not.toBe(true);
-      // The unheld stale session proves the scan ran.
-      expect(archivedIds()).toEqual(['second-stale-session']);
-      expect(JSON.parse(files.get(stalePath) ?? '{}')).toMatchObject({ isPinned: true });
-    });
 
     it('should load saved conversations from metadata files', async () => {
       const timestamp = Date.now();
@@ -3632,7 +3607,7 @@ describe('ClaudianPlugin', () => {
       // data.json is minimal (no state - already migrated)
       (plugin.loadData as jest.Mock).mockResolvedValue({});
 
-      await plugin.loadSettings();
+      await plugin.onload();
 
       const loaded = await chatHostOf(plugin).getConversationById('conv-saved-1');
       expect(loaded?.id).toBe('conv-saved-1');
@@ -3678,7 +3653,7 @@ describe('ClaudianPlugin', () => {
       // data.json is minimal (already migrated)
       (plugin.loadData as jest.Mock).mockResolvedValue({});
 
-      await plugin.loadSettings();
+      await plugin.onload();
 
       const loaded = await chatHostOf(plugin).getConversationById('conv-saved-1');
       expect(loaded?.sessionId).toBeNull();
@@ -3701,9 +3676,113 @@ describe('ClaudianPlugin', () => {
         migrationVersion: 2,
       });
 
-      await plugin.loadSettings();
+      await plugin.onload();
 
       expect(chatHostOf(plugin).getConversationList()).toHaveLength(0);
+    });
+  });
+
+  describe('auto-archive inactive sessions', () => {
+    const clock = testClock();
+    const inactiveFor = (days: number): number => clock().getTime() - days * 86_400_000;
+    const sessions = [
+      { id: 'stale-session', providerId: 'claude' as const, title: 'Stale', createdAt: inactiveFor(21), lastActivityAt: inactiveFor(20) },
+      { id: 'recent-session', providerId: 'claude' as const, title: 'Recent', createdAt: inactiveFor(3), lastActivityAt: inactiveFor(2) },
+      { id: 'pinned-stale-session', providerId: 'claude' as const, title: 'Pinned', createdAt: inactiveFor(21), lastActivityAt: inactiveFor(20), isPinned: true },
+      { id: 'second-stale-session', providerId: 'claude' as const, title: 'Second stale', createdAt: inactiveFor(31), lastActivityAt: inactiveFor(30) },
+    ];
+
+    async function loadAllSessions(settings: Record<string, unknown>): Promise<Map<string, string>> {
+      const files = installVaultFiles({ '.claudian/claudian-settings.json': JSON.stringify(settings) });
+      jest.spyOn(SessionStorage.prototype, 'scan').mockImplementation(async (options) => {
+        options?.onBatch?.(deviceMetadataRecords(...sessions));
+        return { records: deviceMetadataRecords(...sessions), complete: true, invalidMetadataCount: 0 };
+      });
+      mockMetadataSources(...sessions);
+      await plugin.onload();
+      await (plugin as any).sessionMetadata.loadRemaining();
+      await new Promise(resolve => setImmediate(resolve));
+      return files;
+    }
+
+    const archivedIds = (): string[] => chatHostOf(plugin).getConversationList()
+      .filter(conversation => conversation.isArchived)
+      .map(conversation => conversation.id);
+
+    it('archives unpinned sessions past the threshold once all metadata has loaded', async () => {
+      const files = await loadAllSessions({ sessionAutoArchiveAfter: '14d' });
+
+      expect(archivedIds()).toEqual(['stale-session', 'second-stale-session']);
+      const persisted = JSON.parse(
+        files.get(`${getDeviceSessionsPath(getHostnameKey())}/stale-session.meta.json`) ?? '{}',
+      );
+      expect(persisted.isArchived).toBe(true);
+      expect(Notice).toHaveBeenCalledWith('Auto-archived 2 inactive sessions');
+    });
+
+    it('skips sessions held by a deferred chat pane that has not mounted its view', async () => {
+      mockApp.workspace.getLeavesOfType.mockImplementation((type: string) => (
+        type === VIEW_TYPE_CLAUDIAN
+          ? [{
+              view: {},
+              getViewState: () => ({
+                type: VIEW_TYPE_CLAUDIAN,
+                state: {
+                  tabWorkspace: {
+                    version: 1,
+                    openTabs: [{ tabId: 'deferred-tab', conversationId: 'stale-session' }],
+                    activeTabId: 'deferred-tab',
+                  },
+                },
+              }),
+            }]
+          : []
+      ));
+
+      await loadAllSessions({ sessionAutoArchiveAfter: '14d' });
+
+      // The unheld stale session proves the scan ran.
+      expect(archivedIds()).toEqual(['second-stale-session']);
+    });
+
+    it('does not archive a session whose pin was still being saved when the scan ran', async () => {
+      const files = await loadAllSessions({});
+      const stalePath = `${getDeviceSessionsPath(getHostnameKey())}/stale-session.meta.json`;
+      let releasePinWrite!: () => void;
+      const pinWriteGate = new Promise<void>((resolve) => { releasePinWrite = resolve; });
+      const write = mockApp.vault.adapter.write.getMockImplementation();
+      let isFirstStaleWrite = true;
+      mockApp.vault.adapter.write.mockImplementation(async (path: string, content: string) => {
+        if (path === stalePath && isFirstStaleWrite) {
+          isFirstStaleWrite = false;
+          await pinWriteGate;
+        }
+        return write(path, content);
+      });
+
+      const pin = chatHostOf(plugin).conversationLifecycle.setPinned(['stale-session'], true);
+      await chatHostOf(plugin).mutateSettings((settings) => { settings.sessionAutoArchiveAfter = '7d'; });
+      await new Promise(resolve => setImmediate(resolve));
+      releasePinWrite();
+      await pin;
+      await new Promise(resolve => setImmediate(resolve));
+
+      const stale = chatHostOf(plugin).getConversationList().find(({ id }) => id === 'stale-session');
+      expect(stale).toMatchObject({ isPinned: true });
+      expect(stale?.isArchived).not.toBe(true);
+      // The unheld stale session proves the scan ran.
+      expect(archivedIds()).toEqual(['second-stale-session']);
+      expect(JSON.parse(files.get(stalePath) ?? '{}')).toMatchObject({ isPinned: true });
+    });
+
+    it('leaves sessions alone while off and archives when the setting is enabled', async () => {
+      await loadAllSessions({});
+      expect(archivedIds()).toEqual([]);
+
+      await chatHostOf(plugin).mutateSettings((settings) => { settings.sessionAutoArchiveAfter = '7d'; });
+      await new Promise(resolve => setImmediate(resolve));
+
+      expect(archivedIds()).toEqual(['stale-session', 'second-stale-session']);
     });
   });
 
@@ -3748,7 +3827,7 @@ describe('ClaudianPlugin', () => {
 
       (plugin.loadData as jest.Mock).mockResolvedValue({});
 
-      await plugin.loadSettings();
+      await plugin.onload();
 
       const loaded = await chatHostOf(plugin).getConversationById('conv-multi-session');
       expect((loaded?.providerState as any)?.previousProviderSessionIds).toEqual(['session-A']);
