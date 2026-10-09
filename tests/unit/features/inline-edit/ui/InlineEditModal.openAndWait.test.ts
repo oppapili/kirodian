@@ -326,7 +326,7 @@ describe('InlineEditModal - openAndWait', () => {
             },
           },
         },
-        getActiveModelSelection: () => ({ providerId: 'opencode', model: 'opencode:openai/gpt-5.4' }),
+        getActiveModelSelection: () => ({ providerId: 'kiro', model: 'kiro:claude-sonnet-4' }),
         getConversationSync: jest.fn().mockReturnValue(null),
         getView: jest.fn().mockReturnValue({
           getActiveTab: jest.fn().mockReturnValue({
@@ -443,7 +443,7 @@ describe('InlineEditModal - openAndWait', () => {
             kiro: { enabled: true },
           },
         },
-        getActiveModelSelection: () => ({ providerId: 'opencode', model: conversation.selectedModel }),
+        getActiveModelSelection: () => ({ providerId: 'kiro', model: conversation.selectedModel }),
         getConversationSync: jest.fn().mockReturnValue(conversation),
         getView: jest.fn().mockReturnValue({
           getActiveTab: jest.fn().mockReturnValue({

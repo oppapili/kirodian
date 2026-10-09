@@ -118,13 +118,22 @@ it('keeps saved family aliases enabled after discovering a newer unselected vers
     });
     expect(resolveConversationModel(settings, 'claude', { selectedModel: 'fable' }).model)
       .toBe('claude-code/claude-fable-5-10');
-    expect(resolveNewConversationModel(settings)?.model).toBe('claude-code/claude-fable-5-10');
     expect(ProviderRegistry.getModelPolicy('claude').normalizeModelVariant('fable', settings))
       .toBe('claude-code/claude-fable-5-10');
     expect(getClaudeSupportedEffortLevels(settings, 'fable')).toEqual(['high']);
     // A retired explicit ID follows the enabled family member.
     expect(findProviderModelOption('claude', 'claude-fable-4-0', settings)).toBe('claude-code/claude-fable-5-10');
   }
+  // The in-memory last-selected claude seed still drives the new-conversation
+  // model to its enabled family alias.
+  expect(resolveNewConversationModel(host.settings)?.model).toBe('claude-code/claude-fable-5-10');
+  // Kirodian-specific: claude is a HIDDEN provider, so a stored chat-model
+  // selection naming it is intentionally dropped on load (see
+  // normalizeStoredChatModelSelection), coercing new conversations away from the
+  // invisible provider rather than resurfacing it. The claude family alias
+  // itself stays resolvable (asserted in the loop above); only the stored
+  // *selection* is discarded.
+  expect(resolveNewConversationModel(await storage.load())?.providerId).not.toBe('claude');
   // A reported but unselected ID stays unavailable; storage keeps only selected rows, so after
   // reload it is indistinguishable from a retired one until the next discovery.
   expect(findProviderModelOption('claude', 'claude-fable-6-0', host.settings)).toBeNull();
