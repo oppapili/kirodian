@@ -20,8 +20,8 @@ import {
   renderProviderModelEnablementWarning,
 } from '../../../shared/settings/ProviderModelEnablementWarning';
 import { renderProviderModelsSection } from '../../../shared/settings/ProviderModelsSection';
-import { getHostnameKey } from '../../../utils/env';
-import { normalizeConfiguredCLIPath } from '../../../utils/path';
+import { getInstallationKey as getHostnameKey } from '../../../core/device/InstallationKey';
+import { normalizeConfiguredCLIPath } from '../../../core/process/cliPath';
 import type { KiroWorkspaceServices } from '../app/KiroWorkspaceServices';
 import {
   clearCurrentKiroCatalog,

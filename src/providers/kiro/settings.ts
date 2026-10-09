@@ -3,7 +3,7 @@ import { getProviderEnvironmentVariables } from '../../core/providers/providerEn
 import { STANDARD_REASONING_VALUES } from '../../core/providers/reasoning';
 import { normalizeHostnameStringMap } from '../../core/providers/settings/HostnameStringMap';
 import type { HostnameCLIPaths } from '../../core/types/settings';
-import { getHostnameKey } from '../../utils/env';
+import { getInstallationKey as getHostnameKey } from '../../core/device/InstallationKey';
 import type { KiroAgentMode } from './execution/KiroSessionModeMetadata';
 import {
   clearKiroReasoningMetadata,

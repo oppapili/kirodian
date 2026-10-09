@@ -18,14 +18,14 @@ import type {
 } from '../../../core/execution';
 import type { ProviderHost } from '../../../core/providers/ProviderHost';
 import type { ChatMessage, PermissionMode } from '../../../core/types';
-import { appendBrowserContext } from '../../../utils/browser';
-import { appendCanvasContext } from '../../../utils/canvas';
-import { appendLinkedContent } from '../../../utils/context';
-import { appendEditorContext } from '../../../utils/editor';
+import { appendBrowserContext } from '../../../core/prompt/browserContext';
+import { appendCanvasContext } from '../../../core/prompt/canvasContext';
+import { appendLinkedContent } from '../../../core/prompt/promptContext';
+import { appendEditorContext } from '../../../core/prompt/editorContext';
 import {
   buildContextFromHistory,
   buildPromptWithHistoryContext,
-} from '../../../utils/session';
+} from '../../../core/prompt/historyContext';
 import {
   type ACPContentBlock,
   ACPExecutionEventNormalizer,

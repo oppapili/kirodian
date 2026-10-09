@@ -10,7 +10,7 @@ import { getVaultPath } from '../../../utils/path';
 import {
   resolveWindowsCmdShimSpawnSpec,
   terminateSpawnedProcess,
-} from '../../../utils/windowsCmdShim';
+} from '../../../core/process/windowsCmdShim';
 import {
   type KiroDiscoveredModel,
   normalizeKiroDiscoveredModels,
