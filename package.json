@@ -84,10 +84,12 @@
     "@babel/core": "7.29.7",
     "@hono/node-server": "2.0.11",
     "body-parser": "2.3.0",
-    "fast-uri": "3.1.6",
+    "fast-uri": "3.1.8",
+    "handlebars": "4.7.10",
     "hono": "4.13.7",
-    "ip-address": "10.3.1",
+    "ip-address": "10.7.2",
     "js-yaml": "4.3.2",
+    "moment": "2.31.0",
     "qs": "6.16.0"
   }
 }
