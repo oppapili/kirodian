@@ -13,12 +13,13 @@ describe('AgentSkillResources', () => {
     ProviderWorkspaceRegistry.clear();
   });
 
-  it('publishes the new generation synchronously before Codex refresh settles', async () => {
+  it('publishes the new generation synchronously before a provider refresh settles', async () => {
     let finishRefresh!: () => void;
     const refresh = jest.fn().mockReturnValue(new Promise<void>(resolve => {
       finishRefresh = resolve;
     }));
-    ProviderWorkspaceRegistry.setServices('codex', {
+    ProviderWorkspaceRegistry.register('kiro', { consumesAgentSkills: true, initialize: jest.fn() });
+    ProviderWorkspaceRegistry.setServices('kiro', {
       onAgentSkillsChanged: refresh,
     });
     const invalidateProviderResources = jest.fn();
@@ -28,10 +29,9 @@ describe('AgentSkillResources', () => {
 
     expect(resources.getGeneration()).toBe(1);
     expect(invalidateProviderResources).toHaveBeenCalledWith(
-      expect.arrayContaining(['codex', 'grok', 'pi', 'opencode']),
+      expect.arrayContaining(['kiro']),
       1,
     );
-    expect(invalidateProviderResources.mock.calls[0][0]).not.toContain('claude');
     expect(refresh).toHaveBeenCalledTimes(1);
 
     finishRefresh();

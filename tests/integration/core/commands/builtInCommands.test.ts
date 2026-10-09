@@ -8,7 +8,11 @@ import {
 describe('getBuiltInCommandsForDropdown - provider filtering', () => {
 
   it('returns the full built-in set when no command is provider-restricted', () => {
-    const commands = getBuiltInCommandsForDropdown('claude');
+    const commands = getBuiltInCommandsForDropdown({
+      supportsNativeHistory: true,
+      supportsFork: true,
+      supportsFastMode: true,
+    });
     expect(commands.length).toBe(BUILT_IN_COMMANDS.length);
     expect(commands.map(c => c.name)).toContain('clear');
     expect(commands.map(c => c.name)).toContain('resume');
