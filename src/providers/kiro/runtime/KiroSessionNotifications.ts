@@ -1,8 +1,8 @@
 import type { SlashCommand } from '../../../core/types';
 import { type ACPAvailableCommand, normalizeACPAvailableCommands } from '../../acp';
 
-// Kiro streams its session updates over standard ACP `session/update`, so unlike
-// Grok there is no `x.ai/*` wrapped-notification envelope to unwrap here. The only
+// Kiro streams its session updates over standard ACP `session/update`, so there
+// is no `x.ai/*` wrapped-notification envelope to unwrap here. The only
 // Kiro-specific notification this provider consumes is the slash-command catalog,
 // pushed as `_kiro.dev/commands/available` after a session is created.
 //

@@ -41,10 +41,7 @@ body:
       options:
         - Not provider-specific
         - Claude
-        - Codex
-        - Grok
-        - OpenCode
-        - Pi
+        - Kiro
         - Other or new provider
     validations:
       required: true

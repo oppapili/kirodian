@@ -8,10 +8,10 @@ import {
 import type { KiroModelCatalogCoordinator } from './KiroModelCatalogCoordinator';
 
 /**
- * Build the shared model-catalog controller for the Kiro provider. Mirrors
- * `createGrokModels`: the controller owns the common settings policy (selection,
- * aliases, staleness) while discovery, native metadata, and persistence remain the
- * coordinator's responsibility.
+ * Build the shared model-catalog controller for the Kiro provider. The
+ * controller owns the common settings policy (selection, aliases, staleness)
+ * while discovery, native metadata, and persistence remain the coordinator's
+ * responsibility.
  *
  * @param host - Provider host used for settings mutation and change notifications.
  * @param native - The Kiro model-catalog coordinator, narrowed to its `refresh` hook.

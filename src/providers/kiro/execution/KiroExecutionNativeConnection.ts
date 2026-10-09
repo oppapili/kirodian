@@ -24,7 +24,7 @@ const COMMANDS_AVAILABLE_TIMEOUT_MS = 5000;
 
 // Kiro exposes its slash-command catalog by pushing `_kiro.dev/commands/available`
 // notifications after a session is created, rather than answering a synchronous
-// list request the way Grok's `_x.ai/commands/list` does. That push arrives ONLY
+// list request. That push arrives ONLY
 // after `session/new` — an `initialize()`-only connection never receives it — so
 // `listCommands` must establish a session and wait for the first catalog push
 // before resolving. We capture the most recent catalog per connection so the wait

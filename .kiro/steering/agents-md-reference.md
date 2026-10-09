@@ -36,11 +36,7 @@ inclusion: always
 | `src/style/**` | `src/style/AGENTS.md` |
 | `src/providers/acp/**` | `src/providers/acp/AGENTS.md` |
 | `src/providers/claude/**` | `src/providers/claude/AGENTS.md` |
-| `src/providers/codex/**` | `src/providers/codex/AGENTS.md` |
-| `src/providers/grok/**` | `src/providers/grok/AGENTS.md` |
 | `src/providers/kiro/**` | `src/providers/kiro/AGENTS.md` |
-| `src/providers/opencode/**` | `src/providers/opencode/AGENTS.md` |
-| `src/providers/pi/**` | `src/providers/pi/AGENTS.md` |
 | `scripts/**` | `scripts/AGENTS.md` |
 | `tests/**` | `tests/AGENTS.md`（＋カバー対象ソースの `AGENTS.md`） |
 
