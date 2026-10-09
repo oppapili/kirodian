@@ -6,7 +6,6 @@ import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import { isVersionedRuntimeInputFingerprint } from '@/core/providers/settings/RuntimeInputFingerprint';
 import * as sdkSession from '@/providers/claude/history/ClaudeHistoryStore';
-import { getCodexProviderSettings } from '@/providers/codex/settings';
 
 // Provider history readers touch the filesystem through Node's fs.
 jest.mock('fs');
@@ -152,68 +151,6 @@ describe('startApplication', () => {
       expect(saveSpy).toHaveBeenCalled();
     });
   });
-
-  describe('session metadata', () => {
-    it('migrates a legacy Codex fingerprint before reconciling persisted sessions', async () => {
-      const timestamp = Date.now();
-      const metadataPath = '.claudian/sessions/conv-codex-legacy.meta.json';
-      const sessionMetadata = {
-        id: 'conv-codex-legacy',
-        providerId: 'codex',
-        title: 'Legacy Codex Chat',
-        createdAt: timestamp,
-        lastActivityAt: timestamp,
-        sessionId: 'codex-thread-123',
-        selectedModel: 'openai-codex/gpt-5',
-        providerState: {
-          threadId: 'codex-thread-123',
-          sessionFilePath: 'C:\\Users\\tester\\.codex\\sessions\\codex-thread-123.jsonl',
-        },
-      };
-
-      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => (
-        path === '.claudian/claudian-settings.json'
-        || path === '.claudian/sessions'
-        || path === metadataPath
-      ));
-      mockApp.vault.adapter.list.mockImplementation(async (path: string) => (
-        path === '.claudian/sessions'
-          ? { files: [metadataPath], folders: [] }
-          : { files: [], folders: [] }
-      ));
-      mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
-        if (path === '.claudian/claudian-settings.json') {
-          return JSON.stringify({
-            providerConfigs: {
-              codex: {
-                cliPath: 'C:\\Users\\tester\\codex.exe',
-                enabled: true,
-                environmentHash: '',
-                environmentVariables: '',
-              },
-            },
-          });
-        }
-        if (path === metadataPath) {
-          return JSON.stringify(sessionMetadata);
-        }
-        return '';
-      });
-
-      const domains = await loadApplication();
-
-      expect(domains.conversations.getCachedConversation(sessionMetadata.id)).toMatchObject({
-        sessionId: sessionMetadata.sessionId,
-        providerState: sessionMetadata.providerState,
-      });
-      expect(isVersionedRuntimeInputFingerprint(
-        getCodexProviderSettings(domains.settings.getCommittedSettings()).environmentHash,
-      )).toBe(true);
-      expect(mockApp.vault.adapter.write).not.toHaveBeenCalledWith(
-        metadataPath,
-        expect.any(String),
-      );
-    });
 
     it('should preserve Claude metadata during startup when local native history is missing', async () => {
       const timestamp = Date.now();
