@@ -3,14 +3,14 @@ import { createHash } from 'node:crypto';
 
 import crossSpawn from 'cross-spawn';
 
-import { getRuntimeEnvironmentVariables } from '../../../core/providers/providerEnvironment';
-import type { ProviderHost } from '../../../core/providers/ProviderHost';
-import type { ProviderTransitionOwnerContext } from '../../../core/providers/types';
-import { getVaultPath } from '../../../utils/path';
 import {
   resolveWindowsCmdShimSpawnSpec,
   terminateSpawnedProcess,
 } from '../../../core/process/windowsCmdShim';
+import { getRuntimeEnvironmentVariables } from '../../../core/providers/providerEnvironment';
+import type { ProviderHost } from '../../../core/providers/ProviderHost';
+import type { ProviderTransitionOwnerContext } from '../../../core/providers/types';
+import { getVaultPath } from '../../../utils/path';
 import {
   type KiroDiscoveredModel,
   normalizeKiroDiscoveredModels,

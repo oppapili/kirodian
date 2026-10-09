@@ -261,9 +261,9 @@ function formatToolOutput(value: unknown): string {
     return value;
   }
   try {
-    return JSON.stringify(value);
+    return JSON.stringify(value) ?? '';
   } catch {
-    return String(value);
+    return Object.prototype.toString.call(value);
   }
 }
 

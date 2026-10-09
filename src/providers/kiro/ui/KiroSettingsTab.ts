@@ -8,6 +8,8 @@ import { getRuntimeEnvironmentVariables } from '@/core/providers/providerEnviron
 import { KIRO_PROVIDER_ICON } from '@/shared/icons';
 import { renderCLIInstallationSetting } from '@/shared/settings/CLIInstallationSetting';
 
+import { getInstallationKey as getHostnameKey } from '../../../core/device/InstallationKey';
+import { normalizeConfiguredCLIPath } from '../../../core/process/cliPath';
 import { ProviderSettingsCoordinator } from '../../../core/providers/ProviderSettingsCoordinator';
 import { ProviderWorkspaceRegistry } from '../../../core/providers/ProviderWorkspaceRegistry';
 import type { ProviderSettingsTabRenderer } from '../../../core/providers/types';
@@ -20,8 +22,6 @@ import {
   renderProviderModelEnablementWarning,
 } from '../../../shared/settings/ProviderModelEnablementWarning';
 import { renderProviderModelsSection } from '../../../shared/settings/ProviderModelsSection';
-import { getInstallationKey as getHostnameKey } from '../../../core/device/InstallationKey';
-import { normalizeConfiguredCLIPath } from '../../../core/process/cliPath';
 import type { KiroWorkspaceServices } from '../app/KiroWorkspaceServices';
 import {
   clearCurrentKiroCatalog,

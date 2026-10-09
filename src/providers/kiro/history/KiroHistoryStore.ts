@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
+import { resolveToolDiffData } from '../../../core/tools/toolDiff';
 import { isWriteEditTool, TOOL_ASK_USER_QUESTION } from '../../../core/tools/toolNames';
 import type {
   ChatMessage,
@@ -10,7 +11,6 @@ import type {
   ToolCallInfo,
   ToolResultDetails,
 } from '../../../core/types';
-import { resolveToolDiffData } from '../../../core/tools/toolDiff';
 import { extractACPDiffResultDetails } from '../../acp/ACPToolResultNormalization';
 import {
   type KiroRawToolNameResolution,

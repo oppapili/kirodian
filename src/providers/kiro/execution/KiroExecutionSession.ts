@@ -16,17 +16,17 @@ import type {
   RewindableExecutionSession,
   SteerableExecutionSession,
 } from '../../../core/execution';
-import type { ProviderHost } from '../../../core/providers/ProviderHost';
-import type { ChatMessage, PermissionMode } from '../../../core/types';
-import { normalizeToolResultDetails } from '../../../core/tools/toolResultDetails';
 import { appendBrowserContext } from '../../../core/prompt/browserContext';
 import { appendCanvasContext } from '../../../core/prompt/canvasContext';
-import { appendLinkedContent } from '../../../core/prompt/promptContext';
 import { appendEditorContext } from '../../../core/prompt/editorContext';
 import {
   buildContextFromHistory,
   buildPromptWithHistoryContext,
 } from '../../../core/prompt/historyContext';
+import { appendLinkedContent } from '../../../core/prompt/promptContext';
+import type { ProviderHost } from '../../../core/providers/ProviderHost';
+import { normalizeToolResultDetails } from '../../../core/tools/toolResultDetails';
+import type { ChatMessage, PermissionMode } from '../../../core/types';
 import {
   type ACPContentBlock,
   ACPExecutionEventNormalizer,

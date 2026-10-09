@@ -14,7 +14,6 @@ import type {
   ProviderChatUIConfig,
   ProviderId,
 } from '@/core/providers/types';
-import { BRAND_NAME } from '@/i18n/constants';
 import { getChatSettingsSnapshot } from '@/features/chat/ChatSettings';
 import { ComposerContextTray } from '@/features/chat/composer/ComposerContextTray';
 import { ComposerInfoRow } from '@/features/chat/composer/ComposerInfoRow';
@@ -43,6 +42,7 @@ import type {
   TabServices,
   TabUIComponents,
 } from '@/features/chat/tabs/types';
+import { BRAND_NAME } from '@/i18n/constants';
 
 function buildContextManagers(
   options: TabRuntimeConstructionContext,

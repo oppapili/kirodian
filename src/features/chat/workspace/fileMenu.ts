@@ -1,8 +1,8 @@
 import type { App, EventRef } from 'obsidian';
 import { Notice, TFile } from 'obsidian';
 
-import { BRAND_NAME } from '@/i18n/constants';
 import { formatComposerWikilink } from '@/features/chat/composer/composerWikilinks';
+import { BRAND_NAME } from '@/i18n/constants';
 
 interface FileMenuViewHost {
   appendToActiveInput(text: string): boolean;

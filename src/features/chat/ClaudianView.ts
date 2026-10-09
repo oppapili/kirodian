@@ -18,7 +18,6 @@ import {
 } from '@/features/chat/tabs/TabInputEvents';
 import { TabManager } from '@/features/chat/tabs/TabManager';
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
-import { BRAND_NAME } from '@/i18n/constants';
 import {
   cancelScheduledAnimationFrame,
   scheduleAnimationFrame,
@@ -27,6 +26,7 @@ import {
 import { ChatPresentationPlacement } from '@/features/chat/view/ChatPresentationPlacement';
 import { DualPaneLayout, type DualPaneLayoutElements } from '@/features/chat/view/DualPaneLayout';
 import type { ZenModeSlots, ZenModeSource, ZenPresentationPort } from '@/features/chat/zen/types';
+import { BRAND_NAME } from '@/i18n/constants';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
 type LoadableView = {

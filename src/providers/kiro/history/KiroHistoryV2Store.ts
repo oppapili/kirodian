@@ -1,10 +1,10 @@
+import { resolveToolDiffData } from '../../../core/tools/toolDiff';
 import { isWriteEditTool, TOOL_ASK_USER_QUESTION } from '../../../core/tools/toolNames';
 import type {
   ChatMessage,
   ContentBlock,
   ToolCallInfo,
 } from '../../../core/types';
-import { resolveToolDiffData } from '../../../core/tools/toolDiff';
 import {
   normalizeKiroToolCall,
   normalizeKiroToolUseResult,

@@ -3591,16 +3591,6 @@ describe('ClaudianPlugin', () => {
   describe('loadSettings with conversations', () => {
 
     it('should load saved conversations from metadata files', async () => {
-      const timestamp = Date.now();
-      const sessionMeta = JSON.stringify({
-        id: 'conv-saved-1',
-        providerId: 'claude',
-        title: 'Saved Chat',
-        createdAt: timestamp,
-        lastActivityAt: timestamp,
-        sessionId: 'saved-session',
-      });
-
       await chatHostOf(plugin).mutateSettings((settings) => { settings.sessionAutoArchiveAfter = '7d'; });
       await new Promise(resolve => setImmediate(resolve));
 

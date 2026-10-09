@@ -5,7 +5,6 @@ import type {
   ProviderHistoryInput,
   ProviderHistoryPathContext,
   ProviderHistoryResult,
-  ProviderHistoryState,
   ProviderHistoryUpdate,
 } from '../../../core/providers/types';
 import {
