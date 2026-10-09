@@ -1,8 +1,10 @@
 import type {
   ProviderChatUIConfig,
+  ProviderModelPolicy,
   ProviderModelSelectorLock,
   ProviderModeSelectorConfig,
   ProviderPermissionModeOption,
+  ProviderPermissionModePolicy,
   ProviderUIOption,
 } from '../../../core/providers/types';
 import { KIRO_PROVIDER_ICON } from '../../../shared/icons';
@@ -32,7 +34,16 @@ const KIRO_PERMISSION_MODE_OPTIONS: readonly ProviderPermissionModeOption[] = Ob
   },
 ]);
 
-export const kiroChatUIConfig: ProviderChatUIConfig = {
+// Kiro offers only Safe (`normal`) and YOLO. Retired upstream modes such as
+// `plan` are not Kiro values; a stored legacy mode fails closed to Safe.
+const KIRO_PERMISSION_MODE_POLICY: ProviderPermissionModePolicy = Object.freeze({
+  values: ['normal', 'yolo'],
+  fallbackValue: 'normal',
+  defaultValue: 'normal',
+});
+
+export const kiroChatUIConfig: ProviderChatUIConfig & Pick<ProviderModelPolicy, 'permissionModes'> = {
+  permissionModes: KIRO_PERMISSION_MODE_POLICY,
   getModelOptions(settings): ProviderUIOption[] {
     const kiroSettings = getKiroProviderSettings(settings);
     const catalogModels = kiroSettings.currentCatalog?.models ?? [];
