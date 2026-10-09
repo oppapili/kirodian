@@ -152,6 +152,7 @@ describe('startApplication', () => {
     });
   });
 
+  describe('session metadata', () => {
     it('should preserve Claude metadata during startup when local native history is missing', async () => {
       const timestamp = Date.now();
       const sessionMeta = JSON.stringify({
