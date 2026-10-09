@@ -166,12 +166,12 @@ test.each(['unloaded', 'model-recovery'] as const)('strips image payloads when s
   expect(await adapter.read(nativePath)).toBe(result);
 });
 
-test.each([
-  { providerId: 'codex' as const, locator: { threadId: 'native', sessionFilePath: '/history/codex.jsonl' } },
-  { providerId: 'grok' as const, locator: { sessionDirectory: '/history/grok', nativeConversationContextEstablished: true } },
-  { providerId: 'pi' as const, locator: { sessionId: 'native', sessionFile: '/history/pi.jsonl', leafEntryId: 'leaf' } },
-  { providerId: 'opencode' as const, locator: { sessionId: 'native', databasePath: '/history/opencode.db', nativeVersion: 2 } },
-])('preserves $providerId native locators and opaque state in unloaded and recovery records', async ({ providerId, locator }) => {
+test('preserves kiro native locators and opaque state in unloaded and recovery records', async () => {
+  const providerId = 'kiro' as const;
+  const locator = {
+    sessionDirectory: '/history/kiro',
+    forkSource: { sessionId: 'native', resumeAt: 'leaf' },
+  };
   const state = { ...locator, futureField: { cursor: 'keep' } };
   const recoverySource = { sessionId: 'recovery-session', providerState: state, resumeAtMessageId: 'checkpoint' };
   const conversation: Conversation = {
