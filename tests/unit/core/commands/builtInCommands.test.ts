@@ -6,6 +6,15 @@ import {
 } from '@/core/commands/builtInCommands';
 
 describe('builtInCommands', () => {
+  it('uses fast-mode capability rather than a provider name for detection and display', () => {
+    const capable = { providerId: 'test-provider', supportsFastMode: true };
+    const incapable = { providerId: 'codex', supportsFastMode: false };
+    expect(detectBuiltInCommand('/fast', capable)?.command.action).toBe('fast');
+    expect(getBuiltInCommandsForDropdown(capable).map(command => command.name)).toContain('fast');
+    expect(detectBuiltInCommand('/fast', incapable)).toBeNull();
+    expect(getBuiltInCommandsForDropdown(incapable).map(command => command.name)).not.toContain('fast');
+  });
+
   describe('detectBuiltInCommand', () => {
     it('detects /clear command', () => {
       const result = detectBuiltInCommand('/clear');
@@ -81,6 +90,20 @@ describe('builtInCommands', () => {
       expect(detectBuiltInCommand('/FORK')).not.toBeNull();
       expect(detectBuiltInCommand('/Fork')).not.toBeNull();
     });
+
+    it('detects /fast command', () => {
+      const result = detectBuiltInCommand('/fast');
+      expect(result).not.toBeNull();
+      expect(result?.command.name).toBe('fast');
+      expect(result?.command.action).toBe('fast');
+      expect(result?.args).toBe('');
+    });
+
+    it('leaves unsupported commands to provider handling', () => {
+      expect(detectBuiltInCommand('/fast', 'claude')).toBeNull();
+      expect(detectBuiltInCommand('/fast', { supportsFastMode: true })?.command.action).toBe('fast');
+    });
+
   });
 
   describe('getBuiltInCommandsForDropdown', () => {
@@ -124,6 +147,18 @@ describe('builtInCommands', () => {
         forkCmd,
         { supportsNativeHistory: true, supportsFork: false },
       )).toBe(false);
+    });
+
+    it('requires an explicit fast capability', () => {
+      const fastCmd = BUILT_IN_COMMANDS.find((c) => c.name === 'fast')!;
+      expect(isBuiltInCommandSupported(fastCmd, { supportsFastMode: true })).toBe(true);
+      expect(isBuiltInCommandSupported(fastCmd, 'claude')).toBe(false);
+      expect(isBuiltInCommandSupported(fastCmd, {
+        providerId: 'kiro',
+        supportsFastMode: true,
+        supportsNativeHistory: true,
+        supportsFork: true,
+      })).toBe(true);
     });
 
   });

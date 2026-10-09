@@ -1,4 +1,16 @@
+export {
+  type BranchableExecutionSession,
+  type ConversationBranchRecoveryRequest,
+  type ConversationBranchRequest,
+  type ConversationBranchResult,
+  type ConversationBranchState,
+  isBranchableExecutionSession,
+} from './BranchableExecutionSession';
 export { ExecutionEventQueue } from './ExecutionEventQueue';
+export {
+  type PendingInteraction,
+  PendingInteractionLedger,
+} from './PendingInteractionLedger';
 export {
   type ProviderExecutionBackend,
   type ProviderNativePersistence,
@@ -29,6 +41,8 @@ export {
   type ProviderSessionEvent,
   type ProviderSessionEventScope,
   type ProviderSessionStateChangedEvent,
+  type ProviderSubagentProgressEvent,
+  type ProviderSubagentUpdatedEvent,
   type ProviderTaskNotificationEvent,
   type ProviderTextDeltaEvent,
   type ProviderThinkingDeltaEvent,
@@ -42,6 +56,7 @@ export {
   type ProviderUsageUpdatedEvent,
   type ProviderUserMessageStartedEvent,
   type ToolExecutionScope,
+  type WithoutEventScope,
 } from './ProviderExecutionEvent';
 export {
   type ProviderExecutionInvalidationReason,
@@ -84,6 +99,13 @@ export {
   type ProviderSessionStatus,
 } from './ProviderSessionSnapshot';
 export {
+  type RequestedRunCancelSource,
+  RequestedRunChannel,
+  type RequestedRunChannelOptions,
+  type RequestedRunEvent,
+  type RequestedRunTerminalEvent,
+} from './RequestedRunChannel';
+export {
   type ChatRewindConflict,
   type ChatRewindMode,
   type ChatRewindPreview,
@@ -94,3 +116,7 @@ export {
   type RewindableExecutionSession,
   type SteerableExecutionSession,
 } from './RewindableExecutionSession';
+export {
+  SessionSnapshotState,
+  type SessionSnapshotStateOptions,
+} from './SessionSnapshotState';

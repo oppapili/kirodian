@@ -38,7 +38,6 @@ describe('built-in ProviderModule catalog', () => {
       defaultModel: {},
       enableChrome: 'true',
       loadUserSettings: 'false',
-      safeMode: 'unknown',
     });
 
     const defaultEnabled: Record<string, boolean> = {
@@ -68,7 +67,6 @@ describe('built-in ProviderModule catalog', () => {
       discoveredModels: [],
       enableChrome: false,
       loadUserSettings: true,
-      safeMode: 'default',
     });
   });
 

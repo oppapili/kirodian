@@ -4,25 +4,14 @@
     "cancel": "Cancel",
     "delete": "Delete",
     "edit": "Edit",
-    "preview": "Preview",
     "add": "Add",
-    "remove": "Remove",
-    "clear": "Clear",
     "clearAll": "Clear all",
-    "loading": "Loading",
     "error": "Error",
-    "success": "Success",
-    "warning": "Warning",
     "confirm": "Confirm",
-    "settings": "Settings",
-    "advanced": "Advanced",
-    "enabled": "Enabled",
-    "disabled": "Disabled",
-    "platform": "Platform",
-    "refresh": "Refresh",
-    "rewind": "Rewind"
+    "refresh": "Refresh"
   },
   "chat": {
+    "promptSuggestionHint": "Tab to accept",
     "selectAvailableModel": "Select an available model before sending.",
     "selectAvailableTitleModel": "Select an available title model in Kirodian settings.",
     "rewind": {
@@ -53,7 +42,6 @@
       "failed": "Fork failed: {error}",
       "unavailableStreaming": "Cannot fork while streaming",
       "unavailableNoUuid": "Cannot fork: missing message identifiers",
-      "unavailableNoResponse": "Cannot fork: no response to fork from",
       "errorMessageNotFound": "Message not found",
       "errorNoSession": "No session ID available",
       "errorNoActiveTab": "No active tab",
@@ -85,6 +73,22 @@
       "startFailed": "Side chat could not start: {error}",
       "queued": "Queued for the side chat.",
       "busySide": "The side chat is still responding. Wait for it to finish."
+    },
+    "zen": {
+      "regionLabel": "Claudian chat",
+      "showHistory": "Show conversation",
+      "move": "Move chat panel",
+      "working": "Working…",
+      "thinking": "Thinking…",
+      "interrupted": "Interrupted",
+      "workedFor": "Worked for {duration}",
+      "workedForResult": "Worked for {duration} · {result}",
+      "actionRequired": "Needs your input",
+      "error": "Error: {message}",
+      "toolRunning": "{tool} · running",
+      "toolCompleted": "{tool} · done",
+      "toolFailed": "{tool} · failed",
+      "toolBlocked": "{tool} · blocked"
     }
   },
   "settings": {
@@ -92,14 +96,19 @@
     "tabs": {
       "general": "General",
       "providers": "Providers",
-      "claude": "Claude"
+      "claude": "Claude",
+      "skills": "Skills"
+    },
+    "providerSettings": {
+      "unavailable": "Provider settings are unavailable.",
+      "loadFailed": "Could not load provider settings: {message}"
     },
     "display": "Display",
     "conversations": "Conversations",
     "content": "Content",
     "input": "Input",
-    "setup": "Setup",
     "models": "Models",
+    "responses": "Responses",
     "experimental": "Experimental",
     "userName": {
       "name": "What should Kirodian call you?",
@@ -167,7 +176,7 @@
     },
     "safety": "Safety",
     "loadUserSettings": {
-      "name": "Load user Claude settings",
+      "name": "Load user Claude Code settings",
       "desc": "Load user-level Claude Code configuration from ~/.claude: settings.json, skills, commands, agents, and plugins. When disabled, only vault-level configuration is available. When enabled, user permission rules may bypass Safe mode."
     },
     "claudeSafeMode": {
@@ -175,15 +184,20 @@
       "desc": "Permission mode used when the Safe toggle is active."
     },
     "environment": "Environment",
+    "sharedEnvironment": {
+      "name": "Shared environment",
+      "desc": "Provider-neutral runtime variables shared across all providers. Use this for PATH, proxy, cert, and temp variables."
+    },
     "customVariables": {
       "name": "Custom variables",
-      "desc": "Environment variables for Claude SDK (KEY=VALUE format, one per line). Shell export prefix supported."
+      "desc": "Runtime variables owned by Claude Code only. Use this for ANTHROPIC_* and Claude Code-specific toggles."
     },
     "envSnippets": {
       "name": "Snippets",
       "addBtn": "Add snippet",
-      "noSnippets": "No saved environment snippets yet. Click + to save your current environment configuration.",
+      "saveCurrent": "Save current environment as a snippet",
       "nameRequired": "Please enter a name for the snippet",
+      "insert": "Insert",
       "modal": {
         "titleEdit": "Edit snippet",
         "titleSave": "Save snippet",
@@ -196,27 +210,26 @@
         "save": "Save",
         "update": "Update",
         "cancel": "Cancel"
-      }
+      },
+      "insertFailed": "Failed to insert snippet",
+      "deleteConfirm": "Delete environment snippet \"{name}\"?",
+      "deleteFailed": "Failed to delete snippet"
     },
     "customModelOverrides": {
       "name": "Custom model overrides",
       "desc": "Set model selector aliases and context window sizes for custom models."
     },
     "customModelAliases": {
-      "placeholder": "Alias"
+      "placeholder": "Alias",
+      "ariaLabel": "Alias for {model}",
+      "ariaDescription": "Custom label shown in the model selector. Leave empty to use the default."
     },
     "customContextLimits": {
-      "name": "Custom Context Limits",
-      "desc": "Set context window sizes for your custom models. Leave empty to use the default (200k tokens).",
       "invalid": "Invalid format. Use: 256k, 1m, or exact count (1000-10000000)."
     },
     "enableChrome": {
       "name": "Enable Chrome extension",
-      "desc": "Allow Claude to interact with Chrome via the claude-in-chrome extension. Requires the extension to be installed. Requires session restart."
-    },
-    "maxWarmAgentProcesses": {
-      "name": "Maximum concurrent running sessions",
-      "desc": "Maximum number of agent sessions kept ready at once (5-10). Older idle sessions pause automatically and resume when used."
+      "desc": "Allow Claude Code to interact with Chrome via the claude-in-chrome extension. Requires the extension to be installed. Requires session restart."
     },
     "enableDualPane": {
       "name": "Enable dual-pane mode",
@@ -226,9 +239,14 @@
       "name": "Restore tabs on startup",
       "desc": "Reopen all tabs in single-pane mode or the last active tab in dual-pane mode."
     },
-    "enableFilePane": {
-      "name": "Enable file pane",
-      "desc": "Show a Files tab in the dual-pane session manager."
+    "sessionAutoArchiveAfter": {
+      "name": "Auto-archive inactive sessions",
+      "desc": "Archive unpinned sessions with no activity for the chosen period. Open and running sessions are skipped.",
+      "multiSelectHint": "Option-click (Alt-click on Windows and Linux) sessions to select several, then right-click to pin or archive them.",
+      "off": "Off",
+      "days7": "After 7 days",
+      "days14": "After 14 days",
+      "days30": "After 30 days"
     },
     "dualPaneSide": {
       "name": "Dual-pane side",
@@ -259,6 +277,10 @@
       "leftSidebar": "Left sidebar",
       "mainTab": "Main editor tab"
     },
+    "enableZenMode": {
+      "name": "Enable zen mode",
+      "desc": "Keep a minimal chat interface visible when the sidebar is hidden."
+    },
     "cliInstallation": {
       "disclosure": "{name} installation",
       "description": "Optional CLI path for this computer. Leave empty to detect automatically.",
@@ -271,13 +293,15 @@
       "saveFailed": "Could not save the path. Try again."
     },
     "cliPath": {
-      "name": "Claude CLI path",
-      "desc": "Custom path to Claude Code CLI. Leave empty for auto-detection.",
-      "descWindows": "For the native installer, use claude.exe. For npm/pnpm/yarn or other package manager installs, use the cli-wrapper.cjs path (not claude.cmd).",
-      "descUnix": "Paste the output of \"which claude\" — works for both native and npm/pnpm/yarn installs.",
+      "name": "Claude Code CLI path",
+      "genericName": "CLI path",
       "validation": {
         "notExist": "Path does not exist",
-        "isDirectory": "Path is a directory, not a file"
+        "isDirectory": "Path is a directory, not a file",
+        "mustBeAbsolute": "Path must be absolute",
+        "notFile": "Path must point to a file",
+        "notAccessible": "Path is not accessible",
+        "notExecutable": "Path must be executable"
       }
     },
     "language": {
@@ -290,17 +314,50 @@
       "lastProviderWarning": "At least one provider must remain enabled for Kirodian to work.",
       "noModelsWarning": "No {provider} models are enabled. Go to Models below and enable at least one model."
     },
+    "modelPicker": {
+      "name": "Visible models",
+      "desc": "Choose which models are available in the chat selector. Drag to reorder them; the provider uses the first currently usable model as its default. Select at least one model to use this provider.",
+      "browse": "Browse models",
+      "filterLabel": "Filter {provider} models",
+      "searchPlaceholder": "Filter by model, provider, or ID...",
+      "providerFilterLabel": "Filter model providers",
+      "allProviders": "All providers ({count})",
+      "discover": "Discover",
+      "visible": "Visible: ",
+      "ofDiscovered": " of {count} discovered",
+      "oneProvider": " | 1 provider",
+      "manyProviders": " | {count} providers",
+      "loadingModels": "Loading models...",
+      "loading": "Loading...",
+      "available": "{count} available",
+      "noneDiscovered": "No models discovered yet",
+      "selected": "Selected ({count})",
+      "clearAllLabel": "Clear all selected {provider} models",
+      "reorderLabel": "Reorder {model}; drag or use the Up and Down Arrow keys",
+      "default": "Default",
+      "unavailable": "Unavailable",
+      "aliasLabel": "Alias (optional)",
+      "removeLabel": "Remove {model}",
+      "noMatch": "No models match your filter.",
+      "emptyCatalog": "No {provider} models reported. Check your configuration and click Discover.",
+      "loadingCatalog": "Loading {provider} models…",
+      "stale": "{provider} model catalog is stale. Click Discover to refresh it."
+    },
     "claude": {
+      "promptSuggestions": {
+        "name": "Prompt suggestions",
+        "desc": "Show Claude’s predicted next prompt in the empty composer. Each suggestion is an extra Claude request after every turn and can drain your usage limits faster."
+      },
+      "configuration": "Configuration",
       "responseStyle": {
         "name": "Response style",
-        "desc": "Default uses Claude’s normal style. Concise leads with results and skips preamble. Requires Claude Code 2.1.237 or later.",
+        "desc": "Claude Code output style for replies, including custom styles. “Claude Code setting” follows your Claude Code configuration. The list updates when models are refreshed or a chat starts.",
         "default": "Default",
-        "concise": "Concise"
+        "inherit": "Claude Code setting"
       }
     },
     "agentSkills": {
       "sectionTitle": "Skills",
-      "fixedRoot": "Managed in .agents/skills",
       "sharedExpectation": "Manage shared skills in .agents/skills/ for compatible providers.",
       "sharedExpectationKiro": "Manage Kiro skills in .kiro/skills/ (kiro-cli does not read .agents/skills/).",
       "noSkills": "No shared skills configured. Click + to create one.",
@@ -316,9 +373,12 @@
       "created": "Shared skill \"{name}\" created.",
       "updated": "Shared skill \"{name}\" updated.",
       "deleted": "Shared skill \"{name}\" moved to trash.",
+      "fix": "Fix",
+      "fixed": "Skill \"{name}\" fixed.",
       "modal": {
         "titleEdit": "Edit Shared Skill",
         "titleAdd": "Add Shared Skill",
+        "titleFix": "Fix Skill",
         "name": "Skill name",
         "nameDesc": "Lowercase letters and numbers separated by single hyphens",
         "namePlaceholder": "code-reviewer",
@@ -333,6 +393,89 @@
         "title": "Delete Shared Skill",
         "description": "The entire skill folder, including scripts, references, and assets, will be moved to trash.",
         "confirm": "Move to trash"
+      }
+    },
+    "skills": {
+      "subTabs": {
+        "claude": "Claude Code",
+        "shared": "Other providers"
+      },
+      "claudeHelp": "Claude Code skills in .claude/skills/ and commands in .claude/commands/.",
+      "sharedHelp": "Shared skills in .agents/skills/ for Codex CLI, OpenCode, Pi and Grok Build.",
+      "status": {
+        "error": "Could not read the skill folders: {message}"
+      },
+      "synced": "Synced",
+      "actions": {
+        "sync": "Sync",
+        "resync": "Resync"
+      },
+      "commands": {
+        "title": "Claude Code commands",
+        "hint": "Commands work only in Claude Code. Converting them to skills is recommended.",
+        "badge": "command",
+        "empty": "No commands in .claude/commands.",
+        "convert": "Convert to skill",
+        "editTitle": "Edit Command",
+        "convertTitle": "Convert Command to Skill",
+        "nameDesc": "Path under .claude/commands without .md; nested commands use /",
+        "descriptionDesc": "Optional description shown in the command menu",
+        "updated": "Command \"{name}\" updated.",
+        "converted": "Command converted to skill \"{name}\".",
+        "deleted": "Command \"{name}\" moved to trash.",
+        "deleteTitle": "Delete Command",
+        "deleteDescription": "The command file will be moved to trash.",
+        "collisionFailed": "A command named \"{name}\" already exists."
+      },
+      "droppedFrontmatterWarning": "Saving keeps only name and description. These keys will be removed and provider behavior may change: {keys}",
+      "hidden": {
+        "name": "Hidden commands and skills",
+        "desc": "Hide commands and skills from every provider's command menu. Enter exact names without the leading slash, one per line (Pi skills use skill:name).",
+        "placeholder": "commit\ncompact\nskill:review"
+      },
+      "sync": {
+        "title": "Sync Skills",
+        "repairTitle": "Repair Skills Link",
+        "loading": "Checking skill folders...",
+        "intro": "Sync merges Claude Code's skills and commands into .agents/skills and links .claude/skills to it.",
+        "pros": {
+          "oneList": "One list for every provider.",
+          "newSkills": "New skills appear everywhere."
+        },
+        "cons": {
+          "dropped": "Only name and description are kept; provider-specific settings are dropped and behavior may change.",
+          "claudeSyntax": "Claude Code-only syntax won't work in other providers: {names}"
+        },
+        "attentionTitle": "Needs attention",
+        "nothingNeedsAttention": "Nothing needs attention.",
+        "nameField": "Name",
+        "descriptionField": "Description",
+        "ready": "Ready",
+        "problems": {
+          "name": "Invalid name. Use lowercase letters, numbers and hyphens.",
+          "description": "Missing description.",
+          "instructions": "No instructions. Add them to the file and sync again.",
+          "unreadable": "Its frontmatter can't be read. Fix the file and sync again.",
+          "sharedConflict": "A shared skill named \"{name}\" already exists.",
+          "itemConflict": "Another item is also named \"{name}\"."
+        },
+        "options": {
+          "fix": "Fix",
+          "replace": "Replace shared skill",
+          "discard": "Discard (move to trash)",
+          "keep": "Keep as command"
+        },
+        "continue": "Continue",
+        "confirmTitle": "Replace .claude/skills with a link?",
+        "confirmBody": ".claude/skills will be replaced by a link to .agents/skills. This can't be undone.",
+        "repairBody": ".claude/skills will be replaced by a link to .agents/skills. The folder it points to now is not changed.",
+        "linkBody": "Creates .claude/skills as a link to .agents/skills so Claude Code uses the shared skills. No files move.",
+        "linkWithItemsBody": "Commands become skills, then .claude/skills is created as a link to .agents/skills. This can't be undone.",
+        "devicesWarning": "Syncing this vault across devices? The link may not sync; run Sync on each device.",
+        "confirm": "Sync and link",
+        "partial": "Sync stopped before linking. Fix the items below and run Sync again.",
+        "failed": "Sync failed: {message}",
+        "summary": "Moved {moved}, converted {converted}, trashed {trashed}, removed {unlinked} link(s)."
       }
     }
   }

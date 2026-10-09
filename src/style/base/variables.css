@@ -8,19 +8,28 @@
   --claudian-brand-kiro: #943ded;
   --claudian-brand-kiro-rgb: 148, 61, 237;
   --claudian-error: #dc3545;
-  --claudian-error-rgb: 220, 53, 69;
   --claudian-compact: #5bc0de;
+
   /* Shared side-chat accent. */
   --claudian-side-chat: #60a5fa;
+
+  /* Tick on the current choice in toolbar menus. */
+  --claudian-selection-check: #86efac;
 }
 
-/* Active-provider alias for single-provider surfaces. */
-.claudian-container[data-provider="claude"] {
+body.theme-light .claudian-container {
+  --claudian-selection-check: #16a34a;
+}
+
+/* Active-provider alias for single-provider surfaces; a model row that names its provider takes that provider's. */
+.claudian-container[data-provider="claude"],
+.claudian-container .claudian-model-option[data-provider="claude"] {
   --claudian-brand: var(--claudian-brand-claude);
   --claudian-brand-rgb: var(--claudian-brand-claude-rgb);
 }
 
-.claudian-container[data-provider="kiro"] {
+.claudian-container[data-provider="kiro"],
+.claudian-container .claudian-model-option[data-provider="kiro"] {
   --claudian-brand: var(--claudian-brand-kiro);
   --claudian-brand-rgb: var(--claudian-brand-kiro-rgb);
 }

@@ -2,6 +2,7 @@
 
 ## Loading and verification
 
+- For test changes or changes to the code they cover, follow `tests/AGENTS.md`, even when no test edit is planned.
 - Tests follow the guides of the source they cover; they do not inherit `src/` instructions automatically.
 - Build, dependency, lockfile, locale/static-asset import, and `esbuild.config.mjs` changes also require `scripts/AGENTS.md`. Composition changes require the guides of the services being wired.
 - Use the Node version in `.node-version`. For code changes, the full verification command is:
@@ -20,6 +21,7 @@ npm run typecheck && npm run lint && npm run test && npm run build && npm run ch
 - App repositories/settings/storage depend on core contracts, not feature orchestration or provider-native protocols. Concrete provider imports are confined to `main.ts` and provider-default assembly.
 - Features use `FeatureHost` and core registries, never concrete app/provider implementations. `FeatureHost` stays feature-neutral; chat-only capabilities belong in chat's `ChatFeatureHost` extension. Providers use `ProviderHost`, never feature orchestration. Core imports none of these implementations.
 - Shared ACP code contains protocol mechanics and protocol-level normalization only; provider launch policy, extensions, provider-specific normalization, and history stay provider-owned.
+- Each piece of mutable state or policy has one authoritative owner; other modules read derived projections or call the owner's API. Do not add parallel flags, maps, or guards that must be kept in sync; consolidate into the owner instead. Code that only looks alike under different provider semantics is not shared policy.
 
 ## Local conventions
 

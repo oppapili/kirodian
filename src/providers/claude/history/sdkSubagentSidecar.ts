@@ -3,15 +3,15 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 
 import type { ProviderHistoryPathContext } from '../../../core/providers/types';
+import { extractToolResultContent } from '../../../core/tools/toolResultContent';
 import type { ToolCallInfo } from '../../../core/types';
-import { extractToolResultContent } from '../sdk/toolResultContent';
-import type { SDKNativeMessage } from './sdkHistoryTypes';
 import {
   encodeVaultPathForSDK,
   getSDKProjectsPath,
   isPathSafeId,
   isValidSessionId,
-} from './sdkSessionPaths';
+} from './ClaudeHistoryPathResolver';
+import type { SDKNativeMessage } from './sdkHistoryTypes';
 import { extractFinalResultFromSubagentJSONL } from './subagentJSONL';
 
 export function isValidAgentId(agentId: string): boolean {

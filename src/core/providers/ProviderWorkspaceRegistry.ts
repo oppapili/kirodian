@@ -7,7 +7,6 @@ import type {
   ProviderCommandLoader,
   ProviderId,
   ProviderSettingsTabRenderer,
-  ProviderTabWarmupPolicy,
   ProviderWorkspaceRegistration,
   ProviderWorkspaceServices,
 } from './types';
@@ -32,6 +31,14 @@ export class ProviderWorkspaceRegistry {
     registration: ProviderWorkspaceRegistration,
   ): void {
     this.boundary.register(providerId, registration);
+  }
+
+  static providesSessionArchive(providerId: ProviderId): boolean {
+    return this.boundary.providesSessionArchive(providerId);
+  }
+
+  static getAgentSkillProviderIds(): ProviderId[] {
+    return this.boundary.getAgentSkillProviderIds();
   }
 
   static async ensureInitialized(
@@ -97,10 +104,6 @@ export class ProviderWorkspaceRegistry {
 
   static getCommandLoader(providerId: ProviderId): ProviderCommandLoader | null {
     return this.getServices(providerId)?.commandLoader ?? null;
-  }
-
-  static getTabWarmupPolicy(providerId: ProviderId): ProviderTabWarmupPolicy | null {
-    return this.getServices(providerId)?.tabWarmupPolicy ?? null;
   }
 
   static getSettingsTabRenderer(providerId: ProviderId): ProviderSettingsTabRenderer | null {

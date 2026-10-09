@@ -135,7 +135,6 @@ describe('ProviderSettingsCoordinator', () => {
         model: 'sonnet',
         effortLevel: 'high',
         serviceTier: 'default',
-        thinkingBudget: 'off',
         titleGenerationModel: 'sonnet',
         providerConfigs: {
           claude: { ...DEFAULT_CLAUDE_PROVIDER_SETTINGS, enabled: true },
@@ -201,7 +200,7 @@ describe('ProviderSettingsCoordinator', () => {
       const originalGetSettingsReconciler = ProviderRegistry.getSettingsReconciler.bind(
         ProviderRegistry,
       );
-      const originalGetChatUIConfig = ProviderRegistry.getChatUIConfig.bind(ProviderRegistry);
+      const originalGetChatUIConfig = ProviderRegistry.getModelPolicy.bind(ProviderRegistry);
       const reconcilerSpy = jest.spyOn(ProviderRegistry, 'getSettingsReconciler')
         .mockImplementation((providerId) => {
           if (providerId === 'fake-invalidate') return defaultReconciler;
@@ -210,7 +209,7 @@ describe('ProviderSettingsCoordinator', () => {
         });
       const settingsProviderSpy = jest.spyOn(ProviderRegistry, 'resolveSettingsProviderId')
         .mockReturnValue('fake-invalidate');
-      const uiConfigSpy = jest.spyOn(ProviderRegistry, 'getChatUIConfig')
+      const uiConfigSpy = jest.spyOn(ProviderRegistry, 'getModelPolicy')
         .mockImplementation((providerId) => (
           providerId === 'fake-invalidate' || providerId === 'fake-reload'
             ? originalGetChatUIConfig('claude')
@@ -343,7 +342,6 @@ describe('ProviderSettingsCoordinator', () => {
         model: 'haiku',
         effortLevel: 'high',
         serviceTier: 'default',
-        thinkingBudget: 'off',
         savedProviderModel: {
           claude: 'claude-code/fable-v1',
         },
@@ -413,7 +411,7 @@ describe('ProviderSettingsCoordinator', () => {
             savedProviderPermissionMode: { [providerId]: 'plan' },
           };
           const snapshot = ProviderSettingsCoordinator.getProviderSettingsSnapshot(settings, providerId);
-          expect(snapshot.permissionMode).toBe('normal');
+          expect(snapshot.permissionMode).toBe(providerId === 'claude' ? 'manual' : 'normal');
         }
       },
     );
@@ -425,7 +423,7 @@ describe('ProviderSettingsCoordinator', () => {
           settingsProvider: providerId,
           permissionMode: 'plan',
         }, providerId);
-        expect(snapshot.permissionMode).toBe('normal');
+        expect(snapshot.permissionMode).toBe(providerId === 'claude' ? 'manual' : 'normal');
       },
     );
 
@@ -440,7 +438,6 @@ describe('ProviderSettingsCoordinator', () => {
         savedProviderModel: arrayProjection,
         savedProviderEffort: arrayProjection,
         savedProviderServiceTier: arrayProjection,
-        savedProviderThinkingBudget: arrayProjection,
         savedProviderPermissionMode: arrayProjection,
       };
 
@@ -449,7 +446,6 @@ describe('ProviderSettingsCoordinator', () => {
       expect(snapshot.savedProviderModel).toEqual({});
       expect(snapshot.savedProviderEffort).toEqual({});
       expect(snapshot.savedProviderServiceTier).toEqual({});
-      expect(snapshot.savedProviderThinkingBudget).toEqual({});
       expect(snapshot.savedProviderPermissionMode).toEqual({});
     });
 
@@ -458,11 +454,9 @@ describe('ProviderSettingsCoordinator', () => {
         model: 'old-model',
         effortLevel: 'low',
         serviceTier: 'default',
-        thinkingBudget: '500',
         savedProviderModel: { claude: 'sonnet' },
         savedProviderEffort: { claude: 'high' },
         savedProviderServiceTier: { claude: 'default' },
-        savedProviderThinkingBudget: { claude: 'off' },
       };
 
       ProviderSettingsCoordinator.projectActiveProviderState(settings);
@@ -470,7 +464,6 @@ describe('ProviderSettingsCoordinator', () => {
       expect(settings.model).toBe('sonnet');
       expect(settings.effortLevel).toBe('high');
       expect(settings.serviceTier).toBe('default');
-      expect(settings.thinkingBudget).toBe('500');
     });
 
     it('does not overwrite when no saved values exist', () => {
@@ -479,18 +472,15 @@ describe('ProviderSettingsCoordinator', () => {
         model: 'haiku',
         effortLevel: 'high',
         serviceTier: 'default',
-        thinkingBudget: 'off',
         savedProviderModel: {},
         savedProviderEffort: {},
         savedProviderServiceTier: {},
-        savedProviderThinkingBudget: {},
       };
 
       ProviderSettingsCoordinator.projectActiveProviderState(settings);
 
       expect(settings.model).toBe('haiku');
       expect(settings.effortLevel).toBe('high');
-      expect(settings.thinkingBudget).toBe('off');
     });
 
     it('handles missing saved maps gracefully', () => {
@@ -499,7 +489,6 @@ describe('ProviderSettingsCoordinator', () => {
         model: 'haiku',
         effortLevel: 'high',
         serviceTier: 'default',
-        thinkingBudget: 'off',
       };
 
       // Should not throw
@@ -515,11 +504,9 @@ describe('ProviderSettingsCoordinator', () => {
         model: 'claude-sonnet-4-5',
         effortLevel: 'xhigh',
         serviceTier: 'default',
-        thinkingBudget: 'off',
         savedProviderModel: { claude: 'claude-sonnet-4-5' },
         savedProviderEffort: { claude: 'xhigh' },
         savedProviderServiceTier: { claude: 'default' },
-        savedProviderThinkingBudget: { claude: 'off' },
       };
 
       ProviderSettingsCoordinator.projectActiveProviderState(settings);

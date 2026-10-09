@@ -1,11 +1,11 @@
+import { parseEnvironmentVariables } from '@/core/process/env';
+
 import type { ProviderHost } from '../../../core/providers/ProviderHost';
-import { ProviderSettingsCoordinator } from '../../../core/providers/ProviderSettingsCoordinator';
 import type {
   ProviderHistoryPathContext,
   ProviderSubagentHistoryRequest,
   ProviderSubagentHistoryService,
 } from '../../../core/providers/types';
-import { parseEnvironmentVariables } from '../../../utils/env';
 import {
   loadSubagentFinalResult,
   loadSubagentToolCalls,
@@ -41,10 +41,6 @@ export class ClaudeSubagentHistoryService implements ProviderSubagentHistoryServ
     return {
       environment: { ...process.env, ...customEnvironment },
       hostPlatform: process.platform,
-      settings: ProviderSettingsCoordinator.getProviderSettingsSnapshot(
-        this.host.settings,
-        'claude',
-      ),
       vaultPath,
     };
   }

@@ -158,7 +158,17 @@ jest.mock('obsidian', () => {
   };
 });
 
-import { DEFAULT_CLAUDIAN_SETTINGS } from '@/app/settings/defaultSettings';
+const mockSkillsSettingsTab = jest.fn();
+jest.mock('@/features/agent-skills/SkillsSettingsTab', () => ({
+  SkillsSettingsTab: class MockSkillsSettingsTab {
+    constructor(...args: unknown[]) { mockSkillsSettingsTab(...args); }
+    flush(): void {}
+    dispose(): void {}
+  },
+}));
+
+import { DEFAULT_CLAUDIAN_SETTINGS } from '@test/helpers/defaultSettings';
+
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import { ClaudianSettingTab } from '@/features/settings/ClaudianSettings';
@@ -179,9 +189,6 @@ function createTab(enableDualPane: boolean): {
     storage: {
       getAdapter: jest.fn(() => ({})),
     },
-    warmExecutionPool: {
-      reconcileLimit: jest.fn(),
-    },
     providerHost: {
       settings,
       getEnvironmentVariablesForScope: jest.fn(() => ''),
@@ -190,7 +197,7 @@ function createTab(enableDualPane: boolean): {
   };
 
   return {
-    tab: new ClaudianSettingTab({} as any, plugin as any),
+    tab: new ClaudianSettingTab({} as any, {} as any, plugin as any),
     plugin,
   };
 }
@@ -279,6 +286,7 @@ function renderSettingsTab(
 describe('ClaudianSettingTab display settings', () => {
   beforeEach(() => {
     document.body.replaceChildren();
+    mockSkillsSettingsTab.mockClear();
     mockRenderedSettingNames.length = 0;
     mockSettingDescriptionEls.clear();
     mockGitStatusElements.length = 0;
@@ -339,9 +347,24 @@ describe('ClaudianSettingTab display settings', () => {
     expect(container.empty).toHaveBeenCalledTimes(1);
     expect(container.addClass).toHaveBeenCalledWith('claudian-settings');
     expect(findContainer(container, t('settings.tabs.general'))).not.toBeNull();
+    expect(findContainer(container, t('settings.tabs.providers'))).not.toBeNull();
+    expect(findContainer(container, t('settings.tabs.skills'))).not.toBeNull();
   });
 
-  it('refreshes timestamps in every open view after the setting is saved', async () => {
+  it('does not touch skill folders until the Skills tab is opened', () => {
+    const { tab, plugin } = createTab(true);
+    const container = renderSettingsTab(tab);
+
+    expect(plugin.storage.getAdapter).not.toHaveBeenCalled();
+    expect(mockSkillsSettingsTab).not.toHaveBeenCalled();
+    findContainer(container, t('settings.tabs.skills'))?.click();
+    findContainer(container, t('settings.tabs.skills'))?.click();
+
+    expect(plugin.storage.getAdapter).toHaveBeenCalledTimes(1);
+    expect(mockSkillsSettingsTab).toHaveBeenCalledTimes(1);
+  });
+
+  it('saves timestamp preferences through the application settings owner', async () => {
     const { tab, plugin } = createTab(true);
     const firstView = { refreshMessageTimestamps: jest.fn() };
     const secondView = { refreshMessageTimestamps: jest.fn() };
@@ -360,8 +383,7 @@ describe('ClaudianSettingTab display settings', () => {
     await change;
 
     expect(plugin.settings.showMessageTimestamps).toBe(true);
-    expect(firstView.refreshMessageTimestamps).toHaveBeenCalledWith();
-    expect(secondView.refreshMessageTimestamps).toHaveBeenCalledWith();
+    expect(plugin.mutateSettings).toHaveBeenCalledTimes(1);
   });
 
   it('renders the dual-pane position only while dual-pane mode is enabled', () => {
@@ -390,15 +412,19 @@ describe('ClaudianSettingTab display settings', () => {
     expect(update).toHaveBeenCalledTimes(1);
   });
 
-  it('renders and updates the startup tab restore toggle', async () => {
+  it.each([
+    ['restoreTabsOnStartup', 'settings.restoreTabsOnStartup.name'],
+    ['enableZenMode', 'settings.enableZenMode.name'],
+  ] as const)('renders and updates the %s toggle', async (key, name) => {
     const { tab, plugin } = createTab(true);
     (tab as any).renderGeneralTab(createContainer());
 
-    expect(mockRenderedSettingNames).toContain(t('settings.restoreTabsOnStartup.name'));
+    expect(mockRenderedSettingNames).toContain(t(name));
+    expect(plugin.settings[key]).toBe(true);
 
-    await mockToggleChanges.get(t('settings.restoreTabsOnStartup.name'))?.(false);
+    await mockToggleChanges.get(t(name))!(false);
 
-    expect(plugin.settings.restoreTabsOnStartup).toBe(false);
+    expect(plugin.settings[key]).toBe(false);
   });
 
   it('keeps Provider initialization lazy and does not mutate chat selection on navigation', async () => {
@@ -463,4 +489,62 @@ describe('ClaudianSettingTab display settings', () => {
     expect(ensureInitialized.mock.calls.map(([, providerId]) => providerId))
       .toEqual(['claude', 'codex']);
   });
+
+  it('collapses a disabled Provider tab and follows later enablement changes', async () => {
+    let enabled = false;
+    jest.spyOn(ProviderRegistry, 'getRegisteredProviderIds').mockReturnValue(['codex']);
+    jest.spyOn(ProviderRegistry, 'getProviderDisplayName').mockReturnValue('CODEX');
+    jest.spyOn(ProviderRegistry, 'getTitleGenerationModelOptions').mockReturnValue([]);
+    jest.spyOn(ProviderRegistry, 'isEnabled').mockImplementation(() => enabled);
+    jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized').mockResolvedValue(undefined);
+    let notify: ((providerId: 'codex') => void) | null = null;
+    jest.spyOn(ProviderWorkspaceRegistry, 'getSettingsTabRenderer').mockReturnValue({
+      render: (_container, context) => { notify = context.notifyProviderModelOptionsChanged; },
+    });
+    const { tab, plugin } = createTab(true);
+    plugin.notifyProviderChatOptionsChanged = jest.fn();
+    const container = createContainer();
+    (tab as any).activeTab = 'providers';
+
+    renderSettingsTab(tab, container);
+    await waitFor(() => expect(notify).not.toBeNull());
+    const content = findByClass(container, 'claudian-settings-provider-content')!;
+    const collapsed = (): boolean | undefined => content.toggleClass.mock.calls
+      .filter(([name]: [string]) => name === 'claudian-settings-provider-content--disabled')
+      .at(-1)?.[1];
+    expect(collapsed()).toBe(true);
+
+    enabled = true;
+    notify!('codex');
+    expect(collapsed()).toBe(false);
+  });
+});
+
+function findByClass(root: MockContainer, cls: string): MockContainer | null {
+  if ((root.cls as string | undefined)?.split(' ').includes(cls)) return root;
+  for (const child of root.children) {
+    const match = findByClass(child, cls);
+    if (match) return match;
+  }
+  return null;
+}
+
+it('batches a burst of text edits into one settings mutation and flushes on teardown', async () => {
+  jest.useFakeTimers();
+  const { tab, plugin } = createTab(false);
+  const cleanup = (tab as any).renderSettings(createContainer());
+  try {
+    const change = mockTextChanges.get(t('settings.userName.name'))!;
+    for (let index = 0; index < 20; index++) await change(`Name ${index}`);
+    expect(plugin.mutateSettings).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(500);
+    expect(plugin.mutateSettings).toHaveBeenCalledTimes(1);
+    expect(plugin.settings.userName).toBe('Name 19');
+    await change('Last edit');
+    cleanup();
+    await Promise.resolve();
+    expect(plugin.settings.userName).toBe('Last edit');
+    await jest.advanceTimersByTimeAsync(1000);
+    expect(plugin.mutateSettings).toHaveBeenCalledTimes(2);
+  } finally { cleanup(); jest.useRealTimers(); }
 });

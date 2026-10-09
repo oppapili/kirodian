@@ -28,15 +28,17 @@ Open the chat sidebar from the ribbon icon or command palette. Select text and u
 
 **Inline Edit** — Select text or start at the cursor position + hotkey to edit directly in notes with word-level diff preview.
 
+**Zen Mode** — Collapse the sidebar holding Claudian and the chat moves to a [compact composer](assets/zen-mode-collapsed.png) at the bottom of your notes, with a one-line activity preview and [the conversation one click away](assets/zen-mode-expanded.png).
+
 **Slash Commands & Skills** — Type `/` or `$` for reusable prompt templates or Skills from user- and vault-level scopes.
 
-**`@mention`** — Type `@` to reference vault files and folders.
+**@mention** — Type `@` to reference vault files, folders and other Claudian sessions.
 
 **Side Chat (`/side` or `/btw`)** — Explore a separate, temporary conversation with follow-ups and tools while keeping the main chat unchanged.
 
 **MCP Servers** — Connect external tools through each coding agent's native CLI-managed MCP configuration.
 
-**Tabs & Session Management** — Use multiple tabs in single-panel mode or a persistent session manager beside the chat in dual-pane mode.
+**Tabs & Session Management** — Use multiple tabs in [single-pane mode](assets/main-chat-single-pane.png) or a persistent session manager beside the chat in [dual-pane mode](assets/main-chat-dual-pane.png).
 
 ## Requirements
 
@@ -130,6 +132,20 @@ Either:
 1. Install the native binary (recommended).
 2. Add the Node.js path in Settings → Environment: `PATH=/path/to/node/bin`.
 
+### Authentication fails while the CLI subscription works
+
+Claude can report `authentication_failed` inside Obsidian while the selected CLI works with a subscription in a terminal. An `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` inherited from the system environment takes precedence over subscription sign-in, so pointing Claudian at another CLI path does not help. The chat error includes the same recovery steps.
+
+In Settings → Providers → Claude → Custom variables, add an empty assignment for the conflicting credential so Claude falls back to the subscription:
+
+```env
+ANTHROPIC_API_KEY=
+```
+
+Use `ANTHROPIC_AUTH_TOKEN=` instead when that is the inherited credential. Override only credentials you intend to disable, and keep these assignments out of the shared environment so other providers are unaffected.
+
+When asking for help, share the variable names involved rather than their secret values.
+
 ### More help
 
 For provider-specific installation and configuration guidance, refer to the provider documentation linked in the [Requirements](#requirements) section. If you have a feature request or run into a bug, please [submit a GitHub issue](https://github.com/oppapili/kirodian/issues).
@@ -138,27 +154,27 @@ For provider-specific installation and configuration guidance, refer to the prov
 
 ```
 src/
-├── main.ts                      # Plugin entry point
-├── app/                         # Application services, and storage
+├── main.ts                      # Plugin entry point and sole composition root
+├── composition/                 # Host objects and view wiring shared by app and features
+├── app/                         # Startup, conversations, settings, and storage
 ├── core/                        # Provider-neutral execution, registry, and type contracts
-│   ├── execution/               # Provider execution, session lifecycle, and interaction contracts
+│   ├── execution/               # Run, session snapshot, and interaction primitives
 │   ├── providers/               # Provider registry and workspace services
+│   ├── process/                 # CLI discovery and managed child processes
+│   ├── prompt/                  # Prompt and context encoding
 │   ├── auxiliary/               # Shared provider auxiliary services
-│   ├── bootstrap/               # Plugin bootstrap wiring
-│   ├── security/                # Approval utilities
-│   └── ...                      # commands, prompt, storage, tools, types
+│   └── ...                      # bootstrap, commands, rpc, security, storage, tools, types
 ├── providers/
 │   ├── claude/                  # Claude SDK adaptor, prompt encoding, storage, MCP, plugins
 │   ├── kiro/                    # Kiro CLI ACP adaptor, native history, models, and tools
 │   └── acp/                     # Agent Client Protocol shared transport
 ├── features/
-│   ├── chat/                    # Sidebar chat: tabs, controllers, renderers
+│   ├── chat/                    # Sidebar chat: tabs, workspace lifecycle, controllers, renderers
 │   ├── inline-edit/             # Inline edit modal and provider-backed edit services
-│   └── settings/                # Settings shell with provider tabs
-├── shared/                      # Reusable UI components and modals
+│   └── settings/                # Settings shell, provider tabs, Vault skill management
+├── shared/                      # Reusable UI components, settings controls, mention/dropdown
 ├── i18n/                        # Internationalization (10 locales)
-├── types/                       # Shared ambient types
-├── utils/                       # Cross-cutting utilities
+├── utils/                       # Domain-free leaf helpers
 └── style/                       # Modular CSS
 ```
 

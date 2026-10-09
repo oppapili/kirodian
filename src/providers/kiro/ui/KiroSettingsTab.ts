@@ -149,13 +149,6 @@ export const kiroSettingsTabRenderer: ProviderSettingsTabRenderer = {
     new Setting(container).setName(t('settings.agentSkills.sectionTitle')).setHeading();
     context.renderAgentSkillSettings(container, KIRO_PROVIDER_ID);
 
-    new Setting(container).setName('Commands').setHeading();
-    context.renderHiddenProviderCommandSetting(container, KIRO_PROVIDER_ID, {
-      name: 'Hidden Kiro commands',
-      desc: 'Hide runtime commands advertised by Kiro from the command dropdown. Enter names without the leading slash, one per line.',
-      placeholder: 'compact\nreview',
-    });
-
     renderEnvironmentSettingsSection({
       container,
       desc: 'Environment variables passed only to Kiro. Custom-model secrets stay in this provider scope and are referenced from native config by env_key.',

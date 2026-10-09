@@ -51,6 +51,14 @@ describe('ProviderRegistry', () => {
     expect(caps.supportsRewind).toBe(false);
   });
 
+  it.each([undefined, 1, 2] as const)('resolves OpenCode fork mode for native version %s without changing other providers', nativeVersion => {
+    const state = nativeVersion ? { nativeVersion } : undefined;
+    expect(ProviderRegistry.getCapabilities('opencode', state).forkMode).toBe(nativeVersion === 2 ? 'checkpoint' : 'full-session');
+    expect(ProviderRegistry.getCapabilities('opencode', state).supportsEphemeralFork).toBe(nativeVersion === 2);
+    expect(ProviderRegistry.getCapabilities('claude', state)).toEqual(ProviderRegistry.getCapabilities('claude'));
+    expect(ProviderRegistry.getCapabilities('opencode').forkMode).toBe('full-session');
+  });
+
   it('registers provider-owned subagent protocols outside the capability matrix', () => {
     const claudeAdapter = ProviderRegistry.getSubagentAdapter('claude');
     expect(claudeAdapter).toMatchObject({
@@ -61,7 +69,7 @@ describe('ProviderRegistry', () => {
     });
 
     expect(claudeAdapter?.isSpawnTool('Agent')).toBe(true);
-    expect(claudeAdapter?.isSpawnTool('Task')).toBe(true);
+    expect(claudeAdapter?.isSpawnTool('Task')).toBe(false);
 
     for (const providerId of ['claude', 'kiro'] as const) {
       expect(ProviderRegistry.getCapabilities(providerId)).not.toHaveProperty(
@@ -168,12 +176,14 @@ describe('ProviderRegistry', () => {
       },
     });
 
+
+
     expect(options.find(option => option.value === 'sonnet')?.label)
-      .toBe('Claude: Sonnet');
+      .toBe('Claude Code: Sonnet');
   });
 
   it('returns the display name from provider registration metadata', () => {
-    expect(ProviderRegistry.getProviderDisplayName('claude')).toBe('Claude');
+    expect(ProviderRegistry.getProviderDisplayName('claude')).toBe('Claude Code');
     expect(ProviderRegistry.getProviderDisplayName('kiro')).toBe('Kiro');
   });
 

@@ -5,16 +5,15 @@ import {
   assertLinkedContentPath,
   normalizeLinkedContentPath,
 } from '@/core/path/LinkedContentPath';
-import type { ComposerContextTray } from '@/features/chat/ui/ComposerContextTray';
-import { revealWorkspaceLeaf } from '@/utils/obsidianCompat';
-
-import { LinkedContentChip } from './LinkedContentChip';
-import { LinkedContentPickerSource } from './LinkedContentPickerSource';
+import type { ComposerInfoRow } from '@/features/chat/composer/ComposerInfoRow';
+import { LinkedContentChip } from '@/features/chat/linked-content/LinkedContentChip';
+import { LinkedContentPickerSource } from '@/features/chat/linked-content/LinkedContentPickerSource';
 import {
   deriveLinkedContentPresentation,
   type LinkedContentPresentation,
-} from './LinkedContentPresentation';
-import { LinkedContentSelector } from './LinkedContentSelector';
+} from '@/features/chat/linked-content/LinkedContentPresentation';
+import { LinkedContentSelector } from '@/features/chat/linked-content/LinkedContentSelector';
+import { revealWorkspaceLeaf } from '@/utils/obsidianCompat';
 
 export type LinkedContentMode = 'auto-draft' | 'explicit-draft' | 'submitting' | 'locked';
 
@@ -248,10 +247,10 @@ export class LinkedContentController {
     this.selector = null;
   }
 
-  mountContextTray(contextTray: ComposerContextTray): void {
+  mountInfoRow(infoRow: ComposerInfoRow): void {
     this.#assertLive();
     this.chip?.destroy();
-    this.chip = new LinkedContentChip(contextTray, () => {
+    this.chip = new LinkedContentChip(infoRow, () => {
       void this.activateCurrentContent();
     }, () => {
       this.selectExplicit(null);
@@ -259,7 +258,7 @@ export class LinkedContentController {
     this.#renderChip();
   }
 
-  unmountContextTray(): void {
+  unmountInfoRow(): void {
     this.chip?.destroy();
     this.chip = null;
   }
@@ -289,7 +288,7 @@ export class LinkedContentController {
     this.destroyed = true;
     this.activeSubmission = null;
     this.unmountWelcome();
-    this.unmountContextTray();
+    this.unmountInfoRow();
   }
 
   #requireSubmission(token: LinkedContentSubmissionToken): ActiveSubmission {

@@ -1,6 +1,7 @@
 const crossPlatformTests = [
-  'tests/unit/utils/windowsCmdShim.test.ts',
-  'tests/unit/core/process/ManagedStdioProcess.test.ts',
+  'tests/integration/core/process/ProcessProbe.test.ts',
+  'tests/integration/core/process/ManagedStdioProcess.test.ts',
+  'tests/integration/core/process/cliBinaryLocator.test.ts',
 ];
 
 const scriptTests = [
@@ -8,7 +9,6 @@ const scriptTests = [
   'scripts/check-eslint-config.test.mjs',
   'scripts/check-open-handles.test.mjs',
   'scripts/check-release-version.test.mjs',
-  'scripts/check-stylelint-config.test.mjs',
   'scripts/summarize-jest-results.test.mjs',
   'scripts/sync-version.test.mjs',
   'scripts/ciTestSelection.test.mjs',

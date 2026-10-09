@@ -1,6 +1,8 @@
 import type { App } from 'obsidian';
 import { Modal, Notice, setIcon, Setting } from 'obsidian';
 
+import { parseEnvironmentVariables } from '@/core/process/env';
+
 import {
   getEnvironmentScopeUpdates,
   resolveEnvironmentSnippetScope,
@@ -9,8 +11,8 @@ import type { ProviderHost } from '../../core/providers/ProviderHost';
 import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
 import type { EnvironmentScope, EnvSnippet } from '../../core/types';
 import { t } from '../../i18n/i18n';
-import { formatContextLimit, parseContextLimit, parseEnvironmentVariables } from '../../utils/env';
 import { confirmDelete } from '../modals/ConfirmModal';
+import { formatContextLimit, parseContextLimit } from './contextLimit';
 
 export class EnvSnippetModal extends Modal {
   plugin: ProviderHost;
@@ -139,7 +141,7 @@ export class EnvSnippetModal extends Modal {
         });
         aliasInput.value = existingAliases[modelId] ?? '';
         aliasInput.setAttribute('aria-label', `Alias for ${modelId}`);
-        aliasInput.title = 'Custom label shown in the model selector. Leave empty to use the default.';
+        aliasInput.setAttribute('aria-description', t('settings.customModelAliases.ariaDescription'));
         modelAliasInputs.set(modelId, aliasInput);
 
         const input = row.createEl('input', {
@@ -238,22 +240,30 @@ export class EnvSnippetManager {
     const headerEl = this.containerEl.createDiv({ cls: 'claudian-snippet-header' });
     headerEl.createSpan({ text: t('settings.envSnippets.name'), cls: 'claudian-snippet-label' });
 
+    const snippets = this.plugin.settings.envSnippets.filter((snippet) => this.#shouldDisplaySnippet(snippet));
+
+    // The empty state is itself the save action, so the header button only appears beside a list.
+    if (snippets.length === 0) {
+      const emptyBtn = this.containerEl.createEl('button', {
+        cls: 'claudian-snippet-empty',
+        attr: { type: 'button' },
+      });
+      setIcon(emptyBtn.createSpan({ cls: 'claudian-snippet-empty-icon' }), 'plus');
+      emptyBtn.createSpan({ text: t('settings.envSnippets.saveCurrent') });
+      emptyBtn.addEventListener('click', () => {
+        void this.#saveCurrentEnv();
+      });
+      return;
+    }
+
     const saveBtn = headerEl.createEl('button', {
       cls: 'claudian-settings-action-btn',
-      attr: { 'aria-label': t('settings.envSnippets.addBtn') },
+      attr: { type: 'button', 'aria-label': t('settings.envSnippets.addBtn') },
     });
     setIcon(saveBtn, 'plus');
     saveBtn.addEventListener('click', () => {
       void this.#saveCurrentEnv();
     });
-
-    const snippets = this.plugin.settings.envSnippets.filter((snippet) => this.#shouldDisplaySnippet(snippet));
-
-    if (snippets.length === 0) {
-      const emptyEl = this.containerEl.createDiv({ cls: 'claudian-snippet-empty' });
-      emptyEl.setText(t('settings.envSnippets.noSnippets'));
-      return;
-    }
 
     const listEl = this.containerEl.createDiv({ cls: 'claudian-snippet-list' });
 
@@ -274,7 +284,7 @@ export class EnvSnippetManager {
 
       const restoreBtn = actionsEl.createEl('button', {
         cls: 'claudian-settings-action-btn',
-        attr: { 'aria-label': 'Insert', type: 'button' },
+        attr: { 'aria-label': t('settings.envSnippets.insert'), type: 'button' },
       });
       setIcon(restoreBtn, 'clipboard-paste');
       restoreBtn.addEventListener('click', () => {
@@ -282,14 +292,14 @@ export class EnvSnippetManager {
         try {
           await this.#insertSnippet(snippet);
         } catch {
-          new Notice('Failed to insert snippet');
+          new Notice(t('settings.envSnippets.insertFailed'));
         }
         })();
       });
 
       const editBtn = actionsEl.createEl('button', {
         cls: 'claudian-settings-action-btn',
-        attr: { 'aria-label': 'Edit' },
+        attr: { 'aria-label': t('common.edit') },
       });
       setIcon(editBtn, 'pencil');
       editBtn.addEventListener('click', () => {
@@ -298,17 +308,17 @@ export class EnvSnippetManager {
 
       const deleteBtn = actionsEl.createEl('button', {
         cls: 'claudian-settings-action-btn claudian-settings-delete-btn',
-        attr: { 'aria-label': 'Delete' },
+        attr: { 'aria-label': t('common.delete') },
       });
       setIcon(deleteBtn, 'trash-2');
       deleteBtn.addEventListener('click', () => {
         void (async (): Promise<void> => {
         try {
-          if (await confirmDelete(this.plugin.app, `Delete environment snippet "${snippet.name}"?`)) {
+          if (await confirmDelete(this.plugin.app, t('settings.envSnippets.deleteConfirm', { name: snippet.name }))) {
             await this.#deleteSnippet(snippet);
           }
         } catch {
-          new Notice('Failed to delete snippet');
+          new Notice(t('settings.envSnippets.deleteFailed'));
         }
         })();
       });
@@ -352,7 +362,6 @@ export class EnvSnippetManager {
       await this.plugin.applyEnvironmentVariablesBatch(updates);
     }
 
-    // Legacy snippets without contextLimits don't modify limits
     await this.plugin.mutateSettings((settings) => {
       if (snippet.contextLimits) {
         settings.customContextLimits = {
@@ -361,8 +370,7 @@ export class EnvSnippetManager {
         };
       }
 
-      // Legacy snippets without modelAliases don't modify aliases. Snippets saved
-      // with alias fields clear aliases for their own model IDs when left empty.
+      // Explicit empty aliases clear the aliases for this snippet's model IDs.
       if (snippet.modelAliases) {
         const modelIds = ProviderRegistry.getCustomModelIds(parseEnvironmentVariables(snippet.envVars));
         const modelAliases = ProviderRegistry.getChatUIConfig('claude').customModelAliases;

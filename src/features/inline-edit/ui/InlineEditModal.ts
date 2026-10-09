@@ -4,34 +4,31 @@ import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import type { App, Component, Editor, MarkdownView } from 'obsidian';
 import { Notice } from 'obsidian';
 
-import { createCatalogCommandDiscoveryStore } from '../../../core/providers/commands/catalogCommandDiscovery';
-import { getHiddenProviderCommandSet } from '../../../core/providers/commands/hiddenCommands';
-import { resolveConversationModel } from '../../../core/providers/conversationModel';
-import { ProviderRegistry } from '../../../core/providers/ProviderRegistry';
-import { ProviderWorkspaceRegistry } from '../../../core/providers/ProviderWorkspaceRegistry';
-import { type InlineEditMode, type InlineEditService, type ProviderId } from '../../../core/providers/types';
-import { hideSelectionHighlight, showSelectionHighlight } from '../../../shared/components/SelectionHighlight';
-import {
-  ComposerDropdownController,
-  MentionSource,
-  SlashCommandSource,
-} from '../../../shared/composer-dropdown';
-import { VaultMentionDataProvider } from '../../../shared/mention/VaultMentionDataProvider';
+import type { CursorContext } from '@/core/prompt/editorContext';
+import { createCatalogCommandDiscoveryStore } from '@/core/providers/commands/catalogCommandDiscovery';
+import { getHiddenCommandSet } from '@/core/providers/commands/hiddenCommands';
+import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
+import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
+import { type InlineEditMode, type InlineEditService, type ProviderId } from '@/core/providers/types';
+import type { FeatureHost } from '@/features/FeatureHost';
+import type { InlineEditSessionOwner } from '@/features/inline-edit/InlineEditSessionOwner';
 import {
   findBestMentionLookupMatch,
   isMentionStart,
   normalizeForPlatformLookup,
   normalizeMentionPath,
-} from '../../../utils/contextMentionResolver';
-import { type CursorContext, getEditorView } from '../../../utils/editor';
-import { normalizeInsertionText } from '../../../utils/inlineEdit';
-import { getVaultPath, normalizePathForVault as normalizePathForVaultUtil } from '../../../utils/path';
-import type { FeatureHost } from '../../FeatureHost';
-import type { InlineEditSessionOwner } from '../InlineEditSessionOwner';
-import { onInlineEditEditorDestroyed } from './InlineEditEditorLifetime';
-import { renderInlineEditMarkdownPreview } from './inlineEditMarkdownPreview';
-
-type InlineEditHost = FeatureHost & Component;
+} from '@/features/inline-edit/ui/contextMentionResolver';
+import { onInlineEditEditorDestroyed } from '@/features/inline-edit/ui/InlineEditEditorLifetime';
+import { renderInlineEditMarkdownPreview } from '@/features/inline-edit/ui/inlineEditMarkdownPreview';
+import { normalizeInsertionText } from '@/features/inline-edit/ui/normalizeInsertionText';
+import { hideSelectionHighlight, showSelectionHighlight } from '@/shared/components/SelectionHighlight';
+import {
+  ComposerDropdownController,
+  MentionSource,
+  SlashCommandSource,
+} from '@/shared/composer-dropdown';
+import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
+import { getEditorView } from '@/utils/obsidianCompat';
 
 export type InlineEditContext =
   | { mode: 'selection'; selectedText: string }
@@ -268,22 +265,11 @@ interface InlineEditProviderContext {
   providerId: ProviderId;
 }
 
-function resolveInlineEditProviderContext(plugin: InlineEditHost): InlineEditProviderContext {
-  const activeView = typeof plugin.getView === 'function' ? plugin.getView() : null;
-  const activeTab = activeView?.getActiveTab();
-  const conversation = activeTab?.conversationId
-    ? plugin.getConversationSync(activeTab.conversationId)
-    : null;
-  const activeProviderId = conversation?.providerId ?? activeTab?.providerId;
-  const providerId = activeProviderId
-    && ProviderRegistry.isEnabled(activeProviderId, plugin.settings)
-    ? activeProviderId
-    : ProviderRegistry.resolveSettingsProviderId(plugin.settings);
-  const modelOverride = conversation?.providerId === providerId
-    ? resolveConversationModel(plugin.settings, providerId, conversation).model
-    : activeTab?.providerId === providerId
-    ? activeTab.draftModel
-    : null;
+function resolveInlineEditProviderContext(host: FeatureHost): InlineEditProviderContext {
+  const selection = host.getActiveModelSelection?.();
+  const providerId = selection && ProviderRegistry.isEnabled(selection.providerId, host.settings)
+    ? selection.providerId : ProviderRegistry.resolveSettingsProviderId(host.settings);
+  const modelOverride = selection?.providerId === providerId ? selection.model : null;
 
   return {
     modelOverride: modelOverride ?? undefined,
@@ -294,7 +280,9 @@ function resolveInlineEditProviderContext(plugin: InlineEditHost): InlineEditPro
 export class InlineEditModal {
   constructor(
     private app: App,
-    private plugin: InlineEditHost,
+    private host: FeatureHost,
+    /** Owns the lifetime of rendered previews. */
+    private component: Component,
     private editor: Editor,
     private view: MarkdownView,
     private editContext: InlineEditContext,
@@ -319,7 +307,7 @@ export class InlineEditModal {
       return { decision: 'reject' };
     }
 
-    const providerContext = resolveInlineEditProviderContext(this.plugin);
+    const providerContext = resolveInlineEditProviderContext(this.host);
     return new Promise((resolve) => {
       let settled = false;
       let session: InlineEditSession | null = null;
@@ -346,14 +334,15 @@ export class InlineEditModal {
       }
       releaseEditor = onInlineEditEditorDestroyed(editorView, close);
       void ProviderWorkspaceRegistry.ensureInitialized(
-        this.plugin.providerHost,
+        this.host.providerHost,
         providerContext.providerId,
         'inline-edit',
       ).then(() => {
         if (settled) return;
         session = new InlineEditSession(
           this.app,
-          this.plugin,
+          this.host,
+          this.component,
           editorView,
           editor,
           this.editContext,
@@ -410,7 +399,8 @@ export class InlineEditSession {
 
   constructor(
     private app: App,
-    private plugin: InlineEditHost,
+    private host: FeatureHost,
+    private component: Component,
     private editorView: EditorView,
     private editor: Editor,
     editContext: InlineEditContext,
@@ -418,10 +408,10 @@ export class InlineEditSession {
     private resolve: (result: { decision: InlineEditDecision; editedText?: string }) => void,
     providerContext?: InlineEditProviderContext,
   ) {
-    const resolvedProviderContext = providerContext ?? resolveInlineEditProviderContext(plugin);
+    const resolvedProviderContext = providerContext ?? resolveInlineEditProviderContext(host);
     const providerId = resolvedProviderContext.providerId;
     this.inlineEditService = ProviderRegistry.createInlineEditService(
-      plugin.providerHost,
+      host.providerHost,
       providerId,
     );
     this.inlineEditService.setModelOverride?.(resolvedProviderContext.modelOverride);
@@ -465,6 +455,12 @@ export class InlineEditSession {
       this.selectedText = this.editor.getSelection() || this.selectedText;
       this.startLine = from.line + 1; // 1-indexed
     }
+    this.sourceSnapshot = {
+      doc,
+      from: this.selFrom,
+      text: this.#getDocumentSlice(doc, this.selFrom, this.selTo),
+      to: this.selTo,
+    };
   }
 
   show() {
@@ -584,7 +580,7 @@ export class InlineEditSession {
     const slashSource = new SlashCommandSource({
       includeBuiltIns: false,
       providerId: this.resolvedProviderId,
-      hiddenCommands: getHiddenProviderCommandSet(this.plugin.settings, this.resolvedProviderId),
+      hiddenCommands: getHiddenCommandSet(this.host.settings),
       ...(inlineCatalog && discovery ? {
         providerConfig: inlineCatalog.getDropdownConfig(),
         providerDiscovery: discovery,
@@ -594,7 +590,6 @@ export class InlineEditSession {
       // Inline Edit resolves @mentions at send time from input text.
       getCachedVaultFolders: () => this.mentionDataProvider.getCachedVaultFolders(),
       getCachedVaultFiles: () => this.mentionDataProvider.getCachedVaultFiles(),
-      normalizePathForVault: (rawPath) => this.normalizePathForVault(rawPath),
     });
     const dropdown = new ComposerDropdownController(
       ownerDocument.body,
@@ -654,7 +649,7 @@ export class InlineEditSession {
       attr: {
         type: 'button',
         'aria-label': `${label} inline edit`,
-        title: variant === 'accept' ? 'Accept (enter)' : 'Reject (esc)',
+        'aria-keyshortcuts': variant === 'accept' ? 'Enter' : 'Escape',
       },
     });
     button.addEventListener('click', (event: MouseEvent) => {
@@ -668,11 +663,11 @@ export class InlineEditSession {
   async #renderMarkdownPreview(container: HTMLElement, markdown: string): Promise<void> {
     await renderInlineEditMarkdownPreview({
       app: this.app,
-      component: this.plugin,
+      component: this.component,
       container,
       markdown,
       sourcePath: this.notePath,
-      mediaFolder: this.plugin.settings?.mediaFolder ?? '',
+      mediaFolder: this.host.settings?.mediaFolder ?? '',
     });
   }
 
@@ -705,16 +700,12 @@ export class InlineEditSession {
     if (this.settled || this.generating || !this.inputEl || !this.spinnerEl) return;
     const userMessage = this.inputEl.value.trim();
     if (!userMessage) return;
+    if (!this.#isSourceUnchanged()) {
+      this.#rejectStaleSource();
+      return;
+    }
     const generation = ++this.generation;
     this.generating = true;
-
-    const sourceDoc = this.editorView.state.doc;
-    this.sourceSnapshot = {
-      doc: sourceDoc,
-      from: this.selFrom,
-      text: this.#getDocumentSlice(sourceDoc, this.selFrom, this.selTo),
-      to: this.selTo,
-    };
 
     // Slash commands are passed directly to SDK for handling
 
@@ -753,7 +744,8 @@ export class InlineEditSession {
       }
     } catch (error) {
       if (this.#isGenerationActive(generation)) {
-        this.#handleError(error instanceof Error ? error.message : 'Error - try again');
+        if (!this.#isSourceUnchanged()) this.#rejectStaleSource();
+        else this.#handleError(error instanceof Error ? error.message : 'Error - try again');
       }
       return;
     } finally {
@@ -825,9 +817,11 @@ export class InlineEditSession {
     if (!this.inputEl) return;
     this.inputEl.disabled = false;
     this.inputEl.placeholder = errorMessage;
-    this.#updatePositionsFromEditor();
-    this.#updateHighlight();
-    this.#attachSelectionListeners();
+    if (!this.isConversing) {
+      this.#updatePositionsFromEditor();
+      this.#updateHighlight();
+      this.#attachSelectionListeners();
+    }
     this.inputEl.focus();
   }
 
@@ -1046,16 +1040,6 @@ export class InlineEditSession {
     }
   }
 
-  private normalizePathForVault(rawPath: string | undefined | null): string | null {
-    try {
-      const vaultPath = getVaultPath(this.app);
-      return normalizePathForVaultUtil(rawPath, vaultPath);
-    } catch {
-      new Notice('Failed to attach file: invalid path');
-      return null;
-    }
-  }
-
   #resolveContextFilesFromMessage(message: string): string[] {
     if (!message.includes('@')) return [];
 
@@ -1063,11 +1047,11 @@ export class InlineEditSession {
 
     const pathLookup = new Map<string, string>();
     for (const file of vaultFiles) {
-      const normalized = this.normalizePathForVault(file.path);
-      if (!normalized) continue;
-      const lookupKey = normalizeForPlatformLookup(normalizeMentionPath(normalized));
-      if (!pathLookup.has(lookupKey)) {
-        pathLookup.set(lookupKey, normalized);
+      // TFile paths are already Vault-relative; filesystem normalization would
+      // expand literal `%VAR%`/`$VAR` segments and stat every file.
+      const lookupKey = normalizeForPlatformLookup(normalizeMentionPath(file.path));
+      if (lookupKey && !pathLookup.has(lookupKey)) {
+        pathLookup.set(lookupKey, file.path);
       }
     }
 

@@ -8,6 +8,7 @@ export {
   type ConversationMeta,
   type ConversationModelRecoverySource,
   type ConversationMutablePatch,
+  type ConversationSummary,
   type ExecutionInputBrowserSnapshot,
   type ExecutionInputCanvasSnapshot,
   type ExecutionInputContextSnapshot,
@@ -38,17 +39,18 @@ export {
   type KeyboardNavigationSettings,
   type LegacyLinkedContentSettingsInput,
   type PermissionMode,
+  type SessionAutoArchiveAfter,
   type SessionManagerOrganization,
   type SessionManagerSort,
   type SlashCommand,
   type StoredChatModelSelection,
+  type ZenModePosition,
 } from './settings';
 
 // Diff types
 export {
   type DiffLine,
   type DiffStats,
-  type SDKToolUseResult,
   type StructuredPatchHunk,
 } from './diff';
 
@@ -58,10 +60,16 @@ export {
   type AskUserQuestionItem,
   type AskUserQuestionOption,
   type AsyncSubagentStatus,
+  type ScriptToolCallItem,
   type SubagentInfo,
   type SubagentMode,
+  type SubagentProgress,
   type ToolCallInfo,
   type ToolDiffData,
   type ToolProviderPayload,
+  type ToolResultDetails,
+  type ToolResultDiff,
+  type ToolResultImage,
+  type WebSearchResultItem,
 } from './tools';
 export { createTurnStats, isTokenCount } from './turnStats';

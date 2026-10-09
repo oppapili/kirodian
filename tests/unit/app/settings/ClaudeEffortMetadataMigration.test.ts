@@ -1,5 +1,7 @@
 import '@/providers';
 
+import { DEFAULT_CLAUDIAN_SETTINGS } from '@test/helpers/defaultSettings';
+
 import { ClaudianSettingsStorage } from '@/app/settings/ClaudianSettingsStorage';
 import type { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
 import { getClaudeProviderSettings } from '@/providers/claude/settings';
@@ -14,7 +16,7 @@ function createStorage(initial: Record<string, unknown>) {
   } as unknown as VaultFileAdapter;
   return {
     adapter,
-    storage: new ClaudianSettingsStorage(adapter),
+    storage: new ClaudianSettingsStorage(adapter, DEFAULT_CLAUDIAN_SETTINGS),
     read: () => JSON.parse(content) as Record<string, any>,
   };
 }
@@ -46,14 +48,16 @@ describe('Claude effort metadata migration', () => {
     expect(getClaudeProviderSettings(loaded).discoveredModels[1].supportedEffortLevels).toBeUndefined();
   });
 
-  it('removes the retired completion flag without treating missing metadata as complete', async () => {
+  it('removes retired keys without treating missing metadata as complete', async () => {
     const { storage, read, adapter } = createStorage({
-      providerConfigs: { claude: { effortMetadataMigrated: true, visibleModels: ['haiku'], selectedModels: [
+      providerConfigs: { claude: { effortMetadataMigrated: true, defaultModel: 'haiku', visibleModels: ['haiku'], selectedModels: [
         { value: 'haiku', label: 'Haiku', description: '' },
       ] } },
     });
-    await storage.load();
+    const loaded = await storage.load();
     expect(read().providerConfigs.claude.effortMetadataMigrated).toBeUndefined();
+    expect(read().providerConfigs.claude.defaultModel).toBeUndefined();
+    expect((loaded.providerConfigs as Record<string, Record<string, unknown>>).claude).not.toHaveProperty('defaultModel');
 
     const settings = read();
     settings.providerConfigs.claude.visibleModels = ['claude-sonnet-5'];

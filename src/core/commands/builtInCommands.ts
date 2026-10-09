@@ -16,7 +16,8 @@ export type BuiltInCommandAction =
   | 'side';
 type BuiltInCommandCapability =
   | 'supportsNativeHistory'
-  | 'supportsFork';
+  | 'supportsFork'
+  | 'supportsFastMode';
 type BuiltInCommandCapabilityContext =
   Partial<Pick<ProviderCapabilities, BuiltInCommandCapability>>
   & Partial<Pick<ProviderCapabilities, 'providerId'>>;
@@ -31,8 +32,6 @@ export interface BuiltInCommand {
   argumentHint?: string;
   /** When set, provider capabilities must expose this feature. */
   requiredCapability?: BuiltInCommandCapability;
-  /** When set, only these providers expose and execute the command. */
-  supportedProviderIds?: ProviderId[];
 }
 
 export interface BuiltInCommandResult {
@@ -59,6 +58,12 @@ export const BUILT_IN_COMMANDS: BuiltInCommand[] = [
     description: 'Fork entire conversation to new session',
     action: 'fork',
     requiredCapability: 'supportsFork',
+  },
+  {
+    name: 'fast',
+    description: 'Toggle fast mode',
+    action: 'fast',
+    requiredCapability: 'supportsFastMode',
   },
   {
     name: 'side',
@@ -96,28 +101,12 @@ function resolveCapabilities(
   }
 }
 
-function isBuiltInCommandProviderSupported(
-  command: BuiltInCommand,
-  context?: BuiltInCommandSupportContext,
-): boolean {
-  if (!command.supportedProviderIds || !context) {
-    return true;
-  }
-
-  const providerId = typeof context === 'string' ? context : context.providerId;
-  return Boolean(providerId && command.supportedProviderIds.includes(providerId));
-}
-
 export function isBuiltInCommandSupported(
   command: BuiltInCommand,
   context?: BuiltInCommandSupportContext,
 ): boolean {
   if (!context) {
     return true;
-  }
-
-  if (!isBuiltInCommandProviderSupported(command, context)) {
-    return false;
   }
 
   if (!command.requiredCapability) {
@@ -137,19 +126,11 @@ export function detectBuiltInCommand(
   input: string,
   context?: BuiltInCommandSupportContext,
 ): BuiltInCommandResult | null {
-  const trimmed = input.trim();
-  if (!trimmed.startsWith('/')) return null;
-
-  // Extract command name (first word after /)
-  const match = trimmed.match(/^\/([a-zA-Z0-9_-]+)(?:\s(.*))?$/);
-  if (!match) return null;
-
-  const cmdName = match[1].toLowerCase();
-  const command = commandMap.get(cmdName);
-  if (!command) return null;
+  const parsed = parseLeadingBuiltInCommand(input);
+  if (!parsed || /[\r\n\u2028\u2029]/.test(parsed.rawArguments)) return null;
+  const { command } = parsed;
   if (!isBuiltInCommandSupported(command, context)) return null;
-
-  const args = (match[2] || '').trim();
+  const args = parsed.rawArguments.trim();
 
   return { command, args };
 }
@@ -165,16 +146,10 @@ export interface SideChatCommandMatch {
  * Recognizes a complete leading side-chat command token, including multiline
  * arguments that the single-line built-in matcher deliberately rejects.
  */
-export function detectSideChatCommand(
-  input: string,
-  context?: BuiltInCommandSupportContext,
-): SideChatCommandMatch | null {
-  const match = /^\/([a-zA-Z0-9_-]+)(?:[ \t]+([\s\S]*))?$/.exec(input.trim());
-  if (!match) return null;
-  const command = commandMap.get(match[1].toLowerCase());
-  if (!command || command.action !== 'side') return null;
-  if (context && !isBuiltInCommandProviderSupported(command, context)) return null;
-  return { alias: match[1].toLowerCase(), argument: (match[2] ?? '').trim() };
+export function detectSideChatCommand(input: string): SideChatCommandMatch | null {
+  const parsed = parseLeadingBuiltInCommand(input);
+  if (!parsed || parsed.command.action !== 'side') return null;
+  return { alias: parsed.alias, argument: parsed.rawArguments.trim() };
 }
 
 /**
@@ -183,11 +158,8 @@ export function detectSideChatCommand(
  * they are the side feature's own controls.
  */
 export function detectMainOnlyBuiltInCommand(input: string): BuiltInCommand | null {
-  const match = /^\/([a-zA-Z0-9_-]+)(?:[\s]([\s\S]*))?$/.exec(input.trim());
-  if (!match) return null;
-  const command = commandMap.get(match[1].toLowerCase());
-  if (!command || command.action === 'side') return null;
-  return command;
+  const parsed = parseLeadingBuiltInCommand(input);
+  return parsed && parsed.command.action !== 'side' ? parsed.command : null;
 }
 
 /** Whether the current provider exposes the side-chat command at all. */
@@ -220,4 +192,17 @@ export function getBuiltInCommandsForDropdown(context?: BuiltInCommandSupportCon
       content: '', // Built-in commands don't have prompt content
       argumentHint: cmd.argumentHint,
     }));
+}
+
+/** One token boundary for preview, reservation, and submitted command dispatch. */
+function parseLeadingBuiltInCommand(input: string): {
+  command: BuiltInCommand;
+  alias: string;
+  rawArguments: string;
+} | null {
+  const match = /^\/([a-zA-Z0-9_-]+)(?:\s([\s\S]*))?$/.exec(input.trim());
+  if (!match) return null;
+  const alias = match[1].toLowerCase();
+  const command = commandMap.get(alias);
+  return command ? { command, alias, rawArguments: match[2] ?? '' } : null;
 }

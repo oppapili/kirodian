@@ -3,11 +3,11 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import test from 'node:test';
 
-import { selectCiTests } from './ciTestSelection.mjs';
+import { selectCiTests, selectRelatedCiTests } from './ciTestSelection.mjs';
 
 const prompt = 'tests/unit/core/prompt/mainAgent.systemPrompt.test.ts';
 const panel = 'tests/unit/features/chat/ClaudianView.test.ts';
-const native = 'tests/unit/core/process/ManagedStdioProcess.test.ts';
+const native = 'tests/integration/core/process/ManagedStdioProcess.test.ts';
 const docs = 'tests/unit/docs/Documentation.test.ts';
 const select = (paths, relatedTests = [], eventName = 'pull_request') => selectCiTests({
   changes: paths.map(path => typeof path === 'string' ? { status: 'M', path } : path),
@@ -29,17 +29,18 @@ test('presentation changes do not trigger native checks through main composition
 });
 
 test('shared dependencies retain affected native consumers', () => {
-  const result = select(['src/utils/env.ts'], [prompt, native]);
+  const result = select(['src/core/process/env.ts'], [prompt, native]);
   assert.deepEqual(result.testFiles, [prompt, native]);
   assert.deepEqual(result.crossPlatformTests, [native]);
 });
 
-test('native smoke consumers run on native platforms when affected', () => {
+test('real subprocess consumers run on native platforms when affected', () => {
   for (const consumer of [
-    'tests/unit/utils/windowsCmdShim.test.ts',
-    'tests/unit/core/process/ManagedStdioProcess.test.ts',
+    'tests/integration/core/process/ProcessProbe.test.ts',
+    'tests/integration/core/process/ManagedStdioProcess.test.ts',
+    'tests/integration/core/process/cliBinaryLocator.test.ts',
   ]) {
-    const result = select(['src/utils/path.ts'], [consumer]);
+    const result = select(['src/core/process/cliPath.ts'], [consumer]);
     assert.deepEqual(result.crossPlatformTests, [consumer]);
     assert.equal(result.crossPlatform, true);
     assert.deepEqual(select([consumer]).crossPlatformTests, [consumer]);
@@ -47,8 +48,8 @@ test('native smoke consumers run on native platforms when affected', () => {
 });
 
 test('native selection uses only nonempty shards', () => {
-  const paths = 'tests/unit/utils/windowsCmdShim.test.ts';
-  const sdk = 'tests/unit/core/process/ManagedStdioProcess.test.ts';
+  const paths = 'tests/integration/core/process/ProcessProbe.test.ts';
+  const sdk = 'tests/integration/core/process/ManagedStdioProcess.test.ts';
   assert.deepEqual(select([paths]).crossPlatformShards, ['1/1']);
   assert.deepEqual(select([paths, sdk]).crossPlatformShards, ['1/2', '2/2']);
   assert.deepEqual(select(['package-lock.json']).crossPlatformShards, ['1/2', '2/2']);
@@ -83,7 +84,6 @@ test('native script regressions retain a Windows job without selecting unrelated
     assert.deepEqual(result.scriptTests, [script]);
     assert.deepEqual(result.testFiles, []);
     assert.deepEqual(result.crossPlatformTests, []);
-    assert.deepEqual(result.crossPlatformShards, ['1/1']);
     assert.equal(result.crossPlatform, true);
   }
 });
@@ -171,6 +171,13 @@ test('the CI entry point handles real Git ranges, renames, missing bases and rel
       assert.equal(full['test-files'], null);
       assert.deepEqual(full['test-shards'], ['1/2', '2/2']);
     }
+    // Release scope must work before dependency installation, without invoking Jest.
+    writeFileSync(path.join(root, 'scripts/run-jest.js'), "throw new Error('Jest is unavailable');");
+    const tag = scope(deleted, { GITHUB_REF: 'refs/tags/2.3.0' });
+    assert.equal(tag['test-files'], null);
+    assert.equal(tag['script-tests'], null);
+    assert.equal(tag['cross-platform-tests'], null);
+    assert.deepEqual(tag['cross-platform-shards'], ['1/2', '2/2']);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

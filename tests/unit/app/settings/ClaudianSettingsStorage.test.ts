@@ -1,11 +1,11 @@
 import '@/providers';
 
+import { DEFAULT_CLAUDIAN_SETTINGS as DEFAULT_SETTINGS } from '@test/helpers/defaultSettings';
+
 import {
   CLAUDIAN_SETTINGS_PATH,
-  ClaudianSettingsStorage,
-  LEGACY_CLAUDIAN_SETTINGS_PATH,
+  ClaudianSettingsStorage
 } from '@/app/settings/ClaudianSettingsStorage';
-import { DEFAULT_CLAUDIAN_SETTINGS as DEFAULT_SETTINGS } from '@/app/settings/defaultSettings';
 import type { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
 import { getClaudeProviderSettings } from '@/providers/claude/settings';
 
@@ -13,18 +13,18 @@ const mockGetHostnameKey = jest.fn(() => 'host-a');
 const mockGetLegacyDeviceSettingsKey = jest.fn<string | null, []>(() => null);
 const originalPlatform = process.platform;
 
-jest.mock('@/utils/env', () => ({
-  ...jest.requireActual('@/utils/env'),
-  getHostnameKey: () => mockGetHostnameKey(),
-  getLegacyDeviceSettingsKey: () => mockGetLegacyDeviceSettingsKey(),
-}));
-
 const mockAdapter = {
   exists: jest.fn(),
   read: jest.fn(),
   write: jest.fn(),
   delete: jest.fn(),
 } as unknown as jest.Mocked<VaultFileAdapter>;
+
+jest.mock('@/core/device/InstallationKey', () => ({
+  ...jest.requireActual('@/core/device/InstallationKey'),
+  getInstallationKey: () => mockGetHostnameKey(),
+  getLegacyDeviceSettingsKey: () => mockGetLegacyDeviceSettingsKey(),
+}));
 
 describe('ClaudianSettingsStorage', () => {
   let storage: ClaudianSettingsStorage;
@@ -39,7 +39,7 @@ describe('ClaudianSettingsStorage', () => {
     mockAdapter.delete.mockResolvedValue(undefined);
     mockGetHostnameKey.mockReturnValue('host-a');
     mockGetLegacyDeviceSettingsKey.mockReturnValue(null);
-    storage = new ClaudianSettingsStorage(mockAdapter);
+    storage = new ClaudianSettingsStorage(mockAdapter, DEFAULT_SETTINGS);
   });
 
   afterEach(() => {
@@ -47,11 +47,12 @@ describe('ClaudianSettingsStorage', () => {
   });
 
   describe('load', () => {
-    it('retires saved directory selections while preserving current settings and provider configuration', async () => {
+    it('retires obsolete saved settings while preserving current settings and provider configuration', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         ...DEFAULT_SETTINGS,
         persistentExternalContextPaths: ['/old/project'],
+        maxWarmAgentProcesses: 7,
         userName: 'Ada',
         providerConfigs: { claude: { loadUserSettings: true } },
       }));
@@ -64,7 +65,10 @@ describe('ClaudianSettingsStorage', () => {
       expect(written.providerConfigs.claude.loadUserSettings).toBe(true);
       expect(loaded).not.toHaveProperty('persistentExternalContextPaths');
       expect(written).not.toHaveProperty('persistentExternalContextPaths');
+      expect(loaded).not.toHaveProperty('maxWarmAgentProcesses');
+      expect(written).not.toHaveProperty('maxWarmAgentProcesses');
     });
+
 
     it('should return defaults when file does not exist', async () => {
       mockAdapter.exists.mockResolvedValue(false);
@@ -72,7 +76,6 @@ describe('ClaudianSettingsStorage', () => {
       const result = await storage.load();
 
       expect(result.model).toBe(DEFAULT_SETTINGS.model);
-      expect(result.thinkingBudget).toBe(DEFAULT_SETTINGS.thinkingBudget);
       expect(result.permissionMode).toBe(DEFAULT_SETTINGS.permissionMode);
       expect(result.requireCommandOrControlEnterToSend).toBe(false);
       expect(result.titleGenerationLocale).toBe('');
@@ -80,32 +83,17 @@ describe('ClaudianSettingsStorage', () => {
       expect(result.enableDualPane).toBe(true);
       expect(result.dualPaneSide).toBe('right');
       expect(result.restoreTabsOnStartup).toBe(true);
+      expect(result.enableZenMode).toBe(true);
       expect(mockAdapter.read).not.toHaveBeenCalled();
     });
 
-    it('loads legacy .claude settings and migrates them to .claudian', async () => {
-      mockAdapter.exists.mockImplementation(async (path: string) => (
-        path === LEGACY_CLAUDIAN_SETTINGS_PATH
-      ));
-      mockAdapter.read.mockImplementation(async (path: string) => {
-        if (path === LEGACY_CLAUDIAN_SETTINGS_PATH) {
-          return JSON.stringify({
-            model: 'claude-opus-4-5',
-            userName: 'MigratedUser',
-          });
-        }
-        return '{}';
-      });
-
-      const result = await storage.load();
-
-      expect(result.model).toBe('claude-opus-4-5');
-      expect(result.userName).toBe('MigratedUser');
-      expect(mockAdapter.write).toHaveBeenCalledWith(
-        CLAUDIAN_SETTINGS_PATH,
-        expect.any(String),
-      );
-      expect(mockAdapter.delete).toHaveBeenCalledWith(LEGACY_CLAUDIAN_SETTINGS_PATH);
+    it('ignores retired .claude settings without modifying them', async () => {
+      mockAdapter.exists.mockImplementation(async path => path === '.claude/claudian-settings.json');
+      mockAdapter.read.mockResolvedValue(JSON.stringify({ userName: 'Retired' }));
+      expect((await storage.load()).userName).toBe(DEFAULT_SETTINGS.userName);
+      expect(mockAdapter.read).not.toHaveBeenCalled();
+      expect(mockAdapter.write).not.toHaveBeenCalled();
+      expect(mockAdapter.delete).not.toHaveBeenCalled();
     });
 
     it('should parse valid JSON and merge with defaults', async () => {
@@ -120,7 +108,7 @@ describe('ClaudianSettingsStorage', () => {
       expect(result.model).toBe('claude-opus-4-5');
       expect(result.userName).toBe('TestUser');
       // Defaults should still be present for unspecified fields
-      expect(result.thinkingBudget).toBe(DEFAULT_SETTINGS.thinkingBudget);
+      expect(result.effortLevel).toBe(DEFAULT_SETTINGS.effortLevel);
     });
 
 
@@ -221,32 +209,15 @@ describe('ClaudianSettingsStorage', () => {
       });
     });
 
-    it('migrates legacy openInMainTab true to main-tab placement', async () => {
+    it('ignores retired placement and flat provider settings', async () => {
       mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        openInMainTab: true,
-      }));
-
+      mockAdapter.read.mockResolvedValue(JSON.stringify({ openInMainTab: true, claudeCliPath: '/retired', codexCliPath: '/retired', environmentVariables: 'ANTHROPIC_API_KEY=retired\nHTTP_PROXY=retired', hiddenSlashCommands: ['retired'] }));
       const result = await storage.load();
-      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
-
-      expect(result.chatViewPlacement).toBe('main-tab');
-      expect(writtenContent.chatViewPlacement).toBe('main-tab');
-      expect(writtenContent).not.toHaveProperty('openInMainTab');
-    });
-
-    it('migrates legacy openInMainTab false to right-sidebar placement', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        openInMainTab: false,
-      }));
-
-      const result = await storage.load();
-      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
-
-      expect(result.chatViewPlacement).toBe('right-sidebar');
-      expect(writtenContent.chatViewPlacement).toBe('right-sidebar');
-      expect(writtenContent).not.toHaveProperty('openInMainTab');
+      expect(result.chatViewPlacement).toBe(DEFAULT_SETTINGS.chatViewPlacement);
+      expect(getClaudeProviderSettings(result).cliPath).toBe('');
+      expect(getClaudeProviderSettings(result).environmentVariables).toBe('');
+      expect(result.sharedEnvironmentVariables).toBe('');
+      expect(result.hiddenCommands).toEqual([]);
     });
 
     it('normalizes invalid chatViewPlacement values', async () => {
@@ -307,31 +278,57 @@ describe('ClaudianSettingsStorage', () => {
       expect(writtenContent.restoreTabsOnStartup).toBe(false);
     });
 
-    it('should strip legacy blocklist fields from loaded data', async () => {
+    it.each([
+      ['missing', {}, true],
+      ['disabled', { enableZenMode: false }, false],
+      ['enabled', { enableZenMode: true }, true],
+    ])('loads a %s zen mode preference', async (_label, stored, expected) => {
       mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        enableBlocklist: false,
-        blockedCommands: {
-          unix: ['custom-unix-cmd'],
-          windows: ['custom-win-cmd'],
-        },
-      }));
+      mockAdapter.read.mockResolvedValue(JSON.stringify(stored));
 
       const result = await storage.load();
-      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
 
-      expect('enableBlocklist' in result).toBe(false);
-      expect('blockedCommands' in result).toBe(false);
-      expect(writtenContent).not.toHaveProperty('enableBlocklist');
-      expect(writtenContent).not.toHaveProperty('blockedCommands');
+      expect(result.enableZenMode).toBe(expected);
+      const writtenValues = mockAdapter.write.mock.calls
+        .map(([, content]) => (JSON.parse(content) as Record<string, unknown>).enableZenMode)
+        .filter(value => value !== undefined);
+      expect(writtenValues.every(value => value === expected)).toBe(true);
     });
 
-    it('should normalize claudeCliPathsByHost from loaded data', async () => {
+    it('persists a normalized invalid zen mode preference', async () => {
+      mockAdapter.exists.mockResolvedValue(true);
+      mockAdapter.read.mockResolvedValue(JSON.stringify({ enableZenMode: 'yes' }));
+
+      const result = await storage.load();
+
+      expect(result.enableZenMode).toBe(true);
+      expect(JSON.parse(mockAdapter.write.mock.calls.at(-1)![1]).enableZenMode).toBe(true);
+    });
+
+    it.each([
+      ['missing', {}, null],
+      ['docked', { zenModePosition: null }, null],
+      ['moved', { zenModePosition: { x: -0.2, y: 0.375 } }, { x: -0.2, y: 0.375 }],
+      ['malformed', { zenModePosition: { x: '1', y: 0.5 } }, null],
+    ])('loads a %s zen panel position', async (_label, stored, expected) => {
+      mockAdapter.exists.mockResolvedValue(true);
+      mockAdapter.read.mockResolvedValue(JSON.stringify(stored));
+
+      const result = await storage.load();
+
+      expect(result.zenModePosition).toEqual(expected);
+    });
+
+    it('normalizes claude provider CLI paths from loaded data', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
-        claudeCliPathsByHost: {
+        providerConfigs: {
+          claude: {
+            cliPathsByHost: {
           'host-a': '/custom/path-a',
           'host-b': '/custom/path-b',
+        }
+        }
         },
       }));
 
@@ -341,7 +338,7 @@ describe('ClaudianSettingsStorage', () => {
       expect(getClaudeProviderSettings(result).cliPathsByHost['host-b']).toBe('/custom/path-b');
     });
 
-    it('should preserve legacy claudeCliPath field', async () => {
+    it('normalizes legacy flat CLI paths from loaded data', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         claudeCliPath: '/legacy/path',
@@ -416,108 +413,63 @@ describe('ClaudianSettingsStorage', () => {
 
 
 
-    it('should remove legacy show1MModel from the stored file', async () => {
+    it('leaves retired Claude 1M toggles uninterpreted', async () => {
       mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        model: 'sonnet',
-        show1MModel: true,
-      }));
-
-      await storage.load();
-      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
-
-      expect(writtenContent.model).toBe('sonnet');
-      expect(writtenContent.hiddenProviderCommands).toEqual({});
-      expect(writtenContent).not.toHaveProperty('show1MModel');
-    });
-
-    it('should remove legacy Claude 1M toggles from top-level settings', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        model: 'sonnet',
-        enableOpus1M: true,
-        enableSonnet1M: true,
-      }));
-
-      await storage.load();
-      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
-
-      expect(writtenContent).not.toHaveProperty('enableOpus1M');
-      expect(writtenContent).not.toHaveProperty('enableSonnet1M');
-    });
-
-    it('should remove legacy Claude 1M toggles from provider settings', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        providerConfigs: {
-          claude: {
-            enableOpus1M: true,
-            enableSonnet1M: true,
-          },
-        },
-      }));
-
-      await storage.load();
-      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
-
-      expect(writtenContent.providerConfigs.claude).not.toHaveProperty('enableOpus1M');
-      expect(writtenContent.providerConfigs.claude).not.toHaveProperty('enableSonnet1M');
-    });
-
-    it('should remove legacy slashCommands from the stored file', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        model: 'sonnet',
-        slashCommands: [{ id: 'cmd-review', name: 'review', content: 'Review' }],
-      }));
-
+      mockAdapter.read.mockResolvedValue(JSON.stringify({ providerConfigs: { claude: {
+        enableOpus1M: true, enableSonnet1M: true,
+      } } }));
       const result = await storage.load();
-      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
-
-      expect('slashCommands' in result).toBe(false);
-      expect(writtenContent.model).toBe('sonnet');
-      expect(writtenContent.hiddenProviderCommands).toEqual({});
-      expect(writtenContent).not.toHaveProperty('slashCommands');
+      expect(result.providerConfigs.claude).toMatchObject({ enableOpus1M: true, enableSonnet1M: true });
     });
 
-    it('should migrate legacy hiddenSlashCommands into Claude hiddenProviderCommands', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        hiddenSlashCommands: ['commit', '/review'],
-      }));
-
-      const result = await storage.load();
-      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
-
-      expect(result.hiddenProviderCommands).toEqual({
-        claude: ['commit', 'review'],
-      });
-      expect(writtenContent.hiddenProviderCommands).toEqual({
-        claude: ['commit', 'review'],
-      });
-    });
-
-    it('should not override explicit provider hidden commands with legacy hiddenSlashCommands', async () => {
+    it('merges per-provider hidden commands into one global list and retires the old key', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         hiddenProviderCommands: {
-          claude: ['existing'],
+          claude: ['commit', '/Review'],
+          codex: ['$commit'],
+          pi: ['skill:review', 'review'],
         },
-        hiddenSlashCommands: ['commit', '/review'],
+        hiddenSlashCommands: ['legacy'],
       }));
 
       const result = await storage.load();
       const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
 
-      expect(result.hiddenProviderCommands).toEqual({
-        claude: ['existing'],
-      });
-      expect(writtenContent.hiddenProviderCommands).toEqual({
-        claude: ['existing'],
-      });
+      expect(result.hiddenCommands).toEqual(['commit', 'Review', 'skill:review']);
+      expect(writtenContent.hiddenCommands).toEqual(['commit', 'Review', 'skill:review']);
+      expect(writtenContent).not.toHaveProperty('hiddenProviderCommands');
+      expect(result).not.toHaveProperty('hiddenProviderCommands');
     });
 
-    it('normalizes stale scoped mixed env snippets back to unscoped on load', async () => {
+    it('loads the vault-wide skills sync flag as a boolean', async () => {
+      mockAdapter.exists.mockResolvedValue(true);
+      mockAdapter.read.mockResolvedValue(JSON.stringify({}));
+      expect((await storage.load()).skillsSynced).toBe(false);
+
+      mockAdapter.read.mockResolvedValue(JSON.stringify({ skillsSynced: true }));
+      expect((await storage.load()).skillsSynced).toBe(true);
+
+      mockAdapter.read.mockResolvedValue(JSON.stringify({ skillsSynced: 'yes' }));
+      expect((await storage.load()).skillsSynced).toBe(false);
+    });
+
+    it('keeps an existing global hidden list over a stale per-provider map', async () => {
+      mockAdapter.exists.mockResolvedValue(true);
+      mockAdapter.read.mockResolvedValue(JSON.stringify({
+        hiddenCommands: ['kept', ' /kept ', ''],
+        hiddenProviderCommands: { claude: ['stale'] },
+      }));
+
+      const result = await storage.load();
+      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
+
+      expect(result.hiddenCommands).toEqual(['kept']);
+      expect(writtenContent.hiddenCommands).toEqual(['kept']);
+      expect(writtenContent).not.toHaveProperty('hiddenProviderCommands');
+    });
+
+    it('preserves explicit scope on stored mixed environment snippets', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         envSnippets: [{
@@ -537,20 +489,24 @@ describe('ClaudianSettingsStorage', () => {
         name: 'Mixed snippet',
         description: '',
         envVars: 'PATH=/usr/local/bin\nANTHROPIC_MODEL=claude-custom',
-        scope: undefined,
+        scope: 'shared',
         contextLimits: undefined,
         modelAliases: undefined,
       }]);
-      expect(writtenContent.envSnippets[0].scope).toBeUndefined();
+      expect(writtenContent.envSnippets[0].scope).toBe('shared');
     });
 
     it('normalizes custom model aliases on load', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
-        customModelAliases: {
+        providerConfigs: {
+          claude: {
+            modelAliases: {
           ' custom-model ': '  Friendly model  ',
           empty: '   ',
           ignored: 123,
+        }
+        }
         },
         envSnippets: [{
           id: 'snippet-1',
@@ -629,20 +585,6 @@ describe('ClaudianSettingsStorage', () => {
 
 
 
-    it('deletes the legacy settings file after writing the new path', async () => {
-      mockAdapter.exists.mockImplementation(async (path: string) => (
-        path === LEGACY_CLAUDIAN_SETTINGS_PATH
-      ));
-
-      await storage.save(DEFAULT_SETTINGS);
-
-      expect(mockAdapter.write).toHaveBeenCalledWith(
-        CLAUDIAN_SETTINGS_PATH,
-        expect.any(String),
-      );
-      expect(mockAdapter.delete).toHaveBeenCalledWith(LEGACY_CLAUDIAN_SETTINGS_PATH);
-    });
-
     it('should throw on write error', async () => {
       mockAdapter.write.mockRejectedValue(new Error('Write failed'));
 
@@ -684,7 +626,7 @@ describe('ClaudianSettingsStorage Linked content migration', () => {
       signalWriteStarted();
       releaseWrite = resolve;
     }));
-    const storage = new ClaudianSettingsStorage(adapter);
+    const storage = new ClaudianSettingsStorage(adapter, DEFAULT_SETTINGS);
 
     let resolved = false;
     const load = storage.load().then((settings) => {
@@ -718,7 +660,7 @@ describe('ClaudianSettingsStorage Linked content migration', () => {
       pinnedLinkedContentPaths: [],
       pinnedLinkedNotePaths: ['Notes/Legacy.md'],
     });
-    const storage = new ClaudianSettingsStorage(adapter);
+    const storage = new ClaudianSettingsStorage(adapter, DEFAULT_SETTINGS);
 
     const settings = await storage.load();
 
@@ -738,7 +680,7 @@ describe('ClaudianSettingsStorage Linked content migration', () => {
       ],
       pinnedLinkedNotePaths: ['Notes/Legacy.md'],
     });
-    const storage = new ClaudianSettingsStorage(adapter);
+    const storage = new ClaudianSettingsStorage(adapter, DEFAULT_SETTINGS);
 
     const settings = await storage.load();
 
@@ -750,7 +692,7 @@ describe('ClaudianSettingsStorage Linked content migration', () => {
 
   it('omits legacy pinned paths from future writes', async () => {
     const adapter = createAdapter({});
-    const storage = new ClaudianSettingsStorage(adapter);
+    const storage = new ClaudianSettingsStorage(adapter, DEFAULT_SETTINGS);
 
     await storage.save({
       ...await storage.load(),

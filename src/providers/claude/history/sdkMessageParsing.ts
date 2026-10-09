@@ -1,39 +1,28 @@
-import { extractResolvedAnswers, extractResolvedAnswersFromResultText } from '../../../core/tools/toolInput';
+import {
+  buildImageAttachmentFromBase64,
+  parseImageDataUri,
+} from '@/core/execution/imageAttachment';
+import { extractUserDisplayContent } from '@/core/prompt/promptContext';
+import { resolveToolDiffData } from '@/core/tools/toolDiff';
+import { isCompactionCanceledStderr, isInterruptSignalText } from '@/providers/claude/history/interrupt';
+
+import { extractResolvedAnswersFromResultText } from '../../../core/tools/toolInput';
 import { TOOL_ASK_USER_QUESTION } from '../../../core/tools/toolNames';
+import { extractToolResultContent } from '../../../core/tools/toolResultContent';
 import type {
   ChatMessage,
   ContentBlock,
   ImageAttachment,
   ToolCallInfo,
 } from '../../../core/types';
-import { extractUserDisplayContent } from '../../../utils/context';
-import { extractDiffData } from '../../../utils/diff';
-import {
-  buildImageAttachmentFromBase64,
-  parseImageDataUri,
-} from '../../../utils/imageAttachment';
-import { isCompactionCanceledStderr, isInterruptSignalText } from '../../../utils/interrupt';
-import { extractToolResultContent } from '../sdk/toolResultContent';
+import { extractXMLTag, parseClaudeTaskNotification } from '../normalization/claudeTaskNotification';
+import { extractClaudeTextContent, isClaudeNoContentPlaceholder } from '../normalization/claudeTextContent';
+import { normalizeClaudeToolResultDetails } from '../normalization/claudeToolResultDetails';
 import type {
   AsyncSubagentResult,
   SDKNativeContentBlock,
   SDKNativeMessage,
 } from './sdkHistoryTypes';
-
-function extractTextContent(content: string | SDKNativeContentBlock[] | undefined): string {
-  if (!content) {
-    return '';
-  }
-  if (typeof content === 'string') {
-    return content;
-  }
-
-  return content
-    .filter((block): block is SDKNativeContentBlock & { type: 'text'; text: string } =>
-      block.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '(no content)')
-    .map(block => block.text)
-    .join('\n');
-}
 
 function isRebuiltContextContent(textContent: string): boolean {
   if (!/^(User|Assistant):\s/.test(textContent)) {
@@ -131,8 +120,7 @@ function mapContentBlocks(content: string | SDKNativeContentBlock[] | undefined)
     switch (block.type) {
       case 'text': {
         const text = block.text;
-        const trimmed = text?.trim();
-        if (text && trimmed && trimmed !== '(no content)') {
+        if (text?.trim() && !isClaudeNoContentPlaceholder(text)) {
           blocks.push({ type: 'text', content: text });
         }
         break;
@@ -197,7 +185,7 @@ export function parseSDKMessageToChat(
   }
 
   const content = sdkMsg.message?.content;
-  const textContent = extractTextContent(content);
+  const textContent = extractClaudeTextContent(content);
   const timestamp = sdkMsg.timestamp ? new Date(sdkMsg.timestamp).getTime() : Date.now();
   const messageId = sdkMsg.uuid || `sdk-${timestamp}`;
   const images = sdkMsg.type === 'user' ? extractImages(content, messageId) : undefined;
@@ -283,50 +271,28 @@ export function collectStructuredPatchResults(sdkMessages: SDKNativeMessage[]): 
   return results;
 }
 
+/** Background results from queued notifications, read with the live `<task-notification>` rules. */
 export function collectAsyncSubagentResults(
   sdkMessages: SDKNativeMessage[],
 ): Map<string, AsyncSubagentResult> {
   const results = new Map<string, AsyncSubagentResult>();
 
   for (const sdkMsg of sdkMessages) {
-    if (sdkMsg.type !== 'queue-operation') {
-      continue;
-    }
-    if (sdkMsg.operation !== 'enqueue') {
-      continue;
-    }
-    if (typeof sdkMsg.content !== 'string') {
-      continue;
-    }
-    if (!sdkMsg.content.includes('<task-notification>')) {
+    if (sdkMsg.type !== 'queue-operation' || sdkMsg.operation !== 'enqueue') {
       continue;
     }
 
-    const taskId = extractXMLTag(sdkMsg.content, 'task-id');
-    const status = extractXMLTag(sdkMsg.content, 'status');
-    const result = extractXMLTag(sdkMsg.content, 'result');
-    if (!taskId || !result) {
+    const notification = parseClaudeTaskNotification(sdkMsg.content);
+    // The shared parser admits only notifications that carry a status.
+    const status = notification && sdkMsg.content ? extractXMLTag(sdkMsg.content, 'status') : null;
+    if (!notification || !status) {
       continue;
     }
 
-    results.set(taskId, {
-      result,
-      status: status ?? 'completed',
-    });
+    results.set(notification.taskId, { result: notification.content, status });
   }
 
   return results;
-}
-
-export function extractXMLTag(content: string, tagName: string): string | null {
-  const regex = new RegExp(`<${tagName}>\\s*([\\s\\S]*?)\\s*</${tagName}>`, 'i');
-  const match = content.match(regex);
-  if (!match || !match[1]) {
-    return null;
-  }
-
-  const trimmed = match[1].trim();
-  return trimmed.length > 0 ? trimmed : null;
 }
 
 export function isCanonicalSDKUserMessage(record: SDKNativeMessage): boolean {
@@ -334,7 +300,7 @@ export function isCanonicalSDKUserMessage(record: SDKNativeMessage): boolean {
     && record.attachment?.type === 'queued_command' && record.attachment.commandMode === 'prompt';
   if ((!queuedPrompt && record.type !== 'user') || isSystemInjectedMessage(record)) return false;
   const content = queuedPrompt ? record.attachment?.prompt : record.message?.content;
-  const text = extractTextContent(content);
+  const text = extractClaudeTextContent(content);
   if (!text && (!content || typeof content === 'string')) return false;
   return !isInterruptSignalText(text) && !isRebuiltContextContent(text);
 }
@@ -351,7 +317,7 @@ export function isSystemInjectedMessage(sdkMsg: SDKNativeMessage): boolean {
   if (Array.isArray(content) && content.length > 0
     && content.every(block => block.type === 'tool_result')) return true;
 
-  const text = extractTextContent(content);
+  const text = extractClaudeTextContent(content);
   if (!text) {
     return false;
   }
@@ -387,14 +353,7 @@ export function parseTaskNotification(sdkMsg: SDKNativeMessage): string | null {
       && attachment.commandMode === 'task-notification'
       ? attachment.prompt
       : undefined;
-  const text = extractTextContent(content);
-  if (!text?.trimStart().startsWith('<task-notification>')) return null;
-  if (!extractXMLTag(text, 'task-id')) return null;
-  const status = extractXMLTag(text, 'status');
-  if (!status) return null;
-  return extractXMLTag(text, 'result')
-    ?? extractXMLTag(text, 'summary')
-    ?? `Background task ${status}.`;
+  return parseClaudeTaskNotification(content)?.content ?? null;
 }
 
 export function mergeAssistantMessage(target: ChatMessage, source: ChatMessage): void {
@@ -415,11 +374,8 @@ export function mergeAssistantMessage(target: ChatMessage, source: ChatMessage):
   }
 }
 
+/** Applies structured tool results; AskUserQuestion answers fall back to result text for older transcripts. */
 export function hydrateStructuredToolResults(messages: ChatMessage[], toolUseResults: Map<string, unknown>): void {
-  if (toolUseResults.size === 0) {
-    return;
-  }
-
   for (const msg of messages) {
     if (msg.role !== 'assistant' || !msg.toolCalls) {
       continue;
@@ -427,40 +383,17 @@ export function hydrateStructuredToolResults(messages: ChatMessage[], toolUseRes
 
     for (const toolCall of msg.toolCalls) {
       const toolUseResult = toolUseResults.get(toolCall.id);
-      if (!toolUseResult) {
-        continue;
+      const details = normalizeClaudeToolResultDetails(toolUseResult);
+      if (toolUseResult && !toolCall.diffData) {
+        toolCall.diffData = resolveToolDiffData(details?.diff, toolCall);
       }
 
-      if (!toolCall.diffData) {
-        toolCall.diffData = extractDiffData(toolUseResult, toolCall);
-      }
-
-      if (toolCall.name === TOOL_ASK_USER_QUESTION) {
-        const answers =
-          extractResolvedAnswers(toolUseResult) ??
-          extractResolvedAnswersFromResultText(toolCall.result);
+      if (toolCall.name === TOOL_ASK_USER_QUESTION && !toolCall.resolvedAnswers) {
+        const answers = details?.resolvedAnswers
+          ?? extractResolvedAnswersFromResultText(toolCall.result);
         if (answers) {
           toolCall.resolvedAnswers = answers;
         }
-      }
-    }
-  }
-}
-
-export function hydrateFallbackAskUserAnswers(messages: ChatMessage[]): void {
-  for (const msg of messages) {
-    if (msg.role !== 'assistant' || !msg.toolCalls) {
-      continue;
-    }
-
-    for (const toolCall of msg.toolCalls) {
-      if (toolCall.name !== TOOL_ASK_USER_QUESTION || toolCall.resolvedAnswers) {
-        continue;
-      }
-
-      const answers = extractResolvedAnswersFromResultText(toolCall.result);
-      if (answers) {
-        toolCall.resolvedAnswers = answers;
       }
     }
   }

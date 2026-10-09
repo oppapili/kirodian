@@ -1,8 +1,10 @@
+import { getInstallationKey } from '@/core/device/InstallationKey';
+import { parseEnvironmentVariables } from '@/core/process/env';
+
 import { createCLIPathFingerprintInputs } from '../../../core/providers/cli/CLIPathFingerprintInputs';
 import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
 import { createRuntimeInputFingerprint } from '../../../core/providers/settings/RuntimeInputFingerprint';
 import type { ProviderSettingsReconciler } from '../../../core/providers/types';
-import { getHostnameKey, parseEnvironmentVariables } from '../../../utils/env';
 import {
   decodeKiroModelId,
   encodeKiroModelId,
@@ -16,7 +18,7 @@ import {
 export function computeKiroEnvironmentHash(settings: Record<string, unknown>): string {
   const providerSettings = getKiroProviderSettings(settings);
   const cliPathInputs = createCLIPathFingerprintInputs(
-    providerSettings.cliPathsByHost[getHostnameKey()],
+    providerSettings.cliPathsByHost[getInstallationKey()],
     providerSettings.cliPath,
   );
   const environment = Object.entries(parseEnvironmentVariables(

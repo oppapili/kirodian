@@ -19,7 +19,7 @@ function createUIConfig(config: TestProviderConfig): ProviderChatUIConfig {
     getCustomModelIds: () => new Set(),
     getDefaultModel: () => config.defaultModel ?? null,
     ownsModel: model => config.options.includes(model),
-    isAdaptiveReasoningModel: () => false,
+    supportsReasoningEffort: () => false,
     getReasoningOptions: () => [],
     getDefaultReasoningValue: () => 'off',
     isDefaultModel: () => false,
@@ -45,7 +45,7 @@ describe('conversation model resolution', () => {
     providers.empty = { defaultModel: null, options: [] };
     jest.spyOn(ProviderRegistry, 'getRegisteredProviderIds')
       .mockReturnValue(Object.keys(providers));
-    jest.spyOn(ProviderRegistry, 'getChatUIConfig')
+    jest.spyOn(ProviderRegistry, 'getModelPolicy')
       .mockImplementation(providerId => createUIConfig(providers[providerId ?? 'claude']!));
     jest.spyOn(ProviderRegistry, 'isEnabled')
       .mockImplementation((providerId, settings) => (

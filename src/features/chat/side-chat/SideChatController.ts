@@ -1,32 +1,27 @@
 import type { Component } from 'obsidian';
 import { Notice } from 'obsidian';
 
-import type { ComposerInputElement } from '@/shared/composer-dropdown/types';
-
-import { detectSideChatCommand } from '../../../core/commands/builtInCommands';
-import type { ProviderExecutionContext } from '../../../core/execution';
-import { getRuntimeEnvironmentVariables } from '../../../core/providers/providerEnvironment';
-import { ProviderRegistry } from '../../../core/providers/ProviderRegistry';
-import type { ImageAttachment } from '../../../core/types';
-import { t } from '../../../i18n/i18n';
-import { getVaultPath } from '../../../utils/path';
-import type { ChatFeatureHost } from '../ChatFeatureHost';
-import { getChatSettingsSnapshot } from '../ChatSettings';
+import { detectSideChatCommand } from '@/core/commands/builtInCommands';
+import type { ProviderExecutionContext } from '@/core/execution';
+import { getRuntimeEnvironmentVariables } from '@/core/providers/providerEnvironment';
+import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
+import type { ImageAttachment } from '@/core/types';
+import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
+import { getChatSettingsSnapshot } from '@/features/chat/ChatSettings';
+import type { ComposerDraftController } from '@/features/chat/composer/ComposerDraftController';
+import type { ForkSourceUnavailableReason } from '@/features/chat/conversation/forkSourceTypes';
+import { SideChatCommandSubmission } from '@/features/chat/side-chat/SideChatCommandSubmission';
+import { SideChatPanel } from '@/features/chat/side-chat/SideChatPanel';
+import { SideChatRuntime } from '@/features/chat/side-chat/SideChatRuntime';
 import {
-  captureLatestCompletedForkSource,
-  type ForkSourceUnavailableReason,
-} from '../tabs/TabForking';
-import type { AssembledTabRuntime } from '../tabs/types';
-import type { ImageContextManager } from '../ui/ImageContext';
-import { SideChatPanel } from './SideChatPanel';
-import { SideChatRuntime } from './SideChatRuntime';
-import {
-  EMPTY_SIDE_CHAT_DRAFT,
-  type SideChatComposerDraft,
   type SideChatDestination,
+  type SideChatParent,
   type SideChatSettingsProjection,
   type SideChatSource,
-} from './SideChatTypes';
+} from '@/features/chat/side-chat/SideChatTypes';
+import { t } from '@/i18n/i18n';
+import type { ComposerInputElement } from '@/shared/composer-dropdown/types';
+import { getVaultPath } from '@/utils/path';
 
 export interface SideChatControllerDeps {
   readonly plugin: ChatFeatureHost;
@@ -35,9 +30,8 @@ export interface SideChatControllerDeps {
   readonly composerEl: HTMLElement;
   readonly inputWrapperEl: HTMLElement;
   readonly getInputEl: () => ComposerInputElement;
-  readonly getImageContextManager: () => ImageContextManager | null;
-  readonly getTab: () => AssembledTabRuntime;
-  readonly isRuntimeLive: (tab: AssembledTabRuntime) => boolean;
+  readonly drafts: ComposerDraftController;
+  readonly parent: SideChatParent;
   readonly onDestinationChanged: () => void;
   readonly onStatusChanged?: () => void;
 }
@@ -54,11 +48,11 @@ export class SideChatController {
   #runtime: SideChatRuntime | null = null;
   #collapsedHost: HTMLElement | null = null;
   #boundConversationId: string | null = null;
-  #mainDraft: SideChatComposerDraft = EMPTY_SIDE_CHAT_DRAFT;
-  #sideDraft: SideChatComposerDraft = EMPTY_SIDE_CHAT_DRAFT;
   #mainPlaceholder: string | null = null;
   #startSequence = 0;
   #starting = false;
+  #startingCommand: SideChatCommandSubmission | null = null;
+  #pendingStart: Promise<boolean> | null = null;
   #previewActive = false;
   #disposed = false;
 
@@ -112,28 +106,43 @@ export class SideChatController {
       new Notice(t('chat.sideChat.needsPrompt'));
       return false;
     }
-    if (this.#runtime) {
-      // A collapsed existing child is resumed, never replaced.
-      if (this.#runtime.isWorking) {
-        if (!this.#runtime.enqueue({ content: argument, images, context })) return false;
-        if (detectSideChatCommand(this.deps.getInputEl().value)) this.#clearComposer();
-        this.handleComposerInput();
-        new Notice(t('chat.sideChat.queued'));
-        return true;
-      }
-      // Consume the main command before restoring the independent side draft.
-      if (detectSideChatCommand(this.deps.getInputEl().value)) this.#clearComposer();
-      this.#setExpanded(true);
-      await this.submitToSide(argument, images, context);
-      return true;
-    }
-
-    if (this.#starting) {
+    if (this.#disposed) return false;
+    if (this.#starting && !this.#runtime) {
       new Notice(t('chat.sideChat.alreadyExists'));
       return false;
     }
 
-    return this.#startSideChat(argument, images, context);
+    // Capture and consume before any await; recovery belongs to the original main draft.
+    const original = this.deps.drafts.capture('main');
+    const consumed = detectSideChatCommand(original.content) !== null;
+    if (consumed) this.#clearComposer();
+    const command = new SideChatCommandSubmission(this.deps.plugin, { content: argument, images, context }, error => {
+      if (consumed) this.deps.drafts.restore('main', original, { merge: true });
+      if (error) new Notice(error instanceof Error ? error.message : 'Could not prepare the side command.');
+    });
+    if (this.#runtime) {
+      // A collapsed existing child is resumed, never replaced.
+      const runtime = this.#runtime;
+      if (runtime.isWorking) {
+        if (!runtime.enqueue(command)) { command.cancel(); return false; }
+        this.handleComposerInput();
+        new Notice(t('chat.sideChat.queued'));
+        return true;
+      }
+      this.#setExpanded(true);
+      await runtime.submit(command);
+      return true;
+    }
+
+    this.#startingCommand = command;
+    const pending = this.#startSideChat(command);
+    this.#pendingStart = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.#pendingStart === pending) this.#pendingStart = null;
+      if (this.#startingCommand === command) this.#startingCommand = null;
+    }
   }
 
   /** Returns false when the child could not accept the turn, so the draft survives. */
@@ -141,6 +150,7 @@ export class SideChatController {
     content: string,
     images: readonly ImageAttachment[],
     context?: ProviderExecutionContext,
+    displayContent?: string,
   ): Promise<boolean> {
     const runtime = this.#runtime;
     if (!runtime) return false;
@@ -148,21 +158,12 @@ export class SideChatController {
       new Notice(t('chat.sideChat.busySide'));
       return false;
     }
-    await runtime.submit({ content, ...(context ? { context } : {}), images });
+    await runtime.submit({ content, ...(displayContent !== undefined ? { displayContent } : {}), ...(context ? { context } : {}), images });
     return true;
   }
 
-  /** Main retries restore behind the expanded side composer without changing destination. */
-  getMainDraft(): SideChatComposerDraft {
-    return this.destination === 'side' ? this.#mainDraft : this.#captureDraft();
-  }
-
-  restoreMainDraft(draft: SideChatComposerDraft): void {
-    this.#mainDraft = { content: draft.content, images: [...draft.images] };
-    if (this.destination === 'main') this.#restoreDraft(this.#mainDraft);
-  }
-
   cancelSide(): void {
+    this.#startingCommand?.cancel();
     this.#runtime?.cancel();
   }
 
@@ -177,21 +178,25 @@ export class SideChatController {
   }
 
   async discard(): Promise<void> {
-    if (!this.#runtime && !this.#panel) return;
+    if (!this.#runtime && !this.#panel && !this.#starting) return;
     this.#startSequence += 1;
+    this.#startingCommand?.cancel();
+    const pendingStart = this.#pendingStart;
     const wasSideSelected = this.destination === 'side';
     const runtime = this.#runtime;
-    this.#runtime = null;
-    this.#sideDraft = EMPTY_SIDE_CHAT_DRAFT;
-    this.#boundConversationId = null;
-    this.#teardownPanel();
-    this.#applyDestinationPresentation('main');
-    // Collapsed discards leave the live main draft alone.
-    if (wasSideSelected) this.#restoreDraft(this.#mainDraft);
+    const removePanel = () => {
+      this.#runtime = null;
+      this.#boundConversationId = null;
+      this.#teardownPanel();
+      this.#applyDestinationPresentation('main');
+    };
+    if (wasSideSelected) this.deps.drafts.changeDestination(removePanel);
+    else removePanel();
+    this.deps.drafts.restore('side', { content: '', images: [] });
     try {
       this.deps.onDestinationChanged();
     } finally {
-      await runtime?.dispose();
+      await Promise.all([runtime?.dispose(), pendingStart]);
     }
   }
 
@@ -214,33 +219,30 @@ export class SideChatController {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#startSequence += 1;
+    this.#startingCommand?.cancel();
     const runtime = this.#runtime;
     this.#runtime = null;
     this.#teardownPanel();
-    await runtime?.dispose();
+    await Promise.all([runtime?.dispose(), this.#pendingStart]);
   }
 
   async #startSideChat(
-    argument: string,
-    images: readonly ImageAttachment[],
-    context?: ProviderExecutionContext,
+    command: SideChatCommandSubmission,
   ): Promise<boolean> {
-    const tab = this.deps.getTab();
+    const parent = this.deps.parent;
     const sequence = ++this.#startSequence;
     this.#starting = true;
+    this.#boundConversationId = parent.conversationId;
+    let transferred = false;
     try {
-      const capture = await captureLatestCompletedForkSource(
-        tab,
-        this.deps.plugin,
-        this.deps.isRuntimeLive,
-      );
+      const capture = await parent.captureForkSource();
       if (sequence !== this.#startSequence || this.#disposed) return false;
       if (!capture.ok) {
         new Notice(describeUnavailable(capture.reason));
         return false;
       }
 
-      const providerId = capture.context.providerId ?? tab.providerId;
+      const providerId = capture.context.providerId ?? parent.providerId;
       if (!providerId) return false;
       const source: SideChatSource = {
         conversationId: capture.context.sourceConversationId,
@@ -254,14 +256,10 @@ export class SideChatController {
       };
 
       this.#boundConversationId = source.conversationId;
-      // The submitted command and its attachments are consumed by the side turn,
-      // so only residual composer content survives as the main draft.
-      this.#mainDraft = detectSideChatCommand(this.deps.getInputEl().value)
-        ? EMPTY_SIDE_CHAT_DRAFT
-        : this.#captureDraft();
-      this.#mountPanel(source);
-      this.#clearComposer();
-      await this.submitToSide(argument, images, context);
+      this.deps.drafts.changeDestination(() => this.#mountPanel(source));
+      this.deps.onDestinationChanged();
+      transferred = true;
+      await this.#runtime!.submit(command);
       return true;
     } catch (error) {
       new Notice(t('chat.sideChat.startFailed', {
@@ -269,16 +267,20 @@ export class SideChatController {
       }));
       return false;
     } finally {
+      if (!transferred) {
+        command.cancel();
+        await command.settled;
+      }
       this.#starting = false;
     }
   }
 
   #assertForkSourceCurrent(source: SideChatSource): void {
-    const tab = this.deps.getTab();
-    const fullSession = ProviderRegistry.getCapabilities(source.providerId).forkMode === 'full-session';
-    if (!this.deps.isRuntimeLive(tab)
-      || tab.conversationId !== source.conversationId
-      || (fullSession && (tab.state.isStreaming || tab.state.messages.at(-1)?.id !== source.messages.at(-1)?.id))) {
+    const parent = this.deps.parent;
+    const fullSession = ProviderRegistry.getCapabilities(source.providerId, source.providerState).forkMode === 'full-session';
+    if (!parent.isLive
+      || parent.conversationId !== source.conversationId
+      || (fullSession && (parent.isStreaming || parent.lastMessageId !== source.messages.at(-1)?.id))) {
       throw new Error('The source conversation changed. Discard this side chat and start a new one.');
     }
   }
@@ -318,6 +320,7 @@ export class SideChatController {
               settings: this.deps.plugin.settings,
               vaultPath,
             },
+            { lifecycle: 'ephemeral' },
           );
         this.#assertForkSourceCurrent(source);
         return state;
@@ -343,19 +346,15 @@ export class SideChatController {
       },
       source,
       vaultWorkingDirectory: vaultPath ?? '.',
-      warmExecution: {
-        ownerId: `${this.deps.getTab().id}:side`,
-        pool: this.deps.plugin.warmExecutionPool,
-      },
     });
     this.#runtime = runtime;
     // The panel is created expanded, so Side becomes the destination immediately.
     this.#applyDestinationPresentation('side');
     this.#refreshPanel();
-    this.deps.onDestinationChanged();
   }
 
   #teardownPanel(): void {
+    this.deps.composerEl.removeClass('claudian-side-chat-prompt');
     this.#panel?.destroy();
     this.#panel = null;
     this.#previewActive = false;
@@ -366,19 +365,18 @@ export class SideChatController {
     const panel = this.#panel;
     if (!panel || panel.isExpanded === expanded) return;
 
-    const outgoing = this.#captureDraft();
-    if (expanded) this.#mainDraft = outgoing;
-    else this.#sideDraft = outgoing;
-
-    panel.setExpanded(expanded);
-    this.#applyDestinationPresentation(expanded ? 'side' : 'main');
-    this.#restoreDraft(expanded ? this.#sideDraft : this.#mainDraft);
+    this.deps.drafts.changeDestination(() => {
+      panel.setExpanded(expanded);
+      this.#applyDestinationPresentation(expanded ? 'side' : 'main');
+    });
     this.deps.onDestinationChanged();
   }
 
   #applyDestinationPresentation(destination: SideChatDestination): void {
     const isSide = destination === 'side';
+    this.#runtime?.setPromptActive(isSide);
     this.deps.composerEl.toggleClass('claudian-side-chat-expanded', isSide);
+    this.#syncPromptPresentation();
     this.#previewActive = false;
     this.deps.inputWrapperEl.removeClass('claudian-input-side-chat-preview');
 
@@ -393,7 +391,13 @@ export class SideChatController {
     }
   }
 
+  #syncPromptPresentation(): void {
+    this.deps.composerEl.toggleClass('claudian-side-chat-prompt',
+      this.isExpanded && this.#runtime?.state.attention?.kind === 'action-required');
+  }
+
   #refreshPanel(): void {
+    this.#syncPromptPresentation();
     const runtime = this.#runtime;
     const panel = this.#panel;
     if (!runtime || !panel) return;
@@ -405,20 +409,8 @@ export class SideChatController {
     this.deps.onStatusChanged?.();
   }
 
-  #captureDraft(): SideChatComposerDraft {
-    const images = this.deps.getImageContextManager()?.getAttachedImages() ?? [];
-    return { content: this.deps.getInputEl().value, images: [...images] };
-  }
-
-  #restoreDraft(draft: SideChatComposerDraft): void {
-    const inputEl = this.deps.getInputEl();
-    inputEl.value = draft.content;
-    this.deps.getImageContextManager()?.setImages([...draft.images]);
-  }
-
   #clearComposer(): void {
-    this.deps.getInputEl().value = '';
-    this.deps.getImageContextManager()?.clearImages();
+    this.deps.drafts.consume();
   }
 }
 

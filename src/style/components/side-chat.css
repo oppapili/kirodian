@@ -67,7 +67,7 @@
 .claudian-side-chat-status-icon svg {
   width: 14px;
   height: 14px;
-  color: currentColor;
+  color: currentcolor;
 }
 
 .claudian-side-chat-status-text {
@@ -172,7 +172,7 @@
 .claudian-side-chat-actions button.claudian-side-chat-icon-button svg {
   width: 14px;
   height: 14px;
-  color: currentColor;
+  color: currentcolor;
 }
 
 .claudian-side-chat-messages {
@@ -186,5 +186,10 @@
 }
 
 .claudian-side-chat-prompts:empty {
+  display: none;
+}
+
+/* An active side question or permission uses the shared composer's space. */
+.claudian-input-composer.claudian-side-chat-prompt > .claudian-input-container {
   display: none;
 }

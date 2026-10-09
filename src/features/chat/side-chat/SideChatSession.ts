@@ -7,18 +7,19 @@ import type {
   ProviderExecutionLifecycleRegistry,
   ProviderExecutionRun,
   ProviderExecutionSession,
-  ProviderInteractionDismissReason,
   ProviderInteractionPort,
   ProviderNativeResumeSeed,
   ProviderSessionEvent,
   ProviderSessionSnapshot,
   ProviderToolPolicy,
 } from '@/core/execution';
+import { isSteerableExecutionSession } from '@/core/execution';
 import type { ChatMessage, ImageAttachment, ProviderId } from '@/core/types';
+import { consumeExecutionEvents } from '@/features/chat/execution/consumeExecutionEvents';
+import { ExecutionInteractions } from '@/features/chat/execution/ExecutionInteractions';
+import { ExecutionSessionSupervisor } from '@/features/chat/execution/ExecutionSessionSupervisor';
+import { SessionEventStream } from '@/features/chat/execution/SessionEventStream';
 import { toError } from '@/utils/error';
-
-import { ExecutionSessionSupervisor } from '../execution/ExecutionSessionSupervisor';
-import type { WarmExecutionPool } from '../execution/WarmExecutionPool';
 
 export type SideChatTurnStatus =
   | 'completed'
@@ -28,6 +29,8 @@ export type SideChatTurnStatus =
   | 'missing-session';
 
 export interface SideChatTurnRequest {
+  /** Revalidate transient interaction ownership after asynchronous preparation. */
+  readonly assertBeforeHandoff?: () => void;
   readonly text: string;
   readonly images: readonly ImageAttachment[];
   readonly context?: ProviderExecutionContext;
@@ -44,11 +47,6 @@ export interface SideChatTurnResult {
   readonly error?: Extract<ProviderExecutionEvent, { type: 'execution_error' }>;
 }
 
-export interface SideChatWarmExecution {
-  readonly ownerId: string;
-  readonly pool: WarmExecutionPool;
-}
-
 export interface SideChatSessionDeps {
   readonly providerId: ProviderId;
   readonly ephemeral: boolean;
@@ -61,7 +59,6 @@ export interface SideChatSessionDeps {
   readonly buildChildResumeState: () => Promise<Readonly<Record<string, unknown>>>;
   readonly vaultWorkingDirectory: string;
   readonly interactionPort: ProviderInteractionPort;
-  readonly warmExecution?: SideChatWarmExecution;
   readonly onRequestedEvent?: (event: ProviderExecutionEvent) => void | Promise<void>;
   readonly onSessionEvent?: (event: ProviderSessionEvent, isCurrent: () => boolean) => void | Promise<void>;
   readonly onBackgroundWorkChanged?: () => void;
@@ -70,9 +67,11 @@ export interface SideChatSessionDeps {
 }
 
 interface ActiveSideExecution {
+  readonly request: SideChatTurnRequest;
   readonly session: ProviderExecutionSession;
   readonly generation: number;
   readonly run: ProviderExecutionRun;
+  readonly model: string | undefined;
   readonly controller: AbortController;
   terminationOverride: 'cancelled' | 'invalidated' | null;
 }
@@ -80,22 +79,21 @@ interface ActiveSideExecution {
 /**
  * Memory-owned multi-turn execution for one side chat.
  *
- * It holds a lifecycle lease and a warm-pool slot of its own, and keeps the
+ * It holds a lifecycle lease of its own until disposal, and keeps the
  * child's normalized resume state in memory. Nothing here reaches conversation
  * persistence, the accepted-input ledger, or the parent's execution owner.
  */
 export class SideChatSession {
   readonly #supervisor: ExecutionSessionSupervisor;
-  readonly #fencedInteractionPort: ProviderInteractionPort;
-  readonly #pendingInteractions = new Map<string, { turnId: string; sessionInstanceId: string }>();
-  readonly #backgroundTurnIds = new Set<string>();
+  readonly #interactions: ExecutionInteractions;
+  #events: SessionEventStream | null = null;
+  #model: string | undefined;
   #childResumeStatePromise: Promise<Readonly<Record<string, unknown>>> | null = null;
   #seed: ProviderNativeResumeSeed | null = null;
   #providerSessionId: string | undefined;
   #active: ActiveSideExecution | null = null;
   #executionController: AbortController | null = null;
   #pendingWorkCount = 0;
-  #preparing = false;
   #disposed = false;
   #invalidated = false;
   #disposePromise: Promise<void> | null = null;
@@ -103,7 +101,11 @@ export class SideChatSession {
 
   constructor(private readonly deps: SideChatSessionDeps) {
     this.#supervisor = new ExecutionSessionSupervisor(deps.lifecycleRegistry);
-    this.#fencedInteractionPort = this.#createInteractionPort();
+    this.#interactions = new ExecutionInteractions({
+      port: deps.interactionPort,
+      isCurrent: request => this.#isInteractionCurrent(request),
+      staleError: id => new SideChatInteractionStaleError(id),
+    });
   }
 
   get providerId(): ProviderId {
@@ -116,11 +118,12 @@ export class SideChatSession {
   }
 
   get hasBackgroundWork(): boolean {
-    return this.#backgroundTurnIds.size > 0 || this.#pendingWorkCount > 0;
+    return this.#events?.hasBackgroundWork || this.#pendingWorkCount > 0
+      || (this.#supervisor.current?.session.hasBackgroundWork?.() ?? false);
   }
 
   get hasPendingInteractions(): boolean {
-    return this.#pendingInteractions.size > 0;
+    return this.#interactions.hasPending;
   }
 
   async execute(request: SideChatTurnRequest): Promise<SideChatTurnResult> {
@@ -134,7 +137,6 @@ export class SideChatSession {
       return await this.#executeRequest(request, controller);
     } finally {
       if (this.#executionController === controller) this.#executionController = null;
-      this.#notifyMayCool();
     }
   }
 
@@ -157,6 +159,8 @@ export class SideChatSession {
       throw new Error('Side chat execution session became stale before handoff');
     }
 
+    request.assertBeforeHandoff?.();
+    this.#model = request.configuration.model;
     const run = session.execute({
       configuration: request.configuration,
       ...(request.context ? { context: request.context } : {}),
@@ -171,9 +175,11 @@ export class SideChatSession {
       toolPolicy: request.toolPolicy ?? { kind: 'provider-default' },
     });
     const active: ActiveSideExecution = {
+      request,
       controller,
       generation: supervised.generation,
       run,
+      model: request.configuration.model,
       session,
       terminationOverride: null,
     };
@@ -181,51 +187,37 @@ export class SideChatSession {
     try {
       return await this.#consumeRun(active);
     } finally {
-      this.#dismissInteractionsForTurn(active.run.turnId, 'native-rejected');
+      this.#interactions.dismissTurn(active.run.turnId, 'native-rejected');
       if (this.#active === active) this.#active = null;
       this.#captureSnapshot();
-      this.#notifyMayCool();
     }
+  }
+
+  /** Deliver an answer to the current child turn without preparing or replacing its session. */
+  async steer(text: string): Promise<boolean> {
+    const active = this.#active;
+    if (this.#disposed || this.#invalidated || !active || active.controller.signal.aborted
+      || !this.#supervisor.isCurrent(active.session, active.generation)
+      || !isSteerableExecutionSession(active.session)) return false;
+    return active.session.steer({
+      configuration: active.request.configuration,
+      input: [{ type: 'text', text }],
+      signal: active.controller.signal,
+      toolPolicy: active.request.toolPolicy ?? { kind: 'provider-default' },
+    });
   }
 
   cancel(): void {
     this.#executionController?.abort();
     const active = this.#active;
     if (!active) {
-      if (this.#backgroundTurnIds.size > 0) this.#supervisor.current?.session.cancel();
+      if (this.#events?.hasBackgroundWork) this.#supervisor.current?.session.cancel();
       return;
     }
     active.terminationOverride = 'cancelled';
     active.controller.abort();
-    this.#dismissInteractionsForTurn(active.run.turnId, 'cancelled');
+    this.#interactions.dismissTurn(active.run.turnId, 'cancelled');
     active.run.cancel();
-  }
-
-  canCool(): boolean {
-    return Boolean(
-      !this.#disposed
-      && this.#supervisor.current
-      // An ephemeral native id cannot survive eviction of its process.
-      && !this.deps.ephemeral
-      && !this.#preparing
-      && this.#executionController === null
-      && this.#active === null
-      && this.#pendingInteractions.size === 0
-      && this.#pendingWorkCount === 0
-      && this.#backgroundTurnIds.size === 0
-      // A child without a verified native identity cannot be resumed safely.
-      && this.#providerSessionId !== undefined,
-    );
-  }
-
-  async cool(): Promise<void> {
-    this.#assertAvailable();
-    if (!this.#supervisor.current) return;
-    if (!this.canCool()) {
-      throw new Error('Side chat execution is busy and cannot be cooled');
-    }
-    this.#captureSnapshot();
-    await this.#releaseSession();
   }
 
   dispose(): Promise<void> {
@@ -238,7 +230,7 @@ export class SideChatSession {
       active.controller.abort();
       active.run.cancel();
     }
-    this.#dismissAllInteractions('session-disposed');
+    this.#interactions.dismissAll('session-disposed');
     this.#disposePromise = this.#releaseSession();
     return this.#disposePromise;
   }
@@ -247,45 +239,33 @@ export class SideChatSession {
     signal.throwIfAborted();
     const existing = this.#supervisor.current;
     if (existing && this.#supervisor.isCurrent(existing.session, existing.generation)) {
-      await this.#touchWarmSlot();
-      signal.throwIfAborted();
       return existing.session;
     }
 
-    this.#preparing = true;
-    try {
-      const seed = await this.#resolveSeed();
-      signal.throwIfAborted();
-      this.#assertAvailable();
-      await this.#acquireWarmSlot();
-      signal.throwIfAborted();
-      this.#assertAvailable();
-      const backend = this.deps.resolveBackend(this.deps.providerId);
-      if (backend.providerId !== this.deps.providerId) {
-        throw new Error(
-          `Side chat backend provider mismatch: expected ${this.deps.providerId}, got ${backend.providerId}`,
-        );
-      }
-      this.#lastSnapshotRevision = -1;
-      const supervised = this.#supervisor.acquire(
-        backend,
-        {
-          interactionPort: this.#fencedInteractionPort,
-          lifecycle: this.deps.ephemeral ? 'ephemeral' : 'persistent',
-          nativePersistence: this.deps.ephemeral ? 'disabled-if-supported' : 'enabled',
-          ...(seed ? { resumeSeed: seed } : {}),
-          vaultWorkingDirectory: this.deps.vaultWorkingDirectory,
-        },
-        reason => this.#handleInvalidation(reason),
-        event => this.#handleSessionEvent(event),
+    const seed = await this.#resolveSeed();
+    signal.throwIfAborted();
+    this.#assertAvailable();
+    const backend = this.deps.resolveBackend(this.deps.providerId);
+    if (backend.providerId !== this.deps.providerId) {
+      throw new Error(
+        `Side chat backend provider mismatch: expected ${this.deps.providerId}, got ${backend.providerId}`,
       );
-      return supervised.session;
-    } catch (error) {
-      if (!this.#supervisor.current) this.#releaseWarmSlot();
-      throw error;
-    } finally {
-      this.#preparing = false;
     }
+    this.#lastSnapshotRevision = -1;
+    const supervised = this.#supervisor.acquire(
+      backend,
+      {
+        interactionPort: this.#interactions,
+        lifecycle: this.deps.ephemeral ? 'ephemeral' : 'persistent',
+        nativePersistence: this.deps.ephemeral ? 'disabled-if-supported' : 'enabled',
+        ...(seed ? { resumeSeed: seed } : {}),
+        vaultWorkingDirectory: this.deps.vaultWorkingDirectory,
+      },
+      reason => this.#handleInvalidation(reason),
+      event => this.#handleSessionEvent(event),
+    );
+    this.#events = new SessionEventStream(supervised.session.sessionInstanceId);
+    return supervised.session;
   }
 
   async #resolveSeed(): Promise<ProviderNativeResumeSeed> {
@@ -309,44 +289,27 @@ export class SideChatSession {
   }
 
   async #consumeRun(active: ActiveSideExecution): Promise<SideChatTurnResult> {
-    let lastSequence = 0;
     let accepted = false;
     let nativeUserMessageId: string | undefined;
     let checkpointId: string | undefined;
-    let terminal: Extract<
-      ProviderExecutionEvent,
-      { type: 'turn_completed' | 'cancelled' | 'execution_error' }
-    > | undefined;
 
-    for await (const event of active.run.events) {
-      if (this.#active !== active) break;
-      if (
-        event.scope.sessionInstanceId !== active.session.sessionInstanceId
-        || event.scope.executionId !== active.run.executionId
-        || event.scope.turnId !== active.run.turnId
-        || event.scope.sequence <= lastSequence
-      ) {
-        continue;
-      }
-      lastSequence = event.scope.sequence;
+    const terminal = await consumeExecutionEvents(
+      active.run, active.session.sessionInstanceId, active.model, () => this.#active === active,
+      async event => {
+        if (event.type === 'turn_started' && event.accepted) {
+          accepted = true;
+          nativeUserMessageId = event.nativeUserMessageId ?? nativeUserMessageId;
+        } else if (event.type === 'user_message_started') {
+          nativeUserMessageId = event.nativeUserMessageId ?? nativeUserMessageId;
+        } else if (event.type === 'session_state_changed' || event.type === 'permission_mode_changed') {
+          this.#applySnapshot(event.snapshot);
+        } else if (event.type === 'turn_completed') {
+          checkpointId = event.nativeAssistantId ?? event.nativeCheckpointId ?? checkpointId;
+        }
 
-      if (event.type === 'turn_started' && event.accepted) {
-        accepted = true;
-        nativeUserMessageId = event.nativeUserMessageId ?? nativeUserMessageId;
-      } else if (event.type === 'user_message_started') {
-        nativeUserMessageId = event.nativeUserMessageId ?? nativeUserMessageId;
-      } else if (event.type === 'session_state_changed' || event.type === 'permission_mode_changed') {
-        this.#applySnapshot(event.snapshot);
-      } else if (event.type === 'turn_completed') {
-        terminal = event;
-        checkpointId = event.nativeAssistantId ?? event.nativeCheckpointId ?? checkpointId;
-      } else if (event.type === 'cancelled' || event.type === 'execution_error') {
-        terminal = event;
-      }
-
-      await this.#deliverRequestedEvent(event);
-      if (terminal) break;
-    }
+        await this.#deliverRequestedEvent(event);
+      },
+    );
     if (active.terminationOverride
       && !(active.terminationOverride === 'cancelled' && terminal?.type === 'turn_completed')) {
       return { accepted, status: active.terminationOverride };
@@ -381,22 +344,22 @@ export class SideChatSession {
   #handleSessionEvent(event: ProviderSessionEvent): void {
     if (this.#disposed) return;
     const current = this.#supervisor.current;
-    if (!current || event.scope.sessionInstanceId !== current.session.sessionInstanceId) return;
-    if (event.type === 'background_turn_started') {
-      this.#backgroundTurnIds.add(event.scope.turnId);
-    } else if (event.type === 'background_turn_completed') {
-      this.#backgroundTurnIds.delete(event.scope.turnId);
-      this.#dismissInteractionsForTurn(event.scope.turnId, 'native-rejected');
+    if (!current) return;
+    const admitted = this.#events?.accept(event, this.#model);
+    if (!admitted) return;
+    if (event.type === 'background_turn_completed') {
+      this.#interactions.dismissTurn(event.scope.turnId, 'native-rejected');
     } else if (event.type === 'session_error') {
-      this.#backgroundTurnIds.clear();
-      this.#dismissAllInteractions('native-rejected');
+      this.#events?.endBackgroundTurns();
+      this.#model = undefined;
+      this.#interactions.dismissAll('native-rejected');
     }
     if (event.type === 'session_state_changed' || event.type === 'permission_mode_changed') {
       this.#applySnapshot(event.snapshot);
     }
     const isCurrent = () => !this.#disposed && this.#supervisor.current === current;
     const deliver = async () => {
-      if (isCurrent()) await this.deps.onSessionEvent?.(event, isCurrent);
+      if (isCurrent()) await this.deps.onSessionEvent?.(admitted, isCurrent);
     };
     // The renderer admits events synchronously, then owns its rendering queue.
     this.#trackWork(deliver());
@@ -404,15 +367,15 @@ export class SideChatSession {
 
   #handleInvalidation(reason: ProviderExecutionInvalidationReason): void {
     this.#invalidated = this.deps.ephemeral;
-    this.#backgroundTurnIds.clear();
+    this.#events = null;
+    this.#model = undefined;
     const active = this.#active;
     if (active) {
       active.terminationOverride = 'invalidated';
       active.controller.abort();
       active.run.cancel();
     }
-    this.#dismissAllInteractions('provider-transition');
-    this.#releaseWarmSlot();
+    this.#interactions.dismissAll('provider-transition');
     this.deps.onInvalidated?.(reason);
     this.deps.onBackgroundWorkChanged?.();
   }
@@ -452,110 +415,13 @@ export class SideChatSession {
       .finally(() => {
         this.#pendingWorkCount = Math.max(0, this.#pendingWorkCount - 1);
         this.deps.onBackgroundWorkChanged?.();
-        if (this.#pendingWorkCount === 0) this.#notifyMayCool();
       });
   }
 
   async #releaseSession(): Promise<void> {
-    this.#backgroundTurnIds.clear();
-    try {
-      await this.#supervisor.release();
-    } finally {
-      this.#releaseWarmSlot();
-    }
-  }
-
-  async #acquireWarmSlot(): Promise<void> {
-    const warm = this.deps.warmExecution;
-    if (!warm) return;
-    try {
-      await warm.pool.acquire({
-        canCool: () => this.canCool(),
-        cool: () => this.cool(),
-        id: warm.ownerId,
-      });
-    } catch (error) {
-      if (!this.#supervisor.current) warm.pool.release(warm.ownerId);
-      throw error;
-    }
-  }
-
-  #releaseWarmSlot(): void {
-    const warm = this.deps.warmExecution;
-    warm?.pool.release(warm.ownerId);
-  }
-
-  async #touchWarmSlot(): Promise<void> {
-    const warm = this.deps.warmExecution;
-    if (!warm) return;
-    await warm.pool.touch(warm.ownerId);
-  }
-
-  #notifyMayCool(): void {
-    const warm = this.deps.warmExecution;
-    if (!warm) return;
-    void warm.pool.notifyOwnerMayCool(warm.ownerId)
-      .catch(error => this.deps.onError?.(error));
-  }
-
-  #createInteractionPort(): ProviderInteractionPort {
-    return {
-      askUserQuestion: (request, signal) => this.#forwardInteraction(
-        request,
-        signal,
-        () => this.deps.interactionPort.askUserQuestion(request, signal),
-      ),
-      dismissInteraction: (interactionId, reason) => {
-        this.#pendingInteractions.delete(interactionId);
-        this.deps.interactionPort.dismissInteraction(interactionId, reason);
-        this.#notifyMayCool();
-      },
-      requestApproval: (request, signal) => this.#forwardInteraction(
-        request,
-        signal,
-        () => this.deps.interactionPort.requestApproval(request, signal),
-      ),
-    };
-  }
-
-  async #forwardInteraction<
-    TRequest extends {
-      interactionId: string;
-      sessionInstanceId: string;
-      turnId: string;
-    },
-    TResponse extends { interactionId: string },
-  >(
-    request: TRequest,
-    signal: AbortSignal,
-    forward: () => Promise<TResponse>,
-  ): Promise<TResponse> {
-    if (!this.#isInteractionCurrent(request) || signal.aborted) {
-      throw new SideChatInteractionStaleError(request.interactionId);
-    }
-    if (this.#pendingInteractions.has(request.interactionId)) {
-      throw new Error(`Duplicate side chat interaction: ${request.interactionId}`);
-    }
-    this.#pendingInteractions.set(request.interactionId, {
-      sessionInstanceId: request.sessionInstanceId,
-      turnId: request.turnId,
-    });
-    const pending = this.#pendingInteractions.get(request.interactionId);
-    try {
-      const response = await forward();
-      if (
-        response.interactionId !== request.interactionId
-        || signal.aborted
-        || this.#pendingInteractions.get(request.interactionId) !== pending
-        || !this.#isInteractionCurrent(request)
-      ) {
-        throw new SideChatInteractionStaleError(request.interactionId);
-      }
-      return response;
-    } finally {
-      this.#pendingInteractions.delete(request.interactionId);
-      this.#notifyMayCool();
-    }
+    this.#events = null;
+    this.#model = undefined;
+    await this.#supervisor.release();
   }
 
   #isInteractionCurrent(request: {
@@ -571,25 +437,7 @@ export class SideChatSession {
       return false;
     }
     return this.#active?.run.turnId === request.turnId
-      || this.#backgroundTurnIds.has(request.turnId);
-  }
-
-  #dismissInteractionsForTurn(
-    turnId: string,
-    reason: ProviderInteractionDismissReason,
-  ): void {
-    for (const [interactionId, pending] of this.#pendingInteractions) {
-      if (pending.turnId !== turnId) continue;
-      this.#pendingInteractions.delete(interactionId);
-      this.deps.interactionPort.dismissInteraction(interactionId, reason);
-    }
-  }
-
-  #dismissAllInteractions(reason: ProviderInteractionDismissReason): void {
-    for (const interactionId of this.#pendingInteractions.keys()) {
-      this.deps.interactionPort.dismissInteraction(interactionId, reason);
-    }
-    this.#pendingInteractions.clear();
+      || (this.#events?.hasBackgroundTurn(request.turnId) ?? false);
   }
 
   #assertAvailable(): void {

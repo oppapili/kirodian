@@ -1,8 +1,8 @@
 import * as fs from 'fs';
-import { Setting } from 'obsidian';
+import { type DropdownComponent, Setting } from 'obsidian';
 
+import { normalizeConfiguredCLIPath } from '@/core/process/cliPath';
 import { probeCLIInstallation } from '@/core/providers/cli/CLIInstallationProbe';
-import type { ProviderVaultEntryRepository } from '@/core/providers/commands/ProviderVaultEntryRepository';
 import { getRuntimeEnvironmentVariables } from '@/core/providers/providerEnvironment';
 import type { ProviderCLIResolver } from '@/core/providers/types';
 import { CLAUDE_PROVIDER_ICON } from '@/shared/icons';
@@ -16,21 +16,18 @@ import { renderEnvironmentSettingsSection } from '../../../shared/settings/Envir
 import type { ProviderEnablementSettingOptions } from '../../../shared/settings/ProviderEnablementSetting';
 import { renderLastEnabledProviderWarning, renderProviderModelEnablementWarning } from '../../../shared/settings/ProviderModelEnablementWarning';
 import { renderProviderModelsSection } from '../../../shared/settings/ProviderModelsSection';
-import { getHostnameKey } from '../../../utils/env';
-import { normalizeConfiguredCLIPath } from '../../../utils/path';
 import {
   getClaudeModelOptions,
 } from '../modelOptions';
 import {
-  CLAUDE_SAFE_MODES,
-  type ClaudeSafeMode,
   getClaudeProviderSettings,
   updateClaudeProviderSettings,
 } from '../settings';
-import { SlashCommandSettings } from './SlashCommandSettings';
+
+const INHERITED_OUTPUT_STYLE = '';
 
 export function createClaudeSettingsTabRenderer(
-  claudeWorkspace: { cliResolver: Pick<ProviderCLIResolver, 'reset'>; vaultCommandRepository: ProviderVaultEntryRepository; modelCatalog: ProviderModelCatalog; },
+  claudeWorkspace: { cliResolver: Pick<ProviderCLIResolver, 'reset'>; modelCatalog: ProviderModelCatalog; },
 ): ProviderSettingsTabRenderer {
   return {
     render(container, context) {
@@ -41,7 +38,7 @@ export function createClaudeSettingsTabRenderer(
 
       const enablement: Omit<ProviderEnablementSettingOptions, 'container' | 'description'> = {
         getValue: () => getClaudeProviderSettings(settingsBag).enabled,
-        name: t('settings.providerEnablement.name', { provider: 'Claude' }),
+        name: t('settings.providerEnablement.name', { provider: 'Claude Code' }),
         onChange: async (value) => {
           if (!ProviderSettingsCoordinator.canApplyProviderEnablement(
             settingsBag,
@@ -77,10 +74,10 @@ export function createClaudeSettingsTabRenderer(
         getHasEnabledModels: () => getClaudeModelOptions(settingsBag).length > 0,
         getIsEnabled: () => getClaudeProviderSettings(settingsBag).enabled,
         providerId: 'claude',
-        providerName: 'Claude',
+        providerName: 'Claude Code',
       });
 
-      const hostnameKey = getHostnameKey();
+      const hostnameKey = context.plugin.storage.installationKey;
       const validatePath = (value: string): string | null => {
         const trimmed = value.trim();
         if (!trimmed) return null;
@@ -146,48 +143,59 @@ export function createClaudeSettingsTabRenderer(
       // --- Models ---
 
       new Setting(container).setName(t('settings.models')).setHeading();
-      const modelPicker = renderProviderModelsSection(container, 'claude', 'Claude', claudeWorkspace.modelCatalog, () => modelWarning.refresh());
+      let outputStyleDropdown: DropdownComponent | null = null;
+      // Rebuilt whenever discovery reports a new list, keeping a saved style the list lacks selectable.
+      const renderOutputStyleOptions = (): void => {
+        if (!outputStyleDropdown) return;
+        const { outputStyle, discoveredOutputStyles } = getClaudeProviderSettings(settingsBag);
+        const names = outputStyle && !discoveredOutputStyles.includes(outputStyle)
+          ? [...discoveredOutputStyles, outputStyle]
+          : discoveredOutputStyles;
+        outputStyleDropdown.selectEl.replaceChildren();
+        outputStyleDropdown.addOption(INHERITED_OUTPUT_STYLE, t('settings.claude.responseStyle.inherit'));
+        for (const name of names) {
+          outputStyleDropdown.addOption(name, name === 'default' ? t('settings.claude.responseStyle.default') : name);
+        }
+        outputStyleDropdown.setValue(outputStyle ?? INHERITED_OUTPUT_STYLE);
+      };
+
+      const modelPicker = renderProviderModelsSection(container, 'claude', 'Claude Code', claudeWorkspace.modelCatalog, () => {
+        modelWarning.refresh();
+        renderOutputStyleOptions();
+      });
+
+      // --- Responses ---
+
+      new Setting(container).setName(t('settings.responses')).setHeading();
+
+      new Setting(container)
+        .setName(t('settings.claude.promptSuggestions.name'))
+        .setDesc(t('settings.claude.promptSuggestions.desc'))
+        .addToggle(toggle => toggle
+          .setValue(claudeSettings.promptSuggestions)
+          .onChange(async value => {
+            await context.plugin.mutateSettings(settings => {
+              updateClaudeProviderSettings(settings, { promptSuggestions: value });
+            });
+          }));
 
       new Setting(container)
         .setName(t('settings.claude.responseStyle.name'))
         .setDesc(t('settings.claude.responseStyle.desc'))
         .addDropdown((dropdown) => {
+          outputStyleDropdown = dropdown;
           dropdown.selectEl.setAttribute('aria-label', t('settings.claude.responseStyle.name'));
-          dropdown
-            .addOption('Default', t('settings.claude.responseStyle.default'))
-            .addOption('Concise', t('settings.claude.responseStyle.concise'))
-            .setValue(claudeSettings.responseStyle)
-            .onChange(async (value) => {
-              await context.plugin.mutateSettings((settings) => {
-                updateClaudeProviderSettings(settings, {
-                  responseStyle: value === 'Concise' ? 'Concise' : 'Default',
-                });
-              });
+          renderOutputStyleOptions();
+          dropdown.onChange(async (value) => {
+            await context.plugin.mutateSettings((settings) => {
+              updateClaudeProviderSettings(settings, { outputStyle: value || null });
             });
+          });
         });
 
-      // --- Safety ---
+      // --- Configuration ---
 
-      new Setting(container).setName(t('settings.safety')).setHeading();
-
-      new Setting(container)
-        .setName(t('settings.claudeSafeMode.name'))
-        .setDesc(t('settings.claudeSafeMode.desc'))
-        .addDropdown((dropdown) => {
-          for (const mode of CLAUDE_SAFE_MODES) {
-            dropdown.addOption(mode, mode);
-          }
-          dropdown
-            .setValue(claudeSettings.safeMode)
-            .onChange(async (value) => {
-              await context.plugin.mutateSettings((settings) => {
-                updateClaudeProviderSettings(
-                  settings,
-                  { safeMode: value as ClaudeSafeMode },
-                );
-              });
-            });
-        });
+      new Setting(container).setName(t('settings.claude.configuration')).setHeading();
 
       new Setting(container)
         .setName(t('settings.loadUserSettings.name'))
@@ -202,31 +210,6 @@ export function createClaudeSettingsTabRenderer(
             })
         );
 
-      // --- Slash Commands ---
-
-      new Setting(container).setName(t('settings.slashCommands.name')).setHeading();
-
-      const slashCommandsDesc = container.createDiv({ cls: 'claudian-sp-settings-desc' });
-      const descP = slashCommandsDesc.createEl('p', { cls: 'setting-item-description' });
-      descP.appendText(t('settings.slashCommands.desc') + ' ');
-      descP.createEl('a', {
-        text: 'Learn more',
-        href: 'https://code.claude.com/docs/en/skills',
-      });
-
-      const slashCommandsContainer = container.createDiv({ cls: 'claudian-slash-commands-container' });
-      new SlashCommandSettings(
-        slashCommandsContainer,
-        context.plugin.app,
-        claudeWorkspace.vaultCommandRepository,
-      );
-
-      context.renderHiddenProviderCommandSetting(container, 'claude', {
-        name: t('settings.hiddenSlashCommands.name'),
-        desc: t('settings.hiddenSlashCommands.desc'),
-        placeholder: t('settings.hiddenSlashCommands.placeholder'),
-      });
-
       // --- Environment ---
 
       renderEnvironmentSettingsSection({
@@ -235,7 +218,7 @@ export function createClaudeSettingsTabRenderer(
         scope: 'provider:claude',
         heading: t('settings.environment'),
         name: t('settings.customVariables.name'),
-        desc: 'Claude-owned runtime variables only. Use this for ANTHROPIC_* and Claude-specific toggles.',
+        desc: t('settings.customVariables.desc'),
         placeholder: 'ANTHROPIC_API_KEY=your-key\nANTHROPIC_BASE_URL=https://api.example.com\nANTHROPIC_MODEL=custom-model\nCLAUDE_CODE_USE_BEDROCK=1',
         renderCustomContextLimits: (target) => context.renderCustomContextLimits(target, 'claude'),
       });

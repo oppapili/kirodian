@@ -1,11 +1,16 @@
 import { Notice } from 'obsidian';
 
-import type { ChatFeatureHost } from '../ChatFeatureHost';
-import type {
-  AssembledTabRuntime,
-  TabRuntimeCleanupFailure,
-  TabRuntimeResourceOwner,
-} from './types';
+import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
+import type { AssembledTabRuntime, TabRuntimeResourceState } from '@/features/chat/tabs/types';
+
+export interface TabRuntimeCleanupFailure {
+  readonly resource: string;
+  readonly error: unknown;
+}
+
+export interface TabRuntimeResourceOwner extends TabRuntimeResourceState {
+  dispose(): Promise<readonly TabRuntimeCleanupFailure[]>;
+}
 
 const tabDestructionPromises = new WeakMap<AssembledTabRuntime, Promise<void>>();
 const tabShutdownDrainPromises = new WeakMap<
@@ -36,7 +41,7 @@ export function isClosingLifecycleState(
 export function commitProvisionalTab(tab: AssembledTabRuntime): void {
   tab.session.claimUserOwnership();
   if (tab.lifecycleState === 'provisional') {
-    tab.lifecycleState = 'cold';
+    tab.session.commitAdmission();
   }
 }
 
@@ -44,19 +49,16 @@ export function activateTab(tab: AssembledTabRuntime): void {
   tab.dom.contentEl.removeClass('claudian-hidden');
   tab.controllers.streamController.setTabActive(true);
   tab.controllers.sideChatController.setTabActive(true);
-  tab.controllers.selectionController.start();
-  tab.controllers.browserSelectionController.start();
-  tab.controllers.canvasSelectionController.start();
+  tab.controllers.composerSelections.start();
   tab.ui.navigationSidebar.updateVisibility();
 }
 
 export function deactivateTab(tab: AssembledTabRuntime): void {
+  tab.ui.promptSuggestion.discard();
   tab.controllers.streamController.setTabActive(false);
   tab.controllers.sideChatController.setTabActive(false);
   tab.dom.contentEl.addClass('claudian-hidden');
-  tab.controllers.selectionController.stop();
-  tab.controllers.browserSelectionController.stop();
-  tab.controllers.canvasSelectionController.stop();
+  tab.controllers.composerSelections.stop();
 }
 
 export class TabRuntimeTeardownError extends Error {
@@ -106,24 +108,18 @@ async function drainTabForShutdownSnapshotOnce(
   tab.session.pauseIntentAdmission();
   tab.session.pauseBackgroundWork();
   const cleanupFailures: TabRuntimeCleanupFailure[] = [];
-
+  const cancelledActiveTurn = tab.session.turns.isActive;
   await captureTeardownFailure(
     cleanupFailures,
-    'tab pending provider interaction',
-    () => tab.controllers.inputController.dismissPendingApproval(),
+    'tab turn cancellation',
+    () => { tab.session.cancelTurn('shutdown', { dismissInteractions: true }); },
   );
-  const activeTurn = tab.session.activeTurn;
-  const cancelledActiveTurn = activeTurn !== null;
-  if (activeTurn) {
-    tab.state.cancelRequested = true;
-    tab.state.bumpStreamGeneration();
-    await captureTeardownFailure(
-      cleanupFailures,
-      'tab active execution cancellation',
-      () => tab.executionCoordinator.cancel(),
-    );
-    await activeTurn.catch(() => undefined);
-  }
+  if (cancelledActiveTurn) await tab.session.turns.drain().catch(() => undefined);
+  await captureTeardownFailure(
+    cleanupFailures,
+    'tab session mention preparation',
+    () => tab.controllers.inputController.drainSessionMentionPreparations(),
+  );
   await captureTeardownFailure(
     cleanupFailures,
     'tab background work',
@@ -146,8 +142,9 @@ export async function destroyTab(tab: AssembledTabRuntime): Promise<void> {
 }
 
 async function destroyTabOnce(tab: AssembledTabRuntime): Promise<void> {
-  tab.lifecycleState = 'closing';
+  tab.session.beginClose();
   const drainResult = await drainTabForShutdownSnapshot(tab);
+  tab.session.sealIdentity();
   const cleanupFailures = [...drainResult.cleanupFailures];
   const { cancelledActiveTurn } = drainResult;
 
@@ -164,7 +161,7 @@ async function destroyTabOnce(tab: AssembledTabRuntime): Promise<void> {
   await captureTeardownFailure(
     cleanupFailures,
     'tab resume dropdown',
-    () => tab.controllers.inputController.destroyResumeDropdown(),
+    () => tab.controllers.builtInCommandController.destroyResumeDropdown(),
   );
   const resourceOwner = tabRuntimeResourceOwners.get(tab);
   if (resourceOwner) {
@@ -181,9 +178,9 @@ async function destroyTabOnce(tab: AssembledTabRuntime): Promise<void> {
   }
 }
 
-export function getTabTitle(tab: AssembledTabRuntime, plugin: ChatFeatureHost): string {
+export function getTabTitle(tab: Pick<AssembledTabRuntime, 'conversationId'>, plugin: ChatFeatureHost): string {
   if (tab.conversationId) {
-    const conversation = plugin.getConversationSync(tab.conversationId);
+    const conversation = plugin.getConversationSummary(tab.conversationId);
     if (conversation?.title) {
       return conversation.title;
     }

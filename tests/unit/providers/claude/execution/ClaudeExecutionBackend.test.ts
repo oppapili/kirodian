@@ -5,24 +5,34 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import * as sdkModule from '@anthropic-ai/claude-agent-sdk';
+import { capturedSelectionPrompt, capturedSelections } from '@test/helpers/capturedSelections';
 import { claudeCatalogFixture } from '@test/helpers/claudeModels';
-import { testTime } from '@test/helpers/testClock';
-import { createProviderRecoveryTestHarness } from '@test/unit/features/chat/execution/ProviderRecoveryTestHarness';
+import { createProviderRecoveryTestHarness } from '@test/helpers/features/chat/ProviderRecoveryTestHarness';
+import { testDate, testTime } from '@test/helpers/testClock';
 
-import type {
-  ProviderExecutionEvent,
-  ProviderExecutionRequest,
-  ProviderInteractionPort,
-  ProviderSessionConfig,
-  ProviderSessionEvent,
-  ProviderSessionSnapshot,
+import {
+  type ProviderExecutionEvent,
+  ProviderExecutionLifecycleRegistry,
+  type ProviderExecutionRequest,
+  type ProviderInteractionPort,
+  type ProviderSessionConfig,
+  type ProviderSessionEvent,
+  type ProviderSessionSnapshot,
 } from '@/core/execution';
+import { ProviderModelUnavailableError } from '@/core/providers/models/ProviderModelUnavailableError';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
+import type { ClaudianSettings } from '@/core/types';
+type MutableTestHost = ProviderHost & { settings: ClaudianSettings };
+import * as env from '@/core/process/env';
 import type { Conversation } from '@/core/types';
+import { createClaudeWorkspaceServices } from '@/providers/claude/app/ClaudeWorkspaceServices';
 import { ClaudeExecutionBackend } from '@/providers/claude/execution/ClaudeExecutionBackend';
+import { ClaudeExecutionSession } from '@/providers/claude/execution/ClaudeExecutionSession';
 import { ClaudeConversationHistoryService } from '@/providers/claude/history/ClaudeConversationHistoryService';
 import * as historyStore from '@/providers/claude/history/ClaudeHistoryStore';
+import { assertClaudeModelAvailable } from '@/providers/claude/runtime/ClaudeModelAvailability';
 import { buildClaudeSDKUserMessage } from '@/providers/claude/runtime/ClaudeUserMessageFactory';
+import { getClaudeProviderSettings, updateClaudeProviderSettings } from '@/providers/claude/settings';
 
 jest.mock('@/providers/claude/runtime/ClaudeUserMessageFactory', () => {
   const actual = jest.requireActual('@/providers/claude/runtime/ClaudeUserMessageFactory');
@@ -60,11 +70,10 @@ const sdkMock = sdkModule as unknown as {
       argumentHint?: string;
     }>,
   ) => void;
+  setMockSupportedModels: (models: sdkModule.ModelInfo[]) => void;
+  setMockOutputStyles: (styles: string[]) => void;
   setMockContextUsage: (
     contextUsage: { rawMaxTokens: number } | null,
-  ) => void;
-  setMockContextUsageImplementation: (
-    implementation: (() => Promise<{ rawMaxTokens: number }>) | null,
   ) => void;
 };
 
@@ -82,7 +91,7 @@ function createInteractionPort(): jest.Mocked<ProviderInteractionPort> {
   };
 }
 
-function createHost(): ProviderHost {
+function createHost(): MutableTestHost {
   return {
     app: {
       vault: {
@@ -104,7 +113,7 @@ function createHost(): ProviderHost {
     storage: {} as ProviderHost['storage'],
     getResolvedProviderCliPath: jest.fn().mockResolvedValue('/bin/claude'),
     getActiveEnvironmentVariables: jest.fn().mockReturnValue(''),
-  } as unknown as ProviderHost;
+  } as unknown as MutableTestHost;
 }
 
 function createConfig(
@@ -160,6 +169,65 @@ describe('ClaudeExecutionBackend', () => {
     jest.restoreAllMocks();
   });
 
+  it('passes Node-backed CLI paths to the SDK even when Node discovery misses', async () => {
+    jest.spyOn(env, 'findNodeExecutable').mockReturnValue(null);
+    const host = createHost();
+    jest.mocked(host.getResolvedProviderCliPath).mockResolvedValue('/npm/claude/cli-wrapper.cjs');
+    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+
+    try {
+      await collectEvents(session.execute(createRequest()).events);
+
+      expect(sdkMock.getQueryCallCount()).toBe(1);
+      expect(sdkMock.getLastOptions()?.pathToClaudeCodeExecutable).toBe('/npm/claude/cli-wrapper.cjs');
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  it('executes a migrated family alias using its enabled model and effort metadata', async () => {
+    const host = createHost();
+    host.settings.providerConfigs = { claude: {
+      discoveredModels: [
+        { value: 'claude-fable-5-10', label: 'Selected', description: '', supportedEffortLevels: ['high'] },
+        { value: 'claude-fable-6-0', label: 'Unselected', description: '', supportedEffortLevels: ['low'] },
+      ],
+      visibleModels: ['claude-fable-5-10'],
+    } };
+    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const request = createRequest();
+    try {
+      const events = await collectEvents(session.execute({
+        ...request, configuration: { ...request.configuration, model: 'fable', reasoning: 'high' },
+      }).events);
+      expect(events).not.toContainEqual(expect.objectContaining({ type: 'execution_error' }));
+      expect(sdkMock.getLastOptions()?.model).toBe('claude-fable-5-10');
+      expect(sdkMock.getLastOptions()?.effort).toBe('high');
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  it('rejects a bare alias whose exact SDK identity exists but is unselected', async () => {
+    const host = createHost();
+    host.settings.providerConfigs = { claude: {
+      discoveredModels: [
+        { value: 'opus', label: 'Opus', description: '' },
+        { value: 'opus[1m]', label: 'Opus 1M', description: '' },
+      ],
+      visibleModels: ['opus[1m]'],
+    } };
+    expect(() => assertClaudeModelAvailable(host.settings, 'opus')).toThrow(ProviderModelUnavailableError);
+    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const request = createRequest();
+    const events = await collectEvents(session.execute({
+      ...request, configuration: { ...request.configuration, model: 'opus' },
+    }).events);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'execution_error', category: 'configuration' }));
+    expect(sdkMock.getQueryCallCount()).toBe(0);
+    await session.dispose();
+  });
+
   it('rejects ambiguous saved model identities even if only one matching row is enabled', async () => {
     const host = createHost();
     host.settings.providerConfigs = { claude: {
@@ -172,8 +240,8 @@ describe('ClaudeExecutionBackend', () => {
       ...request, configuration: { ...request.configuration, model: 'gateway-model' },
     }).events);
     expect(events).toContainEqual(expect.objectContaining({ type: 'execution_error', category: 'configuration' }));
-    expect(JSON.stringify(events)).toContain('selected Claude model is unavailable');
-    expect(JSON.stringify(events)).toContain('Open Kirodian settings → Claude');
+    expect(JSON.stringify(events)).toContain('selected Claude Code model is unavailable');
+    expect(JSON.stringify(events)).toContain('Open Kirodian settings → Claude Code');
     expect(sdkMock.getQueryCallCount()).toBe(0);
     await session.dispose();
   });
@@ -256,17 +324,9 @@ describe('ClaudeExecutionBackend', () => {
 
   it.each([
     ['bypassPermissions', 'yolo'],
-    ['default', 'normal'],
-    ['acceptEdits', 'normal'],
-    ['auto', 'normal'],
-    ['dontAsk', 'normal'],
-    ['delegate', 'normal'],
-    ['plan', 'normal'],
-    ['future-mode', 'normal'],
-    ['yolo', 'normal'],
-    ['', 'normal'],
-    [null, 'normal'],
-    [false, 'normal'],
+    ['default', 'manual'],
+    ['acceptEdits', 'acceptEdits'],
+    ['auto', 'auto'],
   ])('normalizes native permission %p to %s in execution events', async (nativeMode, permissionMode) => {
     sdkMock.setMockMessages([
       { type: 'system', subtype: 'init', session_id: 'session-1', permissionMode: nativeMode },
@@ -284,6 +344,22 @@ describe('ClaudeExecutionBackend', () => {
       snapshot: expect.objectContaining({ providerId: 'claude', providerSessionId: 'session-1' }),
     }));
   });
+
+  it.each(['dontAsk', 'delegate', 'plan', 'future-mode', 'yolo', '', null, false])(
+    'reports no permission mode for unsupported native permission %p',
+    async (nativeMode) => {
+      sdkMock.setMockMessages([
+        { type: 'system', subtype: 'init', session_id: 'session-1', permissionMode: nativeMode },
+        { type: 'result', subtype: 'success' },
+      ], { appendResult: false });
+      const session = new ClaudeExecutionBackend(createHost())
+        .createSession(createConfig());
+
+      const events = await collectEvents(session.execute(createRequest()).events);
+
+      expect(events).not.toContainEqual(expect.objectContaining({ type: 'permission_mode_changed' }));
+    },
+  );
 
   it.each(['persistent', 'ephemeral'] as const)(
     'keeps pushed commands over delayed initialization metadata in a %s session',
@@ -322,9 +398,105 @@ describe('ClaudeExecutionBackend', () => {
     },
   );
 
+  it('writes a live session model list back once and leaves unchanged catalogs alone', async () => {
+    const host = createHost();
+    const registry = new ProviderExecutionLifecycleRegistry();
+    let writes = 0;
+    Object.assign(host, {
+      executionLifecycleRegistry: registry,
+      mutateSettingsConditionally: jest.fn(async (mutation: (settings: ClaudianSettings) => Promise<boolean> | boolean) => {
+        if (await mutation(host.settings)) writes += 1;
+      }),
+      notifyProviderChatOptionsChanged: jest.fn(),
+    });
+    const services = await createClaudeWorkspaceServices(host, { commandProbe: async () => [], catalogProbe: jest.fn() });
+    const publications: Array<Promise<void>> = [];
+    const backend = new ClaudeExecutionBackend(host, {
+      publishSessionCatalog: catalog => {
+        const publication = services.publishSessionCatalog(catalog);
+        publications.push(publication);
+        return publication;
+      },
+    });
+    const reported = getClaudeProviderSettings(host.settings).discoveredModels.map(model => ({
+      value: model.value, displayName: model.label, description: model.description,
+      supportedEffortLevels: model.supportedEffortLevels,
+    }));
+    sdkMock.setMockSupportedModels([
+      ...reported,
+      { value: 'claude-fable-6-0', displayName: 'Fable 6', description: 'Newest', supportedEffortLevels: ['low', 'high'] },
+    ]);
+
+    try {
+      for (let sessionIndex = 1; sessionIndex <= 2; sessionIndex += 1) {
+        const session = backend.createSession(createConfig());
+        await collectEvents(session.execute(createRequest()).events);
+        await waitFor(() => publications.length === sessionIndex);
+        await Promise.all(publications);
+        await session.dispose();
+        expect(writes).toBe(1);
+      }
+      expect(getClaudeProviderSettings(host.settings).discoveredModels).toContainEqual({
+        value: 'claude-fable-6-0',
+        label: 'Fable 6',
+        description: 'Newest',
+        reasoningMetadataResolved: true,
+        supportedEffortLevels: ['low', 'high'],
+      });
+      expect(host.notifyProviderChatOptionsChanged).toHaveBeenCalledTimes(1);
+      expect(host.notifyProviderChatOptionsChanged).toHaveBeenCalledWith('claude');
+    } finally {
+      await services.dispose();
+      await registry.dispose();
+    }
+  });
+
+  it('writes live session output styles back once while keeping the stored model list', async () => {
+    const host = createHost();
+    const registry = new ProviderExecutionLifecycleRegistry();
+    let writes = 0;
+    Object.assign(host, {
+      executionLifecycleRegistry: registry,
+      mutateSettingsConditionally: jest.fn(async (mutation: (settings: ClaudianSettings) => Promise<boolean> | boolean) => {
+        if (await mutation(host.settings)) writes += 1;
+      }),
+      notifyProviderChatOptionsChanged: jest.fn(),
+    });
+    const services = await createClaudeWorkspaceServices(host, { commandProbe: async () => [], catalogProbe: jest.fn() });
+    const publications: Array<Promise<void>> = [];
+    const backend = new ClaudeExecutionBackend(host, {
+      publishSessionCatalog: catalog => {
+        const publication = services.publishSessionCatalog(catalog);
+        publications.push(publication);
+        return publication;
+      },
+    });
+    const storedModels = getClaudeProviderSettings(host.settings).discoveredModels;
+    sdkMock.setMockOutputStyles(['default', 'Concise', 'My Style']);
+
+    try {
+      for (let sessionIndex = 1; sessionIndex <= 2; sessionIndex += 1) {
+        const session = backend.createSession(createConfig());
+        await collectEvents(session.execute(createRequest()).events);
+        await waitFor(() => publications.length === sessionIndex);
+        await Promise.all(publications);
+        await session.dispose();
+        expect(writes).toBe(1);
+      }
+      expect(getClaudeProviderSettings(host.settings)).toMatchObject({
+        discoveredOutputStyles: ['default', 'Concise', 'My Style'],
+        discoveredModels: storedModels,
+      });
+    } finally {
+      await services.dispose();
+      await registry.dispose();
+    }
+  });
+
   it('creates a persistent session that normalizes SDK output and publishes commands', async () => {
     sdkMock.setMockSupportedCommands([
       { name: 'review', description: 'Review changes', argumentHint: '[path]' },
+      { name: 'pdf', description: 'Work with PDFs', argumentHint: '' },
     ]);
     sdkMock.setMockMessages([
       {
@@ -332,6 +504,7 @@ describe('ClaudeExecutionBackend', () => {
         subtype: 'init',
         session_id: 'native-session',
         agents: ['Explore'],
+        skills: ['documents:pdf'],
       },
       {
         type: 'stream_event',
@@ -408,6 +581,16 @@ describe('ClaudeExecutionBackend', () => {
         argumentHint: '[path]',
         content: '',
         source: 'sdk',
+        kind: 'command',
+      },
+      {
+        id: 'sdk:pdf',
+        name: 'pdf',
+        description: 'Work with PDFs',
+        argumentHint: '',
+        content: '',
+        source: 'sdk',
+        kind: 'skill',
       },
     ]);
   });
@@ -624,6 +807,41 @@ describe('ClaudeExecutionBackend', () => {
     },
   );
 
+  it.each([
+    ['/compact', '/compact'],
+    [' \t/CoMpAcT keep recent edits\nFocus on tests  ', '/compact keep recent edits\nFocus on tests'],
+  ])('compacts with only explicit instructions from %j', async (text, command) => {
+    const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+    try {
+      const events = await collectEvents(session.execute(createRequest({
+        input: [{ type: 'text', text }, { type: 'image', image: {
+          id: 'capture', name: 'capture.png', data: 'aW1hZ2U=',
+          mediaType: 'image/png', size: 5, source: 'paste',
+        } }],
+        context: { ...capturedSelections, linkedContent: { path: 'note.md' },
+          sessionReferences: [{ id: 'ref', title: 'Review', providerId: 'claude', updatedAt: 'updated', snapshotPath: '/tmp/ref.md' }],
+        },
+      })).events);
+      expect(mockBuildClaudeSDKUserMessage.mock.results[0]?.value.message.content).toBe(command);
+      expect(events.at(-1)?.type).toBe('turn_completed');
+    } finally { await session.dispose(); }
+  });
+
+  it('rejects compact without consuming history that still needs recovery', async () => {
+    const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+    const conversationHistory = [{ id: 'prior', role: 'user' as const, content: 'Remember prior context', timestamp: testDate().getTime() }];
+    try {
+      const events = await collectEvents(session.execute(createRequest({
+        input: [{ type: 'text', text: '/compact' }], conversationHistory,
+      })).events);
+      expect(events.at(-1)).toMatchObject({ type: 'execution_error', message: expect.stringContaining('normal message') });
+      expect(getEncodedPrompts()).toEqual([]);
+      await collectEvents(session.execute(createRequest({ conversationHistory })).events);
+      expect(getEncodedPrompts()[0]).toContain('Remember prior context');
+      expect(getEncodedPrompts()[0]).toContain('Hello');
+    } finally { await session.dispose(); }
+  });
+
   it('maps images and structured context without injecting legacy MCP configuration', async () => {
     sdkMock.setMockMessages([
       { type: 'result', subtype: 'success' },
@@ -647,9 +865,12 @@ describe('ClaudeExecutionBackend', () => {
         },
       ],
       context: {
+        ...capturedSelections,
+        sessionReferences: [{ id: 'conv-1-ref', title: 'Review', providerId: 'codex', updatedAt: 'updated', snapshotPath: '/tmp/claudian-sessions/ref.md' }],
         linkedContent: { path: 'note.md' },
       },
       configuration: {
+        readableRoots: ['/tmp/claudian-sessions'],
         systemInstructions: { kind: 'provider-default' },
       },
       toolPolicy: { kind: 'allow-list', names: ['Read', 'Grep'] },
@@ -661,19 +882,20 @@ describe('ClaudeExecutionBackend', () => {
         type: 'image',
         source: { type: 'base64', media_type: 'image/png', data: 'aW1hZ2U=' },
       },
-      { type: 'text', text: '@mentioned Explain this\n\n<linked_content path="note.md" />' },
+      { type: 'text', text: '@mentioned Explain this\n\n<linked_content path="note.md" />\n\n' + capturedSelectionPrompt + '\n\n<context_sessions>\n<context_session title="Review" id="conv-1-ref" provider="codex" updated="updated" path="/tmp/claudian-sessions/ref.md" />\n</context_sessions>' },
     ]);
     expect(getEncodedPrompts()).toEqual([
-      '@mentioned Explain this\n\n<linked_content path="note.md" />',
+      '@mentioned Explain this\n\n<linked_content path="note.md" />\n\n' + capturedSelectionPrompt + '\n\n<context_sessions>\n<context_session title="Review" id="conv-1-ref" provider="codex" updated="updated" path="/tmp/claudian-sessions/ref.md" />\n</context_sessions>',
     ]);
     expect(sdkMock.getLastOptions()).toEqual(expect.objectContaining({
       cwd: '/vault',
+      additionalDirectories: ['/tmp/claudian-sessions'],
       tools: ['Read', 'Grep'],
     }));
     expect(sdkMock.getLastOptions()?.mcpServers).toBeUndefined();
   });
 
-  it('passes provider-default dynamic sections through a non-snapshotted custom system prompt', async () => {
+  it('sends the provider-default prompt as a non-snapshotted custom system prompt', async () => {
     sdkMock.setMockMessages([
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
@@ -681,25 +903,14 @@ describe('ClaudeExecutionBackend', () => {
       .createSession(createConfig({ lifecycle: 'ephemeral' }));
 
     await collectEvents(session.execute(createRequest({
-      configuration: {
-        systemInstructions: {
-          dynamicSections: ['## Additional context\nRuntime guidance.'],
-          kind: 'provider-default',
-        },
-      },
+      configuration: { systemInstructions: { kind: 'provider-default' } },
     })).events);
 
-    const systemPrompt = sdkMock.getLastOptions()?.systemPrompt;
-    expect(systemPrompt).toEqual({
+    expect(sdkMock.getLastOptions()?.systemPrompt).toEqual({
       type: 'custom',
       prompt: expect.stringContaining('## Runtime Context'),
       snapshot: false,
     });
-    expect((systemPrompt as { prompt: string }).prompt).toContain(
-      '## Additional context\nRuntime guidance.',
-    );
-    expect((systemPrompt as { prompt: string }).prompt.match(/## Additional context/g))
-      .toHaveLength(1);
   });
 
   it('encodes structured context with escaped XML paths and bodies', async () => {
@@ -794,8 +1005,10 @@ describe('ClaudeExecutionBackend', () => {
     }));
   });
 
-  it('keeps the persistent runtime context window when result metadata disagrees', async () => {
-    sdkMock.setMockContextUsage({ rawMaxTokens: 1_000_000 });
+  it('uses the result model window without polling the autocompact threshold', async () => {
+    // getContextUsage reports the autocompact window, which compaction policy can set below the
+    // model window; result modelUsage reports the model window itself.
+    sdkMock.setMockContextUsage({ rawMaxTokens: 200_000 });
     sdkMock.setMockMessages([
       { type: 'system', subtype: 'init', session_id: 'session-1' },
       {
@@ -803,14 +1016,14 @@ describe('ClaudeExecutionBackend', () => {
         parent_tool_use_id: null,
         message: {
           content: [{ type: 'text', text: 'Hello' }],
-          usage: { input_tokens: 250_000 },
+          usage: { input_tokens: 100_000 },
         },
       },
       {
         type: 'result',
         subtype: 'success',
         modelUsage: {
-          'custom-model': { contextWindow: 200_000 },
+          'custom-model': { contextWindow: 1_000_000 },
         },
       },
     ], { appendResult: false });
@@ -826,249 +1039,50 @@ describe('ClaudeExecutionBackend', () => {
       },
     })).events);
 
-    expect(sdkMock.getLastResponse()?.getContextUsage).toHaveBeenCalledWith({ detail: 'summary' });
+    expect(sdkMock.getLastResponse()?.getContextUsage).not.toHaveBeenCalled();
     const usageEvents = events.filter((event) => event.type === 'usage_updated');
     expect(usageEvents.at(-1)).toEqual(expect.objectContaining({
       type: 'usage_updated',
       usage: expect.objectContaining({
         model: 'custom-model',
-        contextTokens: 250_000,
+        contextTokens: 100_000,
         contextWindow: 1_000_000,
-                percentage: 25,
+        percentage: 10,
       }),
     }));
   });
 
-  it('corrects live usage when runtime context discovery resolves after usage', async () => {
-    const contextUsage = createDeferred<{ rawMaxTokens: number }>();
-    const resultBarrier = createDeferred<null>();
-    sdkMock.setMockContextUsageImplementation(() => contextUsage.promise);
-    sdkMock.setMockMessages([
-      {
-        type: 'assistant',
-        parent_tool_use_id: null,
-        message: {
-          content: [{ type: 'text', text: 'Hello' }],
-          usage: { input_tokens: 250_000 },
+  it('reuses only the last reported model window on a persistent query', async () => {
+    const queryFactory = jest.fn((request: { prompt: AsyncIterable<sdkModule.SDKUserMessage> }) =>
+      createPromptDrivenPersistentQuery(request.prompt, (prompt) => [
+        { type: 'assistant', message: {
+          content: [{ type: 'text', text: 'Response' }], usage: { input_tokens: 100_000 },
+        } },
+        { type: 'result', subtype: 'success', modelUsage: prompt.includes('Other model')
+          ? { 'custom-model-b': { contextWindow: 200_000 } }
+          : { 'custom-model': { contextWindow: 1_000_000 } } },
+      ]));
+    jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
+      .mockResolvedValueOnce(queryFactory as never);
+    const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+    const execute = async (model: string, text: string) => {
+      const events = await collectEvents(session.execute(createRequest({
+        input: [{ type: 'text', text }],
+        configuration: {
+          systemInstructions: { kind: 'provider-default' }, model, reasoning: 'medium', permissionMode: 'ask',
         },
-      },
-      resultBarrier.promise,
-      { type: 'result', subtype: 'success' },
-    ], { appendResult: false });
-    const session = new ClaudeExecutionBackend(createHost())
-      .createSession(createConfig());
-    const collected: ProviderExecutionEvent[] = [];
-    const run = session.execute(createRequest({
-      configuration: {
-        systemInstructions: { kind: 'provider-default' },
-        model: 'custom-model',
-        reasoning: 'medium',
-        permissionMode: 'ask',
-      },
-    }));
-    const collection = (async () => {
-      for await (const event of run.events) {
-        collected.push(event);
-      }
-    })();
-
-    await waitFor(() => collected.some((event) => (
-      event.type === 'usage_updated'
-      && event.usage.contextWindow === 0
-    )));
-    contextUsage.resolve({ rawMaxTokens: 1_000_000 });
-    await waitFor(() => collected.some((event) => (
-      event.type === 'usage_updated'
-      && event.usage.contextWindow === 1_000_000
-    )));
-    resultBarrier.resolve(null);
-    await collection;
-
-    expect(collected.filter((event) => event.type === 'usage_updated').at(-1))
-      .toEqual(expect.objectContaining({
-        usage: expect.objectContaining({
-          contextWindow: 1_000_000,
-          percentage: 25,
-        }),
-      }));
-  });
-
-  it('ignores a delayed context window after the persistent model changes', async () => {
-    const staleContextUsage = createDeferred<{ rawMaxTokens: number }>();
-    const secondResultBarrier = createDeferred<null>();
-    const getContextUsage = jest.fn()
-      .mockReturnValueOnce(staleContextUsage.promise)
-      .mockResolvedValueOnce({ rawMaxTokens: 500_000 });
-    const queryFactory = jest.fn((request: {
-      prompt: AsyncIterable<sdkModule.SDKUserMessage>;
-    }) => {
-      const query = attachContextUsage(
-        createPromptDrivenPersistentQuery(request.prompt, (prompt) => (
-          prompt.includes('First model')
-            ? [
-              { type: 'system', subtype: 'init', session_id: 'session-1' },
-              {
-                type: 'assistant',
-                message: {
-                  content: [{ type: 'text', text: 'First response' }],
-                  usage: { input_tokens: 250_000 },
-                },
-              },
-              { type: 'result', subtype: 'success' },
-            ]
-            : [
-              {
-                type: 'assistant',
-                message: {
-                  content: [{ type: 'text', text: 'Second response' }],
-                  usage: { input_tokens: 250_000 },
-                },
-              },
-              secondResultBarrier.promise,
-              { type: 'result', subtype: 'success' },
-            ]
-        )),
-        getContextUsage,
-      );
-      return query;
-    });
-    jest.spyOn(
-      await import('@/providers/claude/loadClaudeAgentSDK'),
-      'loadClaudeAgentQuery',
-    ).mockResolvedValueOnce(queryFactory as never);
-    const session = new ClaudeExecutionBackend(createHost())
-      .createSession(createConfig());
-
-    await collectEvents(session.execute(createRequest({
-      input: [{ type: 'text', text: 'First model' }],
-      configuration: {
-        systemInstructions: { kind: 'provider-default' },
-        model: 'custom-model-a',
-        reasoning: 'medium',
-        permissionMode: 'ask',
-      },
-    })).events);
-    const secondEvents: ProviderExecutionEvent[] = [];
-    const secondRun = session.execute(createRequest({
-      input: [{ type: 'text', text: 'Second model' }],
-      configuration: {
-        systemInstructions: { kind: 'provider-default' },
-        model: 'custom-model-b',
-        reasoning: 'medium',
-        permissionMode: 'ask',
-      },
-    }));
-    const secondCollection = (async () => {
-      for await (const event of secondRun.events) {
-        secondEvents.push(event);
-      }
-    })();
-
-    await waitFor(() => secondEvents.some((event) => (
-      event.type === 'usage_updated'
-      && event.usage.contextWindow === 500_000
-    )));
-    staleContextUsage.resolve({ rawMaxTokens: 1_000_000 });
-    await new Promise(resolve => setImmediate(resolve));
-
-    expect(secondEvents).not.toContainEqual(expect.objectContaining({
-      type: 'usage_updated',
-      usage: expect.objectContaining({ contextWindow: 1_000_000 }),
-    }));
-    secondResultBarrier.resolve(null);
-    await secondCollection;
-    expect(getContextUsage).toHaveBeenCalledTimes(2);
-    await session.dispose();
-  });
-
-  it('ignores context discovery from a replaced persistent query', async () => {
-    const staleContextUsage = createDeferred<{ rawMaxTokens: number }>();
-    const replacementResultBarrier = createDeferred<null>();
-    const getStaleContextUsage = jest.fn().mockReturnValue(staleContextUsage.promise);
-    const getReplacementContextUsage = jest.fn().mockResolvedValue({ rawMaxTokens: 500_000 });
-    const staleFactory = jest.fn((request: {
-      prompt: AsyncIterable<sdkModule.SDKUserMessage>;
-    }) => {
-      const staleQuery = attachContextUsage(
-        createPromptDrivenPersistentQuery(request.prompt, () => [
-          { type: 'system', subtype: 'init', session_id: 'session-1' },
-          { type: 'result', subtype: 'success' },
-        ]),
-        getStaleContextUsage,
-      );
-      return staleQuery;
-    });
-    const replacementFactory = jest.fn((request: {
-      prompt: AsyncIterable<sdkModule.SDKUserMessage>;
-    }) => {
-      const replacementQuery = attachContextUsage(
-        createPromptDrivenPersistentQuery(request.prompt, () => [
-          { type: 'system', subtype: 'init', session_id: 'session-2' },
-          {
-            type: 'assistant',
-            message: {
-              content: [{ type: 'text', text: 'Replacement response' }],
-              usage: { input_tokens: 250_000 },
-            },
-          },
-          replacementResultBarrier.promise,
-          { type: 'result', subtype: 'success' },
-        ]),
-        getReplacementContextUsage,
-      );
-      return replacementQuery;
-    });
-    jest.spyOn(
-      await import('@/providers/claude/loadClaudeAgentSDK'),
-      'loadClaudeAgentQuery',
-    )
-      .mockResolvedValueOnce(staleFactory as never)
-      .mockResolvedValueOnce(replacementFactory as never);
-    const session = new ClaudeExecutionBackend(createHost())
-      .createSession(createConfig());
-
-    await collectEvents(session.execute(createRequest({
-      configuration: {
-        systemInstructions: { kind: 'provider-default' },
-        model: 'custom-model',
-        reasoning: 'medium',
-        permissionMode: 'ask',
-      },
-    })).events);
-    const replacementEvents: ProviderExecutionEvent[] = [];
-    const replacementRun = session.execute(createRequest({
-      configuration: {
-        systemInstructions: {
-          kind: 'explicit',
-          instructions: 'Use replacement instructions.',
-        },
-        model: 'custom-model',
-        reasoning: 'medium',
-        permissionMode: 'ask',
-      },
-    }));
-    const replacementCollection = (async () => {
-      for await (const event of replacementRun.events) {
-        replacementEvents.push(event);
-      }
-    })();
-
-    await waitFor(() => replacementEvents.some((event) => (
-      event.type === 'usage_updated'
-      && event.usage.contextWindow === 500_000
-    )));
-    staleContextUsage.resolve({ rawMaxTokens: 1_000_000 });
-    await new Promise(resolve => setImmediate(resolve));
-
-    expect(replacementEvents).not.toContainEqual(expect.objectContaining({
-      type: 'usage_updated',
-      usage: expect.objectContaining({ contextWindow: 1_000_000 }),
-    }));
-    replacementResultBarrier.resolve(null);
-    await replacementCollection;
-    expect(getStaleContextUsage).toHaveBeenCalledTimes(1);
-    expect(getReplacementContextUsage).toHaveBeenCalledTimes(1);
-    await session.dispose();
+      })).events);
+      return events.filter(event => event.type === 'usage_updated').map(event => event.usage.contextWindow);
+    };
+    try {
+      expect(await execute('custom-model', 'First turn')).toEqual([0, 1_000_000]);
+      expect(await execute('custom-model', 'Same model')).toEqual([1_000_000]);
+      expect(await execute('custom-model-b', 'Other model')).toEqual([0, 200_000]);
+      expect(await execute('custom-model', 'Return to first model')).toEqual([0, 1_000_000]);
+      expect(queryFactory).toHaveBeenCalledTimes(1);
+    } finally {
+      await session.dispose();
+    }
   });
 
   it('corrects custom-model usage from result model metadata', async () => {
@@ -1207,24 +1221,38 @@ describe('ClaudeExecutionBackend', () => {
     expect(interactionPort.requestApproval).not.toHaveBeenCalled();
   });
 
-  it('uses native output styles at launch and updates them on the same session', async () => {
+  it('uses native output styles at launch and updates or clears them on the same session', async () => {
     sdkMock.setMockMessages([
       { type: 'system', subtype: 'init', session_id: 'session-1' },
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
     const host = createHost();
-    host.settings.providerConfigs = { claude: { ...claudeCatalogFixture(['claude-sonnet-4-5'], ['low', 'medium', 'high']), responseStyle: 'Concise' } };
+    const withStyle = (outputStyle: string | null) => ({
+      claude: { ...claudeCatalogFixture(['claude-sonnet-4-5'], ['low', 'medium', 'high']), outputStyle },
+    });
+    host.settings.providerConfigs = withStyle('Concise');
     const session = new ClaudeExecutionBackend(host).createSession(createConfig());
 
     await collectEvents(session.execute(createRequest()).events);
     expect(sdkMock.getLastOptions()?.settings).toEqual({ outputStyle: 'Concise' });
     const query = sdkMock.getLastResponse();
-    for (const responseStyle of ['Default', 'Concise']) {
-      host.settings.providerConfigs = { claude: { ...claudeCatalogFixture(['claude-sonnet-4-5'], ['low', 'medium', 'high']), responseStyle } };
+    for (const outputStyle of [null, 'My Style']) {
+      host.settings.providerConfigs = withStyle(outputStyle);
       await collectEvents(session.execute(createRequest()).events);
       expect(sdkMock.getLastResponse()).toBe(query);
-      expect(query?.applyFlagSettings).toHaveBeenLastCalledWith({ outputStyle: responseStyle });
+      expect(query?.applyFlagSettings).toHaveBeenLastCalledWith({ outputStyle });
     }
+    await session.dispose();
+  });
+
+  it('leaves Claude Code\'s own output style in force when none is chosen', async () => {
+    const host = createHost();
+    host.settings.providerConfigs = {
+      claude: { ...claudeCatalogFixture(['claude-sonnet-4-5'], ['low', 'medium', 'high']), outputStyle: null },
+    };
+    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    await collectEvents(session.execute(createRequest()).events);
+    expect(sdkMock.getLastOptions()).not.toHaveProperty('settings');
     await session.dispose();
   });
 
@@ -1323,23 +1351,31 @@ describe('ClaudeExecutionBackend', () => {
     await session.dispose();
   });
 
-  it('switches into auto safe mode on the same persistent query', async () => {
+  it('launches and switches each permission mode on the same persistent query', async () => {
     sdkMock.setMockMessages([
       { type: 'system', subtype: 'init', session_id: 'session-1' },
       { type: 'result', subtype: 'success' },
     ], { appendResult: false });
     const host = createHost();
-    host.settings.providerConfigs = { claude: { ...claudeCatalogFixture(['claude-sonnet-4-5'], ['low', 'medium', 'high']), safeMode: 'default' } };
+    host.settings.providerConfigs = { claude: claudeCatalogFixture(['claude-sonnet-4-5'], ['low', 'medium', 'high']) };
     const session = new ClaudeExecutionBackend(host)
       .createSession(createConfig());
+    const request = createRequest();
+    const execute = (permissionMode: string) => collectEvents(session.execute({
+      ...request, configuration: { ...request.configuration, permissionMode },
+    }).events);
 
-    await collectEvents(session.execute(createRequest()).events);
+    await execute('manual');
+    expect(sdkMock.getLastOptions()?.permissionMode).toBe('default');
     const query = sdkMock.getLastResponse();
-    host.settings.providerConfigs = { claude: { ...claudeCatalogFixture(['claude-sonnet-4-5'], ['low', 'medium', 'high']), safeMode: 'auto' } };
-    await collectEvents(session.execute(createRequest()).events);
+    for (const [mode, native] of [
+      ['auto', 'auto'], ['acceptEdits', 'acceptEdits'], ['yolo', 'bypassPermissions'], ['manual', 'default'],
+    ]) {
+      await execute(mode);
+      expect(query?.setPermissionMode).toHaveBeenLastCalledWith(native);
+    }
 
     expect(sdkMock.getQueryCallCount()).toBe(1);
-    expect(query?.setPermissionMode).toHaveBeenLastCalledWith('auto');
     await session.dispose();
   });
 
@@ -1794,7 +1830,8 @@ describe('ClaudeExecutionBackend', () => {
           '/vault',
           missingSessionId,
         );
-        return resolution === 'delete' ? 'deleted' : resolution === 'preserve'
+        Object.assign(current, resolution.changes);
+        return resolution.outcome === 'delete' ? 'deleted' : resolution.outcome === 'preserve'
           ? 'preserved'
           : 'reset';
       },
@@ -1916,7 +1953,6 @@ describe('ClaudeExecutionBackend', () => {
       'user-1',
       { dryRun: true },
     );
-    expect('steer' in session).toBe(false);
 
     const withoutSeed = new ClaudeExecutionBackend(createHost())
       .createSession(createConfig());
@@ -1993,6 +2029,7 @@ describe('ClaudeExecutionBackend', () => {
         ...(phase === 'background' ? [{ type: 'assistant', message: { content: [{ type: 'text', text: 'Automatic work' }] } }] : []),
         { type: 'system', subtype: 'task_notification', session_id: 'session-1', task_id: 'task-1',
           status: 'completed', summary: 'Task finished' },
+        consumedTaskNotification('task-1'),
         pause.promise,
         { type: 'result', subtype: 'success' },
       ]]);
@@ -2015,6 +2052,48 @@ describe('ClaudeExecutionBackend', () => {
       }
     },
   );
+
+  it('requests progress summaries and publishes subagent progress while the turn is running', async () => {
+    const pause = createDeferred<unknown>();
+    const query = createScriptedPersistentQuery([[
+      { type: 'system', subtype: 'init', session_id: 'session-1' },
+      { type: 'system', subtype: 'task_progress', session_id: 'session-1', task_id: 'agent-1',
+        tool_use_id: 'task-1', description: 'Research', last_tool_name: 'Grep', summary: 'Reading the auth module',
+        usage: { total_tokens: 1200, tool_uses: 3, duration_ms: 4000 } },
+      { type: 'system', subtype: 'task_progress', session_id: 'session-1', task_id: 'bash-1',
+        description: 'Unowned', usage: { total_tokens: 0, tool_uses: 0, duration_ms: 0 } },
+      pause.promise,
+      { type: 'result', subtype: 'success' },
+    ]]);
+    let launchOptions: Record<string, unknown> | undefined;
+    jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
+      .mockResolvedValueOnce(((params: { options?: Record<string, unknown> }) => {
+        launchOptions = params.options;
+        return query;
+      }) as never);
+    const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+    const events: ProviderSessionEvent[] = [];
+    session.onEvent(event => events.push(event));
+    const requested = collectEvents(session.execute(createRequest()).events);
+    try {
+      await waitFor(() => events.some(event => event.type === 'subagent_progress'));
+      expect(launchOptions).toMatchObject({ agentProgressSummaries: true });
+      expect(events.filter(event => event.type === 'subagent_progress')).toEqual([
+        expect.objectContaining({
+          scope: expect.objectContaining({ kind: 'session' }),
+          progress: {
+            toolCallId: 'task-1', summary: 'Reading the auth module', lastToolName: 'Grep',
+            toolUses: 3, totalTokens: 1200, durationMs: 4000,
+          },
+        }),
+      ]);
+    } finally {
+      pause.resolve(null);
+      await requested;
+      await query.finished;
+      await session.dispose();
+    }
+  });
 
   it.each(['before-tool', 'during-input'] as const)(
     'keeps an automatic native message and tool round together when input arrives %s', async (phase) => {
@@ -2049,6 +2128,7 @@ describe('ClaudeExecutionBackend', () => {
         ] } },
         { type: 'system', subtype: 'task_notification', session_id: 'session-1', task_id: 'task-1',
           status: 'completed', output_file: '/tmp/task-output', summary: 'Task finished' },
+        consumedTaskNotification('task-1'),
         { type: 'user', message: { content: [
           { type: 'tool_result', tool_use_id: 'read-background', content: 'First output' },
           { type: 'tool_result', tool_use_id: 'read-second', content: 'Second output' },
@@ -2449,7 +2529,7 @@ describe('ClaudeExecutionBackend', () => {
     const eventsPromise = collectEvents(run.events);
 
     expect(() => session.execute(createRequest())).toThrow(
-      'Claude execution session already has an active run',
+      'Claude Code execution session already has an active run',
     );
     await waitFor(() => query.supportedCommands.mock.calls.length > 0);
     run.cancel();
@@ -2464,7 +2544,7 @@ describe('ClaudeExecutionBackend', () => {
     await session.dispose();
     await session.dispose();
     expect(() => session.execute(createRequest())).toThrow(
-      'Claude execution session is disposed',
+      'Claude Code execution session is disposed',
     );
   });
 
@@ -2970,6 +3050,249 @@ describe('ClaudeExecutionBackend', () => {
   });
 });
 
+describe('ClaudeExecutionSession steering', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  async function startSteerableSession(
+    script: (
+      nextInput: () => Promise<sdkModule.SDKUserMessage>,
+      keepOpen: Promise<unknown>,
+    ) => AsyncGenerator<unknown>,
+    config: Partial<ProviderSessionConfig> = {},
+  ) {
+    const keepOpen = createDeferred<unknown>();
+    let query: ScriptedQuery | null = null;
+    const loadQuery = jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
+      .mockResolvedValueOnce((({ prompt }: { prompt: AsyncIterable<sdkModule.SDKUserMessage> }) => {
+        query = createInputDrivenQuery(prompt, nextInput => script(nextInput, keepOpen.promise));
+        return query;
+      }) as never);
+    const backendSession = new ClaudeExecutionBackend(createHost()).createSession(createConfig(config));
+    const session = Object.assign(backendSession, {
+      dispose: async () => {
+        keepOpen.resolve(null);
+        await ClaudeExecutionSession.prototype.dispose.call(backendSession);
+      },
+    });
+    const sessionEvents: ProviderSessionEvent[] = [];
+    session.onEvent(event => sessionEvents.push(event));
+    const run = session.execute(createRequest({ input: [{ type: 'text', text: 'Refactor the parser' }] }));
+    const events: ProviderExecutionEvent[] = [];
+    const done = (async () => {
+      for await (const event of run.events) events.push(event);
+    })();
+    return { session, run, events, done, sessionEvents, loadQuery, getQuery: () => query };
+  }
+
+  function steerRequest(text: string): ProviderExecutionRequest {
+    return createRequest({ input: [{ type: 'text', text }] });
+  }
+
+  it('folds a steer into the running native turn at its replay acknowledgement', async () => {
+    const steerReceived = createDeferred<sdkModule.SDKUserMessage>();
+    const { session, events, done, sessionEvents } = await startSteerableSession(async function* (nextInput, keepOpen) {
+      const prompt = await nextInput();
+      yield { type: 'system', subtype: 'init', session_id: 'session-1' };
+      yield replayOf(prompt);
+      yield assistantText('assistant-1', 'Reading the parser.');
+      const steer = await nextInput();
+      steerReceived.resolve(steer);
+      yield replayOf(steer);
+      yield assistantText('assistant-2', 'Switching to tabs.');
+      yield { type: 'result', subtype: 'success', user_message_uuids: [prompt.uuid, steer.uuid], queued_turn_count: 0 };
+      await keepOpen;
+    });
+    try {
+      await waitFor(() => events.some(event => event.type === 'text_delta'));
+      await expect(session.steer(steerRequest('Use tabs instead'))).resolves.toBe(true);
+      await done;
+
+      const steer = await steerReceived.promise;
+      expect(steer.priority).toBe('next');
+      expect(getNativePromptText(steer)).toBe('Use tabs instead');
+      const boundaryIndex = events.findIndex(event => (
+        event.type === 'user_message_started' && event.nativeUserMessageId === steer.uuid
+      ));
+      expect(events[boundaryIndex]).toMatchObject({ content: 'Use tabs instead' });
+      expect(events.findIndex(event => event.type === 'text_delta' && event.text === 'Switching to tabs.'))
+        .toBeGreaterThan(boundaryIndex);
+      expect(events.slice(boundaryIndex + 1)).toContainEqual(expect.objectContaining({
+        type: 'assistant_message_started',
+        nativeAssistantId: 'assistant-2',
+      }));
+      expect(events.filter(event => event.type === 'turn_completed')).toHaveLength(1);
+      expect(sessionEvents.some(event => event.type === 'background_turn_started')).toBe(false);
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  it('keeps the run open when Claude runs a late steer as its next native turn', async () => {
+    const { session, events, done, sessionEvents } = await startSteerableSession(async function* (nextInput, keepOpen) {
+      const prompt = await nextInput();
+      yield { type: 'system', subtype: 'init', session_id: 'session-1' };
+      yield replayOf(prompt);
+      yield assistantText('assistant-1', 'Parser refactored.');
+      const steer = await nextInput();
+      yield { type: 'result', subtype: 'success', user_message_uuids: [prompt.uuid], queued_turn_count: 1 };
+      yield replayOf(steer);
+      yield { type: 'stream_event', parent_tool_use_id: null, user_message_uuid: steer.uuid,
+        event: { type: 'message_start', message: { id: 'message-2', usage: {} } } };
+      yield assistantText('assistant-2', 'Also added tests.');
+      yield { type: 'result', subtype: 'success', user_message_uuids: [steer.uuid], queued_turn_count: 0 };
+      await keepOpen;
+    });
+    try {
+      await waitFor(() => events.some(event => event.type === 'text_delta'));
+      await expect(session.steer(steerRequest('Add tests too'))).resolves.toBe(true);
+      await done;
+
+      expect(events.filter(event => event.type === 'text_delta').map(event => event.text))
+        .toEqual(['Parser refactored.', 'Also added tests.']);
+      expect(events.filter(event => event.type === 'turn_completed')).toEqual([
+        expect.objectContaining({ nativeAssistantId: 'assistant-2' }),
+      ]);
+      expect(sessionEvents.some(event => event.type === 'background_turn_started')).toBe(false);
+      expect(session.getStatus()).toBe('idle');
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  it('accepts a steer Claude consumed without replaying it', async () => {
+    const { session, events, done } = await startSteerableSession(async function* (nextInput, keepOpen) {
+      const prompt = await nextInput();
+      yield { type: 'system', subtype: 'init', session_id: 'session-1' };
+      yield assistantText('assistant-1', 'Working.');
+      const steer = await nextInput();
+      yield { type: 'result', subtype: 'success', user_message_uuids: [prompt.uuid, steer.uuid], queued_turn_count: 0 };
+      await keepOpen;
+    });
+    try {
+      await waitFor(() => events.some(event => event.type === 'text_delta'));
+      await expect(session.steer(steerRequest('Be brief'))).resolves.toBe(true);
+      await done;
+      expect(events.at(-1)?.type).toBe('turn_completed');
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  it('rejects a handed-off steer whose delivery ends unknown', async () => {
+    const { session, events, done } = await startSteerableSession(async function* (nextInput, keepOpen) {
+      const prompt = await nextInput();
+      yield { type: 'system', subtype: 'init', session_id: 'session-1' };
+      yield assistantText('assistant-1', 'Working.');
+      await nextInput();
+      yield { type: 'result', subtype: 'success', user_message_uuids: [prompt.uuid], queued_turn_count: 0 };
+      await keepOpen;
+    });
+    try {
+      await waitFor(() => events.some(event => event.type === 'text_delta'));
+      await expect(session.steer(steerRequest('Be brief'))).rejects.toThrow('before the steer was delivered');
+      await done;
+      expect(events.at(-1)?.type).toBe('turn_completed');
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  it('recalls an undelivered steer on cancel by replacing the native process', async () => {
+    const retryQuery = createScriptedPersistentQuery([[
+      { type: 'system', subtype: 'init', session_id: 'session-1' },
+      assistantText('assistant-retry', 'Fresh process.'),
+      { type: 'result', subtype: 'success' },
+    ]]);
+    const steerQueued = createDeferred<null>();
+    const { session, run, events, done, loadQuery, getQuery } = await startSteerableSession(async function* (nextInput, keepOpen) {
+      await nextInput();
+      yield { type: 'system', subtype: 'init', session_id: 'session-1' };
+      yield assistantText('assistant-1', 'Running a long command.');
+      await nextInput();
+      steerQueued.resolve(null);
+      await keepOpen;
+    });
+    loadQuery.mockResolvedValueOnce((() => retryQuery) as never);
+    try {
+      await waitFor(() => events.some(event => event.type === 'text_delta'));
+      const steer = session.steer(steerRequest('Stop after this'));
+      await steerQueued.promise;
+      run.cancel();
+      await expect(steer).rejects.toThrow('before the steer was delivered');
+      await done;
+      expect(events.at(-1)?.type).toBe('cancelled');
+
+      const retryEvents = await collectEvents(session.execute(createRequest()).events);
+      expect(loadQuery).toHaveBeenCalledTimes(2);
+      expect(getQuery()?.interrupt).toHaveBeenCalled();
+      expect(retryEvents.at(-1)?.type).toBe('turn_completed');
+    } finally {
+      await session.dispose();
+    }
+  });
+
+  it('declines steering without a live persistent native turn', async () => {
+    const idle = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+    await expect(idle.steer(steerRequest('Too early'))).resolves.toBe(false);
+    await idle.dispose();
+
+    const { session, events, done } = await startSteerableSession(async function* (nextInput, keepOpen) {
+      await nextInput();
+      yield { type: 'system', subtype: 'init', session_id: 'session-1' };
+      yield assistantText('assistant-1', 'Working.');
+      yield { type: 'result', subtype: 'success' };
+      await keepOpen;
+    }, { lifecycle: 'ephemeral', nativePersistence: 'enabled' });
+    try {
+      await waitFor(() => events.some(event => event.type === 'text_delta'));
+      const accepted = await session.steer(steerRequest('Ephemeral'));
+      await done;
+      expect(accepted).toBe(false);
+    } finally {
+      await session.dispose();
+    }
+  });
+});
+
+function replayOf(message: sdkModule.SDKUserMessage): unknown {
+  return { ...message, isReplay: true, session_id: 'session-1' };
+}
+
+function assistantText(uuid: string, text: string): unknown {
+  return {
+    type: 'assistant',
+    uuid,
+    parent_tool_use_id: null,
+    message: { id: `message-${uuid}`, content: [{ type: 'text', text }] },
+  };
+}
+
+function createInputDrivenQuery(
+  prompt: AsyncIterable<sdkModule.SDKUserMessage>,
+  script: (nextInput: () => Promise<sdkModule.SDKUserMessage>) => AsyncGenerator<unknown>,
+): ScriptedQuery {
+  let resolveFinished!: () => void;
+  const finished = new Promise<void>((resolve) => {
+    resolveFinished = resolve;
+  });
+  const input = prompt[Symbol.asyncIterator]();
+  const nextInput = async () => {
+    const next = await input.next();
+    if (next.done) throw new Error('Native input closed');
+    return next.value;
+  };
+  const query = (async function* () {
+    try {
+      yield* script(nextInput);
+    } finally {
+      resolveFinished();
+    }
+  })();
+  return attachQueryMethods(query, finished);
+}
+
 let deferredRelease: (() => void) | null = null;
 
 function deferredMessage(): Promise<null> {
@@ -3113,17 +3436,6 @@ type ScriptedQuery = AsyncGenerator<unknown> & {
   finished: Promise<void>;
 };
 
-type ContextAwareScriptedQuery = ScriptedQuery & {
-  getContextUsage: jest.Mock;
-};
-
-function attachContextUsage(
-  query: ScriptedQuery,
-  getContextUsage: jest.Mock,
-): ContextAwareScriptedQuery {
-  return Object.assign(query, { getContextUsage });
-}
-
 function attachQueryMethods(
   query: AsyncGenerator<unknown>,
   finished: Promise<void>,
@@ -3199,6 +3511,7 @@ it.each([false, true])('anchors session notifications after emitted events with 
     { type: 'assistant', uuid: 'before-checkpoint', message: { id: 'before', content: [{ type: 'text', text: 'Before notification' }] } },
     ...(completed ? [{ type: 'result', subtype: 'success' }] : []),
     { type: 'system', subtype: 'task_notification', task_id: 'task', session_id: 'session-1', status: 'completed', summary: 'Task finished', uuid: 'notification' },
+    consumedTaskNotification(),
     ...(!completed ? [{ type: 'result', subtype: 'success' }] : []),
     keepOpen.promise,
   ]]);
@@ -3229,6 +3542,7 @@ it.each([false, true])('anchors notifications after automatic events with native
     { type: 'assistant', uuid: 'automatic-checkpoint', message: { id: 'automatic', content: [{ type: 'text', text: 'Automatic answer' }] } },
     ...(completed ? [{ type: 'result', subtype: 'success' }] : []),
     { type: 'system', subtype: 'task_notification', task_id: 'task', session_id: 'session-1', status: 'completed', summary: 'Task finished', uuid: 'notification' },
+    consumedTaskNotification(),
     ...(!completed ? [{ type: 'result', subtype: 'success' }] : []),
     keepOpen.promise,
   ]]);
@@ -3248,4 +3562,239 @@ it.each([false, true])('anchors notifications after automatic events with native
     await session.dispose();
     jest.restoreAllMocks();
   }
+});
+
+it.each(['mid-turn', 'next-turn-echo', 'next-turn-no-echo'])('places a consumed task notification at its native boundary (%s)', async delivery => {
+  const midTurn = delivery === 'mid-turn';
+  const historyDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'claudian-notification-order-'));
+  const completed = createDeferred<unknown>();
+  const keepOpen = createDeferred<unknown>();
+  const notification = '<task-notification><task-id>task</task-id><status>completed</status><summary>Task finished</summary></task-notification>';
+  const answer = { type: 'assistant', uuid: 'answer', message: { id: 'answer', content: [{ type: 'text', text: 'Requested answer' }] } };
+  const consumed = { type: 'user', uuid: 'consumed', parent_tool_use_id: null, isSynthetic: true,
+    ...(midTurn ? { isReplay: true } : {}), message: { role: 'user', content: notification } };
+  const query = createScriptedPersistentQuery([[
+    { type: 'system', subtype: 'init', session_id: 'session-1' },
+    { type: 'system', subtype: 'task_notification', session_id: 'session-1', task_id: 'task', status: 'completed', summary: 'Task finished' },
+    completed.promise,
+    ...(midTurn ? [consumed, answer] : [answer]),
+    { type: 'result', subtype: 'success' },
+    ...(!midTurn ? [
+      // The real late trace completes the child's Bash after the requested result.
+      { type: 'user', parent_tool_use_id: 'async-agent', message: { content: [{ type: 'tool_result', tool_use_id: 'child-bash', content: '(Bash completed with no output)' }] } },
+      { type: 'system', subtype: 'init', session_id: 'session-1' },
+      ...(delivery === 'next-turn-echo' ? [consumed] : []),
+      { type: 'stream_event', parent_tool_use_id: null, event: { type: 'message_start', message: { id: 'followup', usage: {} } } },
+      { type: 'assistant', message: { id: 'followup', content: [{ type: 'text', text: 'Automatic follow-up' }] } },
+      { type: 'result', subtype: 'success' }] : []),
+    keepOpen.promise,
+  ]]);
+  jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
+    .mockResolvedValueOnce((() => query) as never);
+  const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+  const sessionEvents: ProviderSessionEvent[] = [];
+  const order: string[] = [];
+  session.onEvent(event => {
+    sessionEvents.push(event);
+    if (event.type === 'task_notification') order.push(event.content);
+    if (event.type === 'text_delta') order.push(event.text);
+  });
+  const requested = (async () => {
+    for await (const event of session.execute(createRequest()).events) {
+      if (event.type === 'text_delta') order.push(event.text);
+    }
+  })();
+  try {
+    await waitFor(() => sessionEvents.some(event => event.type === 'async_subagent_completed'));
+    expect(sessionEvents.filter(event => event.type === 'task_notification')).toEqual([]);
+    completed.resolve(null);
+    await requested;
+    await waitFor(() => sessionEvents.some(event => event.type === 'task_notification'));
+    if (!midTurn) await waitFor(() => sessionEvents.some(event => event.type === 'background_turn_completed'));
+    expect(order).toEqual(midTurn ? ['Task finished', 'Requested answer']
+      : ['Requested answer', 'Task finished', 'Automatic follow-up']);
+    // Native JSONL records consumption as a queued attachment mid-turn, or a
+    // user message starting the automatic turn. It never records the SDK edge.
+    const historyNotification = midTurn
+      ? { type: 'attachment', attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: notification } }
+      : { type: 'user', message: { content: notification } };
+    const transcript = [
+      { type: 'user', message: { content: 'Hello' } },
+      ...(midTurn ? [historyNotification, answer] : [answer, historyNotification,
+        { type: 'assistant', message: { content: [{ type: 'text', text: 'Automatic follow-up' }] } }]),
+    ].map((entry, index) => ({ ...entry, uuid: `entry-${index}`, parentUuid: index ? `entry-${index - 1}` : null,
+      timestamp: testTime({ seconds: index }) }));
+    const historyPath = path.join(historyDirectory, 'session.jsonl');
+    await fs.writeFile(historyPath, transcript.map(entry => JSON.stringify(entry)).join('\n'));
+    const replay = await historyStore.loadSDKSessionMessages('/vault', 'session-1', undefined, historyPath);
+    expect(replay.error).toBeUndefined();
+    const replayOrder = replay.messages.filter(message => message.role === 'assistant')
+      .flatMap(message => message.contentBlocks ?? [])
+      .flatMap(block => block.type === 'text' || block.type === 'task_notification' ? [block.content] : []);
+    expect(order).toEqual(replayOrder);
+
+    expect(sessionEvents.filter(event => event.type === 'task_notification')).toHaveLength(1);
+  } finally {
+    completed.resolve(null); keepOpen.resolve(null);
+    await requested; await session.dispose(); jest.restoreAllMocks();
+    await fs.rm(historyDirectory, { recursive: true, force: true });
+  }
+});
+
+function consumedTaskNotification(taskId = 'task') {
+  return { type: 'user', uuid: 'notification-consumed', parent_tool_use_id: null, isReplay: true, isSynthetic: true,
+    message: { role: 'user', content: `<task-notification><task-id>${taskId}</task-id><status>completed</status><summary>Task finished</summary></task-notification>` } };
+}
+
+it.each([
+  { name: 'foreground', background: false, expected: false },
+  { name: 'background transition', background: false, transition: true, expected: true },
+  { name: 'background', background: true, expected: true },
+  { name: 'ambient', background: true, skip: true, expected: false },
+  { name: 'replacement query', background: true, replacement: true, expected: false },
+  { name: 'interrupt with a surviving queue', background: true, cancel: true, expected: true },
+])('filters queued completion presentation for $name', async scenario => {
+  const session = new ClaudeExecutionSession(createHost(), createConfig());
+  const events: ProviderSessionEvent[] = [];
+  session.onEvent(event => events.push(event));
+  try {
+    if (scenario.cancel) await session.handleNativeMessage({ type: 'assistant', message: { id: 'before', content: [{ type: 'text', text: 'Before cancellation' }] } } as any, 1);
+    await session.handleNativeMessage({ type: 'system', subtype: 'task_started', task_id: 'task', is_backgrounded: scenario.background } as any, 1);
+    if (scenario.transition) await session.handleNativeMessage({ type: 'system', subtype: 'task_updated', task_id: 'task', patch: { is_backgrounded: true } } as any, 1);
+    await session.handleNativeMessage({ type: 'system', subtype: 'task_notification', session_id: 'session-1',
+      task_id: 'task', status: 'completed', summary: 'Task result', skip_transcript: scenario.skip } as any, 1);
+    expect(events.filter(event => event.type === 'task_notification')).toHaveLength(0);
+    expect(events.filter(event => event.type === 'async_subagent_completed')).toHaveLength(1);
+    if (scenario.cancel) {
+      session.cancel();
+      await session.handleNativeMessage({ type: 'result', subtype: 'success' } as any, 1);
+    }
+    if (scenario.replacement) session.handleNativeQueryOpened({} as sdkModule.Query);
+    await session.handleNativeMessage({ type: 'system', subtype: 'init', session_id: 'session-1' } as any, scenario.replacement ? 2 : 1);
+    await session.handleNativeMessage({ type: 'assistant', message: { id: 'after', content: [{ type: 'text', text: 'Automatic output' }] } } as any, scenario.replacement ? 2 : 1);
+    const expected = scenario.expected ? ['Task result'] : [];
+    expect(events.filter(event => event.type === 'task_notification').map(event => event.content)).toEqual(expected);
+  } finally { await session.dispose(); }
+});
+
+it('keeps task notification state across requested turns of one persistent query', async () => {
+  let sends = 0;
+  jest.spyOn(await import('@/providers/claude/loadClaudeAgentSDK'), 'loadClaudeAgentQuery')
+    .mockResolvedValueOnce(((params: { prompt: AsyncIterable<sdkModule.SDKUserMessage> }) =>
+      createPromptDrivenPersistentQuery(params.prompt, () => ++sends === 1 ? [
+        { type: 'system', subtype: 'init', session_id: 'session-1' },
+        { type: 'system', subtype: 'task_started', task_id: 'foreground', is_backgrounded: false },
+        { type: 'system', subtype: 'task_started', task_id: 'background', is_backgrounded: true },
+        { type: 'result', subtype: 'success' },
+      ] : [
+        { type: 'system', subtype: 'init', session_id: 'session-1' },
+        { type: 'system', subtype: 'task_notification', session_id: 'session-1', task_id: 'foreground', status: 'completed', summary: 'Foreground result' },
+        { type: 'system', subtype: 'task_notification', session_id: 'session-1', task_id: 'background', status: 'completed', summary: 'Background result' },
+        { type: 'assistant', message: { id: 'requested', content: [{ type: 'text', text: 'Second requested answer' }] } },
+        { type: 'result', subtype: 'success' },
+        { type: 'system', subtype: 'init', session_id: 'session-1' },
+        { type: 'assistant', message: { id: 'automatic', content: [{ type: 'text', text: 'Automatic answer' }] } },
+        { type: 'result', subtype: 'success' },
+      ])) as never);
+  const session = new ClaudeExecutionBackend(createHost()).createSession(createConfig());
+  const events: ProviderSessionEvent[] = [];
+  session.onEvent(event => events.push(event));
+  try {
+    await collectEvents(session.execute(createRequest()).events);
+    await collectEvents(session.execute(createRequest()).events);
+    await waitFor(() => events.some(event => event.type === 'background_turn_completed'));
+    expect(events.filter(event => event.type === 'task_notification')).toEqual([
+      expect.objectContaining({ content: 'Background result' }),
+    ]);
+  } finally { await session.dispose(); jest.restoreAllMocks(); }
+});
+
+it('keeps a completion during automatic request startup for the following turn', async () => {
+  const session = new ClaudeExecutionSession(createHost(), createConfig());
+  const order: string[] = [];
+  session.onEvent(event => {
+    if (event.type === 'task_notification') order.push(event.content);
+    if (event.type === 'text_delta') order.push(event.text);
+  });
+  try {
+    // Captured SDK order: A completes, automatic init, B completes, first A chunk.
+    for (const message of [
+      { type: 'system', subtype: 'task_notification', session_id: 'session-1', task_id: 'a', status: 'completed', summary: 'FIRST_DONE' },
+      { type: 'system', subtype: 'init', session_id: 'session-1' },
+      { type: 'system', subtype: 'task_notification', session_id: 'session-1', task_id: 'b', status: 'completed', summary: 'SECOND_DONE' },
+      { type: 'stream_event', parent_tool_use_id: null, event: { type: 'message_start', message: { id: 'first', usage: {} } } },
+      { type: 'assistant', message: { id: 'first', content: [{ type: 'text', text: 'First automatic answer' }] } },
+      { type: 'result', subtype: 'success' },
+      { type: 'system', subtype: 'init', session_id: 'session-1' },
+      { type: 'assistant', message: { id: 'second', content: [{ type: 'text', text: 'Second automatic answer' }] } },
+      { type: 'result', subtype: 'success' },
+    ]) await session.handleNativeMessage(message as any, 1);
+    expect(order).toEqual(['FIRST_DONE', 'First automatic answer', 'SECOND_DONE', 'Second automatic answer']);
+  } finally { await session.dispose(); }
+});
+
+
+describe('Claude prompt suggestions', () => {
+  beforeEach(() => { sdkMock.resetMockMessages(); });
+
+  it('opts in only for requested main turns and restarts when the setting changes', async () => {
+    const host = createHost();
+    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const request = createRequest();
+    Object.assign(request.configuration, { promptSuggestions: true });
+    const launch = () => sdkMock.getLastOptions();
+    const flagEnabled = () => (launch()?.settings as { promptSuggestionEnabled?: boolean } | undefined)
+      ?.promptSuggestionEnabled;
+    try {
+      await collectEvents(session.execute(request).events);
+      expect(launch()).not.toHaveProperty('promptSuggestions');
+      expect(flagEnabled()).toBeUndefined();
+      const initialQuery = sdkMock.getLastResponse();
+      updateClaudeProviderSettings(host.settings, { promptSuggestions: true });
+      await collectEvents(session.execute(request).events);
+      expect(launch()?.promptSuggestions).toBe(true);
+      // The flag-settings layer outranks `promptSuggestionEnabled: false` in settings.json, while
+      // leaving the env override unset keeps Claude Code's near-limit suppression.
+      expect(flagEnabled()).toBe(true);
+      expect(launch()?.env).not.toHaveProperty('CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION');
+      expect(sdkMock.getLastResponse()).not.toBe(initialQuery);
+      const enabledQuery = sdkMock.getLastResponse();
+      updateClaudeProviderSettings(host.settings, { promptSuggestions: false });
+      await collectEvents(session.execute(request).events);
+      expect(launch()).not.toHaveProperty('promptSuggestions');
+      expect(flagEnabled()).toBeUndefined();
+      expect(sdkMock.getLastResponse()).not.toBe(enabledQuery);
+      updateClaudeProviderSettings(host.settings, { promptSuggestions: true });
+      await collectEvents(session.execute(createRequest()).events);
+      expect(launch()).not.toHaveProperty('promptSuggestions');
+      expect(flagEnabled()).toBeUndefined();
+    } finally { await session.dispose(); }
+  });
+
+  it('delivers a trailing suggestion as a transient event owned by the completed turn', async () => {
+    const host = createHost();
+    updateClaudeProviderSettings(host.settings, { promptSuggestions: true });
+    const session = new ClaudeExecutionBackend(host).createSession(createConfig());
+    const events: ProviderSessionEvent[] = [];
+    session.onEvent(event => events.push(event));
+    const request = createRequest();
+    Object.assign(request.configuration, { promptSuggestions: true });
+    sdkMock.setMockMessages([
+      { type: 'system', subtype: 'init', session_id: 'suggestion-session' },
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Done' }] } },
+      { type: 'result', subtype: 'success', session_id: 'suggestion-session' },
+      { type: 'prompt_suggestion', suggestion: 'Add tests', session_id: 'suggestion-session', uuid: 'suggestion' },
+    ], { appendResult: false });
+    try {
+      const run = session.execute(request);
+      const output = await collectEvents(run.events);
+      await new Promise(resolve => setImmediate(resolve));
+      expect(output.at(-1)?.type).toBe('turn_completed');
+      expect(events).toContainEqual(expect.objectContaining({
+        type: 'prompt_suggestion', suggestion: 'Add tests', originatingTurnId: run.turnId,
+      }));
+      expect(JSON.stringify(session.getSnapshot())).not.toContain('Add tests');
+      expect(output.some(event => (event as { type: string }).type === 'prompt_suggestion')).toBe(false);
+    } finally { await session.dispose(); }
+  });
 });

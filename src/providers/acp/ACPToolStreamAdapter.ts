@@ -1,6 +1,6 @@
 import { normalizeToolProviderPayload } from '../../core/tools/toolProviderPayload';
-import type { StreamChunk, ToolProviderPayload } from '../../core/types';
-import type { SDKToolUseResult } from '../../core/types/diff';
+import { mergeToolResultDetails } from '../../core/tools/toolResultDetails';
+import type { StreamChunk, ToolProviderPayload, ToolResultDetails } from '../../core/types';
 import type { ACPToolCall, ACPToolCallUpdate } from './types';
 
 interface ACPToolStreamState {
@@ -19,14 +19,23 @@ export interface ACPResolvedToolRawName {
 }
 
 export interface ACPToolStreamPresentationAdapter {
-  normalizeToolInput(rawName: string | undefined, input: Record<string, unknown>): Record<string, unknown>;
-  normalizeToolName(rawName: string | undefined): string;
-  normalizeToolUseResult(
+  /** Input is the latest raw snapshot, never an earlier presentation; raw output can identify the target. */
+  normalizeToolInput(rawName: string | undefined, input: Record<string, unknown>, rawOutput?: unknown): Record<string, unknown>;
+  /** Raw input/output let dispatcher tools present the tool they dispatch to. */
+  normalizeToolName(rawName: string | undefined, rawInput?: unknown, rawOutput?: unknown): string;
+  /** Provider-specific result fields; they override the shared ACP diff field by field. */
+  normalizeToolResultDetails(
     rawName: string | undefined,
     input: Record<string, unknown>,
     rawOutput: unknown,
     rawInput: unknown,
-  ): SDKToolUseResult | undefined;
+  ): ToolResultDetails | undefined;
+  /** Lossless native fields attached to the tool's start and result. */
+  buildToolProviderPayload?(
+    rawName: string | undefined,
+    rawInput: unknown,
+    rawOutput: unknown,
+  ): ToolProviderPayload | undefined;
   resolveRawToolName(
     currentRawName: ACPResolvedToolRawName | undefined,
     update: {
@@ -79,7 +88,7 @@ export class ACPToolStreamAdapter {
       result.push({
         id: toolCallUpdate.toolCallId,
         input: state.input,
-        name: this.adapter.normalizeToolName(state.rawName),
+        name: this.adapter.normalizeToolName(state.rawName, state.rawInput, state.rawOutput),
         ...providerPayloadFields,
         type: 'tool_use',
       });
@@ -105,43 +114,19 @@ export class ACPToolStreamAdapter {
       provenance: current.rawNameProvenance,
       rawName: current.rawName,
     } : undefined, update);
-    const nextInput = current?.input ?? {};
     const rawInput = update.rawInput !== undefined ? update.rawInput : current?.rawInput;
     const rawOutput = update.rawOutput !== undefined ? update.rawOutput : current?.rawOutput;
-
-    if (update.rawInput !== undefined) {
-      const normalizedRawInput = normalizeRawToolInput(update.rawInput);
-      return this.#buildToolState(
-        nextRawName,
-        { ...nextInput, ...normalizedRawInput },
-        rawInput,
-        rawOutput,
-      );
-    }
-
     if (
-      nextRawName.rawName !== current?.rawName
-      || nextRawName.provenance !== current?.rawNameProvenance
-    ) {
-      return this.#buildToolState(nextRawName, nextInput, rawInput, rawOutput);
-    }
+      current && rawInput === current.rawInput && rawOutput === current.rawOutput
+      && nextRawName.rawName === current.rawName
+      && nextRawName.provenance === current.rawNameProvenance
+    ) return current;
 
-    return current && rawOutput === current.rawOutput
-      ? current
-      : this.#buildToolState(nextRawName, nextInput, rawInput, rawOutput);
-  }
-
-  #buildToolState(
-    rawName: ACPResolvedToolRawName,
-    input: Record<string, unknown>,
-    rawInput?: unknown,
-    rawOutput?: unknown,
-  ): ACPToolStreamState {
     return {
-      input: this.adapter.normalizeToolInput(rawName.rawName, input),
+      input: this.adapter.normalizeToolInput(nextRawName.rawName, normalizeRawToolInput(rawInput), rawOutput),
       rawInput,
-      rawName: rawName.rawName,
-      rawNameProvenance: rawName.provenance,
+      rawName: nextRawName.rawName,
+      rawNameProvenance: nextRawName.provenance,
       rawOutput,
     };
   }
@@ -155,20 +140,21 @@ export class ACPToolStreamAdapter {
         return {
           ...chunk,
           input: state.input,
-          name: this.adapter.normalizeToolName(state.rawName),
+          name: this.adapter.normalizeToolName(state.rawName, state.rawInput, state.rawOutput),
           ...this.#buildProviderPayloadFields(state),
         };
       case 'tool_result': {
-        const providerToolUseResult = this.adapter.normalizeToolUseResult(
+        const resultDetails = mergeToolResultDetails(chunk.resultDetails, this.adapter.normalizeToolResultDetails(
           state.rawName,
           state.input,
           state.rawOutput,
           state.rawInput,
-        );
-        const toolUseResult = mergeToolUseResults(chunk.toolUseResult, providerToolUseResult);
-        return toolUseResult
-          ? { ...chunk, toolUseResult }
-          : chunk;
+        ));
+        return {
+          ...chunk,
+          ...(resultDetails ? { resultDetails } : {}),
+          ...this.#buildProviderPayloadFields(state),
+        };
       }
       default:
         return chunk;
@@ -178,24 +164,11 @@ export class ACPToolStreamAdapter {
   #buildProviderPayloadFields(
     state: ACPToolStreamState,
   ): { providerPayload?: ToolProviderPayload } {
-    const result = this.adapter.normalizeToolUseResult(
-      state.rawName,
-      state.input,
-      state.rawOutput,
-      state.rawInput,
+    const providerPayload = normalizeToolProviderPayload(
+      this.adapter.buildToolProviderPayload?.(state.rawName, state.rawInput, state.rawOutput),
     );
-    const providerPayload = normalizeToolProviderPayload(result?.providerPayload);
     return providerPayload ? { providerPayload } : {};
   }
-}
-
-function mergeToolUseResults(
-  nativeResult: SDKToolUseResult | undefined,
-  providerResult: SDKToolUseResult | undefined,
-): SDKToolUseResult | undefined {
-  if (!nativeResult) return providerResult;
-  if (!providerResult) return nativeResult;
-  return { ...nativeResult, ...providerResult };
 }
 
 function normalizeRawToolInput(rawInput: unknown): Record<string, unknown> {

@@ -23,6 +23,7 @@ export class ProviderInitializationBoundary {
   private services: Partial<Record<ProviderId, ProviderWorkspaceServices>> = {};
   private initAttempts: Partial<Record<ProviderId, ProviderInitializationAttempt>> = {};
   private generation = 0;
+  private owner: ProviderHost | null = null;
 
   setServices(
     providerId: ProviderId,
@@ -43,11 +44,25 @@ export class ProviderInitializationBoundary {
     this.registrations[providerId] = registration;
   }
 
+  providesSessionArchive(providerId: ProviderId): boolean {
+    return this.registrations[providerId]?.providesSessionArchive === true;
+  }
+
+  getAgentSkillProviderIds(): ProviderId[] {
+    return Object.entries(this.registrations)
+      .filter(([, registration]) => registration?.consumesAgentSkills)
+      .map(([providerId]) => providerId);
+  }
+
   async ensureInitialized(
     plugin: ProviderHost,
     providerId: ProviderId,
     _reason: string,
   ): Promise<void> {
+    if (this.owner && this.owner !== plugin) {
+      throw new Error('Provider workspace host differs from the active owner. Dispose it before replacing the host.');
+    }
+    this.owner = plugin;
     if (this.services[providerId]) {
       return;
     }
@@ -97,6 +112,7 @@ export class ProviderInitializationBoundary {
       delete this.services[providerId];
     }
     this.initAttempts = {};
+    this.owner = null;
     await Promise.allSettled(promises);
   }
 
@@ -111,13 +127,8 @@ export class ProviderInitializationBoundary {
       throw new Error(`Provider workspace "${providerId}" is not registered.`);
     }
 
-    const storage = plugin.storage;
-    const vaultAdapter = storage.getAdapter();
-
     const context: ProviderWorkspaceInitContext = {
       plugin,
-      storage,
-      vaultAdapter,
       transitionScope,
     };
 
