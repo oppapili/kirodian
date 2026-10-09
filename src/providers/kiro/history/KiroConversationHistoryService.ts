@@ -1,9 +1,13 @@
+import { copyProviderHistoryState } from '../../../core/providers/providerHistory';
 import { mergePersistedProviderState } from '../../../core/providers/providerState';
 import type {
   ProviderConversationHistoryService,
+  ProviderHistoryInput,
   ProviderHistoryPathContext,
+  ProviderHistoryResult,
+  ProviderHistoryState,
+  ProviderHistoryUpdate,
 } from '../../../core/providers/types';
-import type { Conversation } from '../../../core/types';
 import {
   buildPersistedKiroProviderState,
   parseKiroProviderState,
@@ -19,18 +23,26 @@ const KIRO_PROVIDER_STATE_KEYS = [
 ] as const;
 
 export class KiroConversationHistoryService implements ProviderConversationHistoryService {
+  // Keyed by the resolved session id (application `id` is no longer part of the native
+  // history input under upstream's immutable propose-changes contract). The value is the
+  // `sessionId::sessionDirectory` hydration key, so a repeat hydrate of the same resolved
+  // session with messages already present can skip re-parsing, as before.
   private readonly hydratedKeys = new Map<string, string>();
 
   async hydrateConversationHistory(
-    conversation: Conversation,
+    input: ProviderHistoryInput,
     vaultPath: string | null,
     pathContext?: ProviderHistoryPathContext,
-  ): Promise<void> {
+  ): Promise<ProviderHistoryUpdate> {
+    const conversation = copyProviderHistoryState(input);
     const state = parseKiroProviderState(conversation.providerState);
     if (this.isPendingForkConversation(conversation)) {
+      const cacheKey = conversation.providerState && state.forkSource
+        ? state.forkSource.sessionId
+        : null;
       if (!pathContext) {
-        this.hydratedKeys.delete(conversation.id);
-        return;
+        if (cacheKey) this.hydratedKeys.delete(cacheKey);
+        return conversation;
       }
       const forkSource = state.forkSource!;
       const sourceSessionDirectory = resolveKiroSessionDirectory(
@@ -49,10 +61,10 @@ export class KiroConversationHistoryService implements ProviderConversationHisto
           }) as Record<string, unknown> | undefined,
         );
       }
-      if (conversation.messages.length > 0) return;
+      if (conversation.messages.length > 0) return conversation;
       if (!sourceSessionDirectory) {
-        this.hydratedKeys.delete(conversation.id);
-        return;
+        this.hydratedKeys.delete(forkSource.sessionId);
+        return conversation;
       }
       const hydrationKey = `fork::${sourceSessionDirectory}::${forkSource.resumeAt}`;
       const parsed = await loadKiroHistory(sourceSessionDirectory, forkSource.sessionId);
@@ -60,18 +72,18 @@ export class KiroConversationHistoryService implements ProviderConversationHisto
         message.role === 'assistant' && message.assistantMessageId === forkSource.resumeAt
       ));
       if (checkpointIndex < 0) {
-        this.hydratedKeys.delete(conversation.id);
-        return;
+        this.hydratedKeys.delete(forkSource.sessionId);
+        return conversation;
       }
       conversation.messages = parsed.messages.slice(0, checkpointIndex + 1);
-      this.hydratedKeys.set(conversation.id, hydrationKey);
-      return;
+      this.hydratedKeys.set(forkSource.sessionId, hydrationKey);
+      return conversation;
     }
 
     const sessionId = conversation.sessionId;
     if (!sessionId || !pathContext) {
-      this.hydratedKeys.delete(conversation.id);
-      return;
+      if (sessionId) this.hydratedKeys.delete(sessionId);
+      return conversation;
     }
     const sessionDirectory = resolveKiroSessionDirectory(
       state.sessionDirectory,
@@ -90,21 +102,21 @@ export class KiroConversationHistoryService implements ProviderConversationHisto
       );
     }
     if (!sessionDirectory) {
-      this.hydratedKeys.delete(conversation.id);
-      return;
+      this.hydratedKeys.delete(sessionId);
+      return conversation;
     }
 
     const hydrationKey = `${sessionId}::${sessionDirectory}`;
     if (
       conversation.messages.length > 0
-      && this.hydratedKeys.get(conversation.id) === hydrationKey
+      && this.hydratedKeys.get(sessionId) === hydrationKey
     ) {
-      return;
+      return conversation;
     }
     const parsed = await loadKiroHistory(sessionDirectory, sessionId);
     if (parsed.messages.length === 0) {
-      this.hydratedKeys.delete(conversation.id);
-      return;
+      this.hydratedKeys.delete(sessionId);
+      return conversation;
     }
     conversation.messages = parsed.messages;
     const hydratedState = parseKiroProviderState(conversation.providerState);
@@ -118,38 +130,40 @@ export class KiroConversationHistoryService implements ProviderConversationHisto
         }) as Record<string, unknown> | undefined,
       );
     }
-    this.hydratedKeys.set(conversation.id, hydrationKey);
+    this.hydratedKeys.set(sessionId, hydrationKey);
+    return conversation;
   }
 
-  resolveSessionIdForConversation(conversation: Conversation | null): string | null {
+  resolveSessionIdForConversation(conversation: ProviderHistoryInput | null): string | null {
     const state = parseKiroProviderState(conversation?.providerState);
     return conversation?.sessionId ?? state.forkSource?.sessionId ?? null;
   }
 
   async resolveMissingConversationSession(
-    conversation: Conversation,
+    input: ProviderHistoryInput,
     _vaultPath: string | null,
     missingProviderSessionId?: string,
-  ): Promise<'delete' | 'reset' | 'preserve'> {
+  ): Promise<ProviderHistoryResult<'delete' | 'reset' | 'preserve'>> {
     if (
-      !conversation.sessionId
+      !input.sessionId
       || !missingProviderSessionId
-      || conversation.sessionId !== missingProviderSessionId
+      || input.sessionId !== missingProviderSessionId
     ) {
-      return 'preserve';
+      return { outcome: 'preserve' };
     }
 
+    const conversation = copyProviderHistoryState(input);
     const providerState = { ...conversation.providerState };
     for (const key of KIRO_PROVIDER_STATE_KEYS) delete providerState[key];
     conversation.sessionId = null;
     conversation.providerState = Object.keys(providerState).length > 0
       ? providerState
       : undefined;
-    this.hydratedKeys.delete(conversation.id);
-    return 'reset';
+    this.hydratedKeys.delete(input.sessionId);
+    return { outcome: 'reset', changes: conversation };
   }
 
-  isPendingForkConversation(conversation: Conversation): boolean {
+  isPendingForkConversation(conversation: ProviderHistoryInput): boolean {
     const state = parseKiroProviderState(conversation.providerState);
     return Boolean(state.forkSource && !conversation.sessionId);
   }
@@ -172,7 +186,7 @@ export class KiroConversationHistoryService implements ProviderConversationHisto
   }
 
   buildPersistedProviderState(
-    conversation: Conversation,
+    conversation: ProviderHistoryInput,
   ): Record<string, unknown> | undefined {
     return mergePersistedProviderState(
       conversation.providerState,

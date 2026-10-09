@@ -2,7 +2,6 @@ import type { ProviderCommandCatalog } from '../../../core/providers/commands/Pr
 import type { ProviderHost } from '../../../core/providers/ProviderHost';
 import { ProviderWorkspaceRegistry } from '../../../core/providers/ProviderWorkspaceRegistry';
 import type {
-  ProviderTabWarmupPolicy,
   ProviderTransitionOwnerContext,
   ProviderWorkspaceRegistration,
   ProviderWorkspaceServices,
@@ -40,12 +39,6 @@ export interface KiroWorkspaceServicesOptions {
   readonly commandMetadataProbe?: KiroCommandMetadataProbe;
   readonly agentCatalogService?: KiroAgentCatalogServiceLike;
 }
-
-const kiroTabWarmupPolicy: ProviderTabWarmupPolicy = {
-  resolveMode() {
-    return 'commands';
-  },
-};
 
 export async function createKiroWorkspaceServices(
   plugin: ProviderHost,
@@ -126,7 +119,6 @@ export async function createKiroWorkspaceServices(
     agentCatalogCoordinator,
     commandLoader: new KiroCommandLoader(commandMetadataProbe),
     settingsTabRenderer: kiroSettingsTabRenderer,
-    tabWarmupPolicy: kiroTabWarmupPolicy,
     modelCatalog,
     refreshModelCatalog: context => modelCatalogCoordinator.refreshModelCatalog(context),
     refreshAgentCatalog: context => agentCatalogCoordinator.refresh(context),

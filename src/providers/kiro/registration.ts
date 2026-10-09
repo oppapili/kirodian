@@ -19,6 +19,7 @@ export const kiroProviderRegistration: ProviderModule = {
   blankTabOrder: 12,
   capabilities: KIRO_PROVIDER_CAPABILITIES,
   chatUIConfig: kiroChatUIConfig,
+  modelPolicy: kiroChatUIConfig,
   createExecutionBackend: (plugin) => {
     const workspace = getKiroWorkspaceServices();
     return new KiroExecutionBackend(plugin, {

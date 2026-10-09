@@ -64,7 +64,6 @@ implements KiroExecutionNativeConnection {
         onSessionNotification: notification => this.notify(notification, 'standard'),
         requestPermission: request => options.requestPermission(request),
       },
-      methodOverrides: { cancel: 'session/cancel' },
       transport: this.transport,
     });
     for (const method of KIRO_COMMANDS_AVAILABLE_NOTIFICATION_METHODS) {
