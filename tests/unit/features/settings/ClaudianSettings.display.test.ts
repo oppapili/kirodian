@@ -492,12 +492,13 @@ describe('ClaudianSettingTab display settings', () => {
 
   it('collapses a disabled Provider tab and follows later enablement changes', async () => {
     let enabled = false;
-    jest.spyOn(ProviderRegistry, 'getRegisteredProviderIds').mockReturnValue(['codex']);
-    jest.spyOn(ProviderRegistry, 'getProviderDisplayName').mockReturnValue('CODEX');
+    jest.spyOn(ProviderRegistry, 'getRegisteredProviderIds').mockReturnValue(['kiro']);
+    jest.spyOn(ProviderRegistry, 'getVisibleProviderIds').mockReturnValue(['kiro']);
+    jest.spyOn(ProviderRegistry, 'getProviderDisplayName').mockReturnValue('Kiro');
     jest.spyOn(ProviderRegistry, 'getTitleGenerationModelOptions').mockReturnValue([]);
     jest.spyOn(ProviderRegistry, 'isEnabled').mockImplementation(() => enabled);
     jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized').mockResolvedValue(undefined);
-    let notify: ((providerId: 'codex') => void) | null = null;
+    let notify: ((providerId: 'kiro') => void) | null = null;
     jest.spyOn(ProviderWorkspaceRegistry, 'getSettingsTabRenderer').mockReturnValue({
       render: (_container, context) => { notify = context.notifyProviderModelOptionsChanged; },
     });
@@ -515,7 +516,7 @@ describe('ClaudianSettingTab display settings', () => {
     expect(collapsed()).toBe(true);
 
     enabled = true;
-    notify!('codex');
+    notify!('kiro');
     expect(collapsed()).toBe(false);
   });
 });

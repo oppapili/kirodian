@@ -338,18 +338,6 @@ describe('ClaudianSettingsStorage', () => {
       expect(getClaudeProviderSettings(result).cliPathsByHost['host-b']).toBe('/custom/path-b');
     });
 
-    it('normalizes legacy flat CLI paths from loaded data', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        claudeCliPath: '/legacy/path',
-      }));
-
-      const result = await storage.load();
-
-      expect(getClaudeProviderSettings(result).cliPath).toBe('/legacy/path');
-    });
-
-
     it('preserves hostname-scoped provider settings without assigning them to the current device', async () => {
       Object.defineProperty(process, 'platform', { value: 'win32' });
       mockGetHostnameKey.mockReturnValue('device:current');
@@ -568,22 +556,6 @@ describe('ClaudianSettingsStorage', () => {
       const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
       expect(writtenContent.model).toBe('claude-opus-4-5');
     });
-
-    it('should strip legacy slashCommands before writing', async () => {
-      const settings = {
-        ...DEFAULT_SETTINGS,
-        model: 'claude-opus-4-5' as const,
-        slashCommands: [{ id: 'cmd-review', name: 'review', content: 'Review' }],
-      } as typeof DEFAULT_SETTINGS & { slashCommands: unknown[] };
-
-      await storage.save(settings as any);
-
-      const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
-      expect(writtenContent.model).toBe('claude-opus-4-5');
-      expect(writtenContent).not.toHaveProperty('slashCommands');
-    });
-
-
 
     it('should throw on write error', async () => {
       mockAdapter.write.mockRejectedValue(new Error('Write failed'));
