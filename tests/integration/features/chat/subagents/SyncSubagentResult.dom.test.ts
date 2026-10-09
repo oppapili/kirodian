@@ -11,6 +11,7 @@ import { Component } from 'obsidian';
 
 import type { ChatMessage } from '@/core/types';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
+import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { providerOutputEventToStreamChunk } from '@/features/chat/rendering/providerOutputChunks';
 import { ChatState } from '@/features/chat/state/ChatState';
 import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
@@ -43,11 +44,11 @@ it.each([
   const messagesEl = document.body.createDiv();
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin,
-    new Component(), messagesEl);
+    new Component(), messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('claude'));
   const state = new ChatState();
-  const subagents = new SubagentManager(() => undefined);
+  const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
-    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
+    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined, getProviderId: () => 'claude' });
   const message: ChatMessage = { id: 'response', role: 'assistant', timestamp: testDate().getTime(), content: '', contentBlocks: [] };
   const normalizer = new ClaudeExecutionEventNormalizer();
   const structuredAnswer = '    Structured answer.\nSecond part uses <result>value</result> literally.';

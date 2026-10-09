@@ -10,6 +10,7 @@ import { axe } from 'jest-axe';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import type { ChatMessage } from '@/core/types';
+import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 import { ChatState } from '@/features/chat/state/ChatState';
 import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
@@ -47,9 +48,9 @@ it.each([false, true])('collapses work across compaction on completion and reloa
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin, new Component(), messagesEl);
   const state = new ChatState();
-  const subagents = new SubagentManager(() => undefined);
+  const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
-    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
+    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined, getProviderId: () => 'claude' });
   let response: ChatMessage = { id: 'response', role: 'assistant', timestamp: testDate().getTime(), content: '', contentBlocks: [] };
   const assertDisclosure = async () => {
     const header = within(messagesEl).getByRole('button', { name: 'Worked for 05:07' });
@@ -108,11 +109,11 @@ it.each(['early', 'late', 'none'])('matches live and JSONL notification order wi
   const messagesEl = document.body.createDiv();
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin,
-    new Component(), messagesEl);
+    new Component(), messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('claude'));
   const state = new ChatState();
-  const subagents = new SubagentManager(() => undefined);
+  const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
-    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
+    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined, getProviderId: () => 'claude' });
   let response: ChatMessage = { id: 'response', role: 'assistant', timestamp: testDate().getTime(), content: '', contentBlocks: [] };
   const order = () => {
     const worked = within(messagesEl).getByRole('button', { name: /^Worked(?: for \d+:\d+)?$/ });
@@ -190,11 +191,11 @@ it.each(['between', 'during-second', 'after-second'])('groups an older task noti
   const messagesEl = document.body.createDiv();
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin,
-    new Component(), messagesEl);
+    new Component(), messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('claude'));
   const state = new ChatState();
-  const subagents = new SubagentManager(() => undefined);
+  const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
-    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
+    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined, getProviderId: () => 'claude' });
   const prefix = [
     { type: 'user', uuid: 'first-user', timestamp: testTime({ seconds: 0 }), message: { content: 'Start background research.' } },
     { type: 'assistant', uuid: 'launch', timestamp: testTime({ seconds: 1 }), message: { stop_reason: 'tool_use', content: [
@@ -301,11 +302,11 @@ it.each(['child', 'result', 'snapshot'] as const)('keeps a pending Agent before 
   const messagesEl = document.body.createDiv();
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin,
-    new Component(), messagesEl);
+    new Component(), messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('claude'));
   const state = new ChatState();
-  const subagents = new SubagentManager(() => undefined);
+  const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
-    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
+    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined, getProviderId: () => 'claude' });
   const original: ChatMessage = { id: 'original', role: 'assistant', timestamp: 1, content: '', contentBlocks: [] };
   try {
     state.addMessage(original);
@@ -339,11 +340,11 @@ it('does not recreate a response after its conversation is cleared during finali
   const messagesEl = document.body.createDiv();
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin,
-    new Component(), messagesEl);
+    new Component(), messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('claude'));
   const state = new ChatState();
-  const subagents = new SubagentManager(() => undefined);
+  const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
-    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
+    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined, getProviderId: () => 'claude' });
   const original: ChatMessage = { id: 'original', role: 'assistant', timestamp: 1, content: '', contentBlocks: [] };
   try {
     state.addMessage(original);
@@ -366,11 +367,11 @@ it.each(['background', 'user'] as const)('groups only the requested response acr
   const messagesEl = document.body.createDiv();
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin,
-    new Component(), messagesEl);
+    new Component(), messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('claude'));
   const state = new ChatState();
-  const subagents = new SubagentManager(() => undefined);
+  const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
-    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
+    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined, getProviderId: () => 'claude' });
   let nextId = 0;
   const host = { state, renderer, stream, isConnected: () => true, createMessageId: () => `part-${++nextId}` };
   let response: ChatMessage = { id: 'response', role: 'assistant', timestamp: testDate().getTime(), content: '', contentBlocks: [] };
@@ -417,11 +418,11 @@ it('keeps a notification consumed by an automatic response outside an admitted r
   const messagesEl = document.body.createDiv();
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
   const renderer = new MessageRenderer(plugin,
-    new Component(), messagesEl);
+    new Component(), messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('claude'));
   const state = new ChatState();
-  const subagents = new SubagentManager(() => undefined);
+  const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('claude'));
   const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
-    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
+    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined, getProviderId: () => 'claude' });
   let nextId = 0;
   const host = { state, renderer, stream, isConnected: () => true, createMessageId: () => `part-${++nextId}` };
   let response: ChatMessage = { id: 'requested', role: 'assistant', timestamp: testDate().getTime(), content: '', contentBlocks: [] };
