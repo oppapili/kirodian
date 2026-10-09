@@ -167,7 +167,7 @@ export function providerWorkspaceRegistryModuleMock() {
 export function providerRegistryModuleMock() {
   return {
     ProviderRegistry: {
-      getRegisteredProviderIds: jest.fn().mockReturnValue(['claude', 'codex', 'opencode']),
+      getRegisteredProviderIds: jest.fn().mockReturnValue(['claude', 'kiro']),
       getEnabledProviderIds: jest.fn().mockReturnValue(['claude']),
       getBlankTabProviderIds: jest.fn().mockReturnValue(['claude']),
       isEnabled: jest.fn().mockReturnValue(true),

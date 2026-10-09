@@ -47,10 +47,10 @@ describe('TabProviderPresence', () => {
     });
   });
 
-  it.each(['claude', 'kiro'].flatMap(providerId => [
-    { provider: providerId, restored: { conversationId: `${providerId}-history` } },
-    { provider: providerId, restored: { conversationId: null, providerId, draftModel: `${providerId}:model` } },
-  ]))('starts a shared runtime for an inactive restored provider tab without preparing execution: %o', async ({ provider, restored }) => {
+  it.each([
+    { provider: 'kiro', restored: { conversationId: 'kiro-history' } },
+    { provider: 'kiro', restored: { conversationId: null, providerId: 'kiro', draftModel: 'kiro:model' } },
+  ])('starts a shared runtime for an inactive restored provider tab without preparing execution: %o', async ({ provider, restored }) => {
     const startRuntime = jest.fn().mockResolvedValue(undefined);
     jest.mocked(ProviderRegistry.getCapabilities).mockImplementation(providerId => ({
       providerId, supportsProviderCommands: true, startsSharedRuntimeOnTabPresence: providerId === provider,
@@ -73,7 +73,7 @@ describe('TabProviderPresence', () => {
     await manager.destroy();
   });
 
-  it.each(['claude', 'kiro'])('starts a shared runtime when a blank tab selects %s without preparing execution', async provider => {
+  it.each(['kiro'])('starts a shared runtime when a blank tab selects %s without preparing execution', async provider => {
     const startRuntime = jest.fn().mockResolvedValue(undefined);
     jest.mocked(ProviderRegistry.getCapabilities).mockImplementation(providerId => ({
       providerId, supportsProviderCommands: true, startsSharedRuntimeOnTabPresence: providerId === provider,

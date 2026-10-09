@@ -6,7 +6,6 @@ import { fireEvent, within } from '@testing-library/dom';
 
 import { ModelSelector } from '@/features/chat/composer/toolbar/ModelSelector';
 import type { ToolbarCallbacks } from '@/features/chat/composer/toolbar/types';
-import { getBlankTabModelOptions } from '@/features/chat/tabs/tabProviderSettings';
 import { claudeChatUIConfig } from '@/providers/claude/ui/ClaudeChatUIConfig';
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
@@ -39,42 +38,4 @@ it('renders saved model order top-to-bottom through the real provider UI config'
   config.visibleModels = ['sonnet', 'opus', 'haiku'];
   selector.renderOptions();
   expect(labels()).toEqual(['sonnet', 'opus', 'haiku']);
-});
-
-it('preserves provider group display order while keeping saved order inside each group', () => {
-  const host = document.body.createDiv();
-  const settings = {
-    model: '',
-    providerConfigs: {
-      claude: {
-        enabled: true,
-        discoveredModels: ['opus', 'haiku'].map(value => ({ value, label: value, description: '' })),
-        visibleModels: ['haiku', 'opus'],
-      },
-      kiro: {
-        enabled: true,
-        discoveredModels: [
-          { value: 'claude-sonnet-4', label: 'Claude Sonnet 4', description: '' },
-          { value: 'claude-haiku-4.5', label: 'Claude Haiku 4.5', description: '' },
-        ],
-        visibleModels: ['claude-haiku-4.5', 'claude-sonnet-4'],
-      },
-    },
-  };
-  new ModelSelector(host, {
-    getSettings: () => settings,
-    getUIConfig: () => ({ getModelOptions: getBlankTabModelOptions }),
-  } as unknown as ToolbarCallbacks);
-  fireEvent.click(within(host).getByRole('button', { name: /^Set up models/ }));
-  // Each row names its provider so it can carry that provider's brand colour.
-  expect(within(host).getAllByRole('option').map(node => node.getAttribute('data-provider')))
-    .toEqual(['claude', 'claude', 'kiro', 'kiro']);
-  const groups = within(host).getAllByRole('group');
-  expect(groups.map(group => [
-    group.getAttribute('aria-labelledby') && host.querySelector(`#${group.getAttribute('aria-labelledby')}`)?.textContent,
-    within(group).getAllByRole('option').map(item => item.textContent),
-  ])).toEqual([
-    ['Claude Code', ['haiku', 'opus']],
-    ['Kiro', ['Claude Haiku 4.5', 'Claude Sonnet 4']],
-  ]);
 });

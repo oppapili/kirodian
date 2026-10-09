@@ -94,7 +94,7 @@ describe('SessionBrowser session metadata popover', () => {
     expect(visibleRows.map(row => row.querySelector('.claudian-session-metadata-value')?.textContent))
       .toEqual([
         ...(title ? [title] : []),
-        'GPT-5.1 Codex',
+        'Claude Sonnet 4',
         formatSessionCreatedDate(createdAt),
         formatSessionLastActive(lastActivityAt),
       ]);
