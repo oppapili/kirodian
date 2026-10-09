@@ -1,7 +1,6 @@
 # Build output
 main.js
 styles.css
-.codex-vendor/
 *.js.map
 dist/
 build/
@@ -96,4 +95,3 @@ CLAUDE.local.md
 # package-lock.json
 
 .claude/
-.codex/

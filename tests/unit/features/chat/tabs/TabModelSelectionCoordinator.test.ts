@@ -82,22 +82,22 @@ describe('TabModelSelectionCoordinator', () => {
     const harness = createHarness();
     const firstRequest = harness.coordinator.beginRequest();
     const first = harness.coordinator.selectBlank(firstRequest, {
-      providerId: 'codex',
-      model: 'codex-first',
+      providerId: 'kiro',
+      model: 'kiro-first',
     });
     const secondRequest = harness.coordinator.beginRequest();
     const second = harness.coordinator.selectBlank(secondRequest, {
-      providerId: 'codex',
-      model: 'codex-latest',
+      providerId: 'kiro',
+      model: 'kiro-latest',
     });
 
     expect(harness.getDraft()).toEqual({
-      providerId: 'codex',
-      model: 'codex-latest',
+      providerId: 'kiro',
+      model: 'kiro-latest',
     });
     expect(harness.initializeProvider).toHaveBeenCalledTimes(1);
 
-    harness.getTransition('codex').resolve();
+    harness.getTransition('kiro').resolve();
     const [firstResult, secondResult] = await Promise.all([first, second]);
 
     expect(firstResult.status).toBe('succeeded');
@@ -111,17 +111,17 @@ describe('TabModelSelectionCoordinator', () => {
     const harness = createHarness();
     const firstRequest = harness.coordinator.beginRequest();
     const first = harness.coordinator.selectBlank(firstRequest, {
-      providerId: 'codex',
-      model: 'codex-first',
+      providerId: 'kiro',
+      model: 'kiro-first',
     });
     const secondRequest = harness.coordinator.beginRequest();
     const second = harness.coordinator.selectBlank(secondRequest, {
-      providerId: 'codex',
-      model: 'codex-latest',
+      providerId: 'kiro',
+      model: 'kiro-latest',
     });
-    const error = new Error('Codex initialization failed');
+    const error = new Error('Kiro initialization failed');
 
-    harness.getTransition('codex').reject(error);
+    harness.getTransition('kiro').reject(error);
 
     await expect(first).resolves.toEqual({ status: 'superseded' });
     await expect(second).rejects.toBe(error);
@@ -136,12 +136,12 @@ describe('TabModelSelectionCoordinator', () => {
     const harness = createHarness();
     const request = harness.coordinator.beginRequest();
     const selection = harness.coordinator.selectBlank(request, {
-      providerId: 'codex',
-      model: 'codex-model',
+      providerId: 'kiro',
+      model: 'kiro-model',
     });
 
     harness.loseOwnership();
-    harness.getTransition('codex').reject(new Error('Codex initialization failed'));
+    harness.getTransition('kiro').reject(new Error('Kiro initialization failed'));
 
     await expect(selection).resolves.toEqual({ status: 'superseded' });
     expect(harness.restoreDraft).not.toHaveBeenCalled();
@@ -151,23 +151,23 @@ describe('TabModelSelectionCoordinator', () => {
     const harness = createHarness();
     const firstRequest = harness.coordinator.beginRequest();
     const first = harness.coordinator.selectBlank(firstRequest, {
-      providerId: 'codex',
-      model: 'codex-model',
+      providerId: 'kiro',
+      model: 'kiro-model',
     });
     const secondRequest = harness.coordinator.beginRequest();
     const second = harness.coordinator.selectBlank(secondRequest, {
-      providerId: 'grok',
-      model: 'grok-model',
+      providerId: 'kiro-preview',
+      model: 'kiro-preview-model',
     });
 
-    harness.getTransition('codex').reject(new Error('Codex initialization failed'));
+    harness.getTransition('kiro').reject(new Error('Kiro initialization failed'));
     await expect(first).resolves.toEqual({ status: 'superseded' });
     await new Promise<void>(resolve => setImmediate(resolve));
 
-    expect(harness.getDraft()).toEqual({ providerId: 'grok', model: 'grok-model' });
+    expect(harness.getDraft()).toEqual({ providerId: 'kiro-preview', model: 'kiro-preview-model' });
     expect(harness.initializeProvider).toHaveBeenCalledTimes(2);
 
-    harness.getTransition('grok').resolve();
+    harness.getTransition('kiro-preview').resolve();
     const result = await second;
     expect(result.status).toBe('succeeded');
     expect(result.status === 'succeeded' && result.isCurrent()).toBe(true);
@@ -177,22 +177,22 @@ describe('TabModelSelectionCoordinator', () => {
     const harness = createHarness();
     const firstRequest = harness.coordinator.beginRequest();
     const first = harness.coordinator.selectBlank(firstRequest, {
-      providerId: 'codex',
-      model: 'codex-model',
+      providerId: 'kiro',
+      model: 'kiro-model',
     });
     const secondRequest = harness.coordinator.beginRequest();
     const second = harness.coordinator.selectBlank(secondRequest, {
-      providerId: 'grok',
-      model: 'grok-model',
+      providerId: 'kiro-preview',
+      model: 'kiro-preview-model',
     });
 
-    harness.getTransition('codex').reject(new Error('Codex initialization failed'));
+    harness.getTransition('kiro').reject(new Error('Kiro initialization failed'));
     await expect(first).resolves.toEqual({ status: 'superseded' });
     await new Promise<void>(resolve => setImmediate(resolve));
-    const grokError = new Error('Grok initialization failed');
-    harness.getTransition('grok').reject(grokError);
+    const previewError = new Error('Kiro preview initialization failed');
+    harness.getTransition('kiro-preview').reject(previewError);
 
-    await expect(second).rejects.toBe(grokError);
+    await expect(second).rejects.toBe(previewError);
     expect(harness.getDraft()).toEqual({
       providerId: 'claude',
       model: 'claude-default',
@@ -204,21 +204,21 @@ describe('TabModelSelectionCoordinator', () => {
     const harness = createHarness();
     const firstRequest = harness.coordinator.beginRequest();
     const first = harness.coordinator.selectBlank(firstRequest, {
-      providerId: 'codex',
-      model: 'codex-first',
+      providerId: 'kiro',
+      model: 'kiro-first',
     });
     const secondRequest = harness.coordinator.beginRequest();
     const second = harness.coordinator.selectBlank(secondRequest, {
-      providerId: 'grok',
-      model: 'grok-model',
+      providerId: 'kiro-preview',
+      model: 'kiro-preview-model',
     });
     const thirdRequest = harness.coordinator.beginRequest();
     const third = harness.coordinator.selectBlank(thirdRequest, {
-      providerId: 'codex',
-      model: 'codex-latest',
+      providerId: 'kiro',
+      model: 'kiro-latest',
     });
 
-    harness.getTransition('codex').resolve();
+    harness.getTransition('kiro').resolve();
     const [firstResult, secondResult, thirdResult] = await Promise.all([
       first,
       second,
@@ -230,8 +230,8 @@ describe('TabModelSelectionCoordinator', () => {
     expect(thirdResult.status).toBe('succeeded');
     expect(thirdResult.status === 'succeeded' && thirdResult.isCurrent()).toBe(true);
     expect(harness.getDraft()).toEqual({
-      providerId: 'codex',
-      model: 'codex-latest',
+      providerId: 'kiro',
+      model: 'kiro-latest',
     });
     expect(harness.initializeProvider).toHaveBeenCalledTimes(1);
   });

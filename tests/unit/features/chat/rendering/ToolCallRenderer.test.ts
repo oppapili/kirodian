@@ -454,7 +454,7 @@ describe('ToolCallRenderer', () => {
     });
   });
 
-  describe('getToolSummary - Codex native tools', () => {
+  describe('getToolSummary - native agent tools', () => {
     it('returns file count for apply_patch with changes array', () => {
       expect(getToolSummary('apply_patch', {
         changes: [{ path: 'src/a.ts', kind: 'update' }, { path: 'src/b.ts', kind: 'add' }],
@@ -516,7 +516,7 @@ describe('ToolCallRenderer', () => {
     });
   });
 
-  describe('getToolLabel - Codex native tools', () => {
+  describe('getToolLabel - native agent tools', () => {
     it('labels apply_patch with summary', () => {
       expect(getToolLabel('apply_patch', {
         changes: [{ path: 'src/foo.ts', kind: 'update' }],
@@ -549,7 +549,7 @@ describe('ToolCallRenderer', () => {
   });
 
   describe('WebSearch expanded rendering', () => {
-    it('renders Codex search actions instead of the placeholder result text', () => {
+    it('renders search actions instead of the placeholder result text', () => {
       const parentEl = createMockEl();
       const toolCall = createToolCall({
         name: 'WebSearch',
@@ -571,7 +571,7 @@ describe('ToolCallRenderer', () => {
       expect(lines).not.toContain('Search complete');
     });
 
-    it('renders Codex open_page actions from tool input even without a rich result body', () => {
+    it('renders open_page actions from tool input even without a rich result body', () => {
       const parentEl = createMockEl();
       const toolCall = createToolCall({
         name: 'WebSearch',

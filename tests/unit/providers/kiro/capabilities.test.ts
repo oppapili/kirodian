@@ -17,7 +17,7 @@ describe('KIRO_PROVIDER_CAPABILITIES', () => {
   });
 
   // Kiro always persists native conversation history, so it has no ephemeral
-  // (in-memory-only) session mode -- this must stay false, mirroring Grok.
+  // (in-memory-only) session mode -- this must stay false.
   it('disables ephemeral sessions because Kiro always persists native history', () => {
     expect(KIRO_PROVIDER_CAPABILITIES.supportsEphemeralSessions).toBe(false);
   });

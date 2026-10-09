@@ -272,8 +272,8 @@ describe('TabManager provider execution orchestration', () => {
   it('does not inherit the active tab provider when creating another blank tab', async () => {
     const { manager } = createManager();
     const active = await manager.createTab();
-    active!.providerId = 'codex';
-    active!.draftModel = 'codex:gpt-5';
+    active!.providerId = 'kiro';
+    active!.draftModel = 'kiro:model-a';
 
     await manager.createTab();
 
@@ -1564,8 +1564,8 @@ describe('TabManager provider execution orchestration', () => {
     const { manager } = createManager(createPlugin({ getCachedConversation }));
     const retained = await manager.createTab('conversation-1');
     const blank = await manager.createTab(null, undefined, { activate: false });
-    blank!.draftModel = 'codex:gpt-5';
-    blank!.providerId = 'codex';
+    blank!.draftModel = 'kiro:model-a';
+    blank!.providerId = 'kiro';
     const preview = await manager.createTab('conversation-2', undefined, {
       lifecycleState: 'provisional',
     });
@@ -1573,7 +1573,7 @@ describe('TabManager provider execution orchestration', () => {
     expect(manager.getPersistedState()).toEqual({
       openTabs: [
         { tabId: retained!.id, conversationId: 'conversation-1' },
-        { tabId: blank!.id, conversationId: null, draftModel: 'codex:gpt-5', providerId: 'codex' },
+        { tabId: blank!.id, conversationId: null, draftModel: 'kiro:model-a', providerId: 'kiro' },
         { tabId: preview!.id, conversationId: 'conversation-2' },
       ],
       activeTabId: preview!.id,
@@ -1695,7 +1695,7 @@ describe('TabManager provider execution orchestration', () => {
     await manager.restoreState({
       openTabs: [
         { tabId: 'restored-1', conversationId: 'conversation-1' },
-        { tabId: 'restored-2', conversationId: null, draftModel: 'codex:gpt-5' },
+        { tabId: 'restored-2', conversationId: null, draftModel: 'kiro:model-a' },
       ],
       activeTabId: 'restored-2',
     });
@@ -1710,7 +1710,7 @@ describe('TabManager provider execution orchestration', () => {
     expect(manager.getActiveTabId()).toBe('restored-2');
     expect(onActiveTabChanged).toHaveBeenCalledTimes(1);
     expect(mockCreateTabRuntime.mock.calls[1]?.[0]).toEqual(expect.objectContaining({
-      draftModel: 'codex:gpt-5',
+      draftModel: 'kiro:model-a',
       lifecycleState: 'cold',
       tabId: 'restored-2',
     }));
@@ -1762,11 +1762,11 @@ describe('TabManager provider execution orchestration', () => {
     const commandResult = deferred<any>();
     commandLoader.loadCommands.mockReturnValueOnce(commandResult.promise);
     commandCatalog.listDropdownEntries.mockResolvedValueOnce([{
-      id: 'opencode:review',
+      id: 'kiro:review',
       name: 'review',
     }]);
     (ProviderRegistry.getCapabilities as jest.Mock).mockReturnValue({
-      providerId: 'opencode',
+      providerId: 'kiro',
       supportsProviderCommands: true,
     });
     commandCatalog.getDropdownConfig.mockReturnValue({
@@ -1776,7 +1776,7 @@ describe('TabManager provider execution orchestration', () => {
 
     try {
       const tab = await manager.createTab();
-      tab!.providerId = 'opencode';
+      tab!.providerId = 'kiro';
       const catalogResolver = mockCreateTabRuntime.mock.calls[0]?.[0]
         .getProviderCatalogConfig as (runtime: any) => any;
       const discovery = catalogResolver(tab).discovery;
@@ -2370,7 +2370,7 @@ describe('TabManager provider execution orchestration', () => {
     const source = await manager.createTab();
     source!.state.messages = [{ id: 'latest', role: 'assistant', content: 'Done', timestamp: 1 }];
     const fork = manager.forkToNewTab({
-      messages: [...source!.state.messages], providerId: 'opencode', resumeAt: 'native-latest',
+      messages: [...source!.state.messages], providerId: 'kiro', resumeAt: 'native-latest',
       sourceConversationId: null, sourceSessionId: 'native-session', forkMode: 'full-session',
     }, source);
     for (let attempt = 0; attempt < 10 && !buildForkProviderState.mock.calls.length; attempt++) await Promise.resolve();

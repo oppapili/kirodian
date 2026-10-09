@@ -15,19 +15,19 @@ describe('ProviderProjectionMap', () => {
   it('preserves string values and filters mixed persisted types', () => {
     expect(normalizeProviderProjectionMap({
       claude: '',
-      codex: 'gpt-test',
-      grok: null,
-      opencode: 42,
-      pi: false,
+      kiro: 'gpt-test',
+      alpha: null,
+      beta: 42,
+      gamma: false,
     })).toEqual({
       claude: '',
-      codex: 'gpt-test',
+      kiro: 'gpt-test',
     });
   });
 
   it('returns a fresh, safely-owned object and ignores inherited values', () => {
     const persisted = Object.create({ inherited: 'bad' }) as Record<string, unknown>;
-    persisted.codex = 'gpt-test';
+    persisted.kiro = 'gpt-test';
     Object.defineProperty(persisted, '__proto__', {
       enumerable: true,
       value: 'saved-value',
@@ -36,9 +36,9 @@ describe('ProviderProjectionMap', () => {
     const normalized = normalizeProviderProjectionMap(persisted);
 
     expect(normalized).not.toBe(persisted);
-    expect(normalized.codex).toBe('gpt-test');
+    expect(normalized.kiro).toBe('gpt-test');
     expect(normalized.__proto__).toBe('saved-value');
-    expect(Object.keys(normalized)).toEqual(['codex', '__proto__']);
+    expect(Object.keys(normalized)).toEqual(['kiro', '__proto__']);
     expect(Object.getPrototypeOf(normalized)).toBe(Object.prototype);
     expect(Object.prototype.hasOwnProperty.call(normalized, '__proto__')).toBe(true);
     expect(Object.prototype.hasOwnProperty.call(normalized, 'inherited')).toBe(false);
@@ -50,9 +50,9 @@ describe('ProviderProjectionMap', () => {
     };
 
     const ensured = ensureProviderProjectionMap(settings, 'savedProviderModel');
-    ensured.codex = 'gpt-test';
+    ensured.kiro = 'gpt-test';
 
     expect(settings.savedProviderModel).toBe(ensured);
-    expect(settings.savedProviderModel).toEqual({ codex: 'gpt-test' });
+    expect(settings.savedProviderModel).toEqual({ kiro: 'gpt-test' });
   });
 });

@@ -6,16 +6,16 @@ import { isPathWithinRoot } from '@/core/storage/pathContainment';
 
 describe('isPathWithinRoot', () => {
   it('uses path segments instead of string prefixes', () => {
-    expect(isPathWithinRoot('/home/user/.codex/sessions/a.jsonl', '/home/user/.codex/sessions')).toBe(true);
-    expect(isPathWithinRoot('/home/user/.codex/sessions-evil/a.jsonl', '/home/user/.codex/sessions')).toBe(false);
-    expect(isPathWithinRoot('/home/user/.codex/sessions/../secrets/a.jsonl', '/home/user/.codex/sessions')).toBe(false);
+    expect(isPathWithinRoot('/home/user/.kiro/sessions/a.jsonl', '/home/user/.kiro/sessions')).toBe(true);
+    expect(isPathWithinRoot('/home/user/.kiro/sessions-evil/a.jsonl', '/home/user/.kiro/sessions')).toBe(false);
+    expect(isPathWithinRoot('/home/user/.kiro/sessions/../secrets/a.jsonl', '/home/user/.kiro/sessions')).toBe(false);
   });
 
   it('supports Windows drive and UNC paths independently of the host platform', () => {
-    expect(isPathWithinRoot('C:\\Users\\me\\.codex\\sessions\\a.jsonl', 'C:\\Users\\me\\.codex\\sessions')).toBe(true);
-    expect(isPathWithinRoot('D:\\Users\\me\\.codex\\sessions\\a.jsonl', 'C:\\Users\\me\\.codex\\sessions')).toBe(false);
-    expect(isPathWithinRoot('\\\\wsl$\\Ubuntu\\home\\me\\.codex\\sessions\\a.jsonl', '\\\\wsl$\\Ubuntu\\home\\me\\.codex\\sessions')).toBe(true);
-    expect(isPathWithinRoot('\\\\wsl$\\Other\\home\\me\\.codex\\sessions\\a.jsonl', '\\\\wsl$\\Ubuntu\\home\\me\\.codex\\sessions')).toBe(false);
+    expect(isPathWithinRoot('C:\\Users\\me\\.kiro\\sessions\\a.jsonl', 'C:\\Users\\me\\.kiro\\sessions')).toBe(true);
+    expect(isPathWithinRoot('D:\\Users\\me\\.kiro\\sessions\\a.jsonl', 'C:\\Users\\me\\.kiro\\sessions')).toBe(false);
+    expect(isPathWithinRoot('\\\\wsl$\\Ubuntu\\home\\me\\.kiro\\sessions\\a.jsonl', '\\\\wsl$\\Ubuntu\\home\\me\\.kiro\\sessions')).toBe(true);
+    expect(isPathWithinRoot('\\\\wsl$\\Other\\home\\me\\.kiro\\sessions\\a.jsonl', '\\\\wsl$\\Ubuntu\\home\\me\\.kiro\\sessions')).toBe(false);
   });
 
   it('rejects an existing symlink that escapes the trusted root', () => {

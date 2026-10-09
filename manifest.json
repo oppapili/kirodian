@@ -3,7 +3,7 @@
   "name": "Kirodian",
   "version": "0.3.0-beta.1",
   "minAppVersion": "1.13.0",
-  "description": "Embeds Kiro CLI and other coding agents (Claude Code, Codex, Grok, Opencode, Pi) as AI collaborators in your vault. Your vault becomes their working directory, giving them capabilities for file reads and writes, search, bash commands, and multi-step workflows. A fork of Claudian.",
+  "description": "Embeds Kiro CLI as an AI collaborator in your vault. Your vault becomes its working directory, giving it capabilities for file reads and writes, search, bash commands, and multi-step workflows. A fork of Claudian.",
   "author": "oppapili (fork of Claudian by Yishen Tu)",
   "authorUrl": "https://github.com/oppapili/kirodian",
   "isDesktopOnly": true

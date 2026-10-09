@@ -21,20 +21,20 @@ describe('renderProviderModelEnablementWarning', () => {
       {
         getHasEnabledModels: () => hasModels,
         getIsEnabled: () => enabled,
-        providerId: 'codex',
-        providerName: 'Codex',
+        providerId: 'kiro',
+        providerName: 'Kiro',
       },
     );
 
     expect(container.createDiv).toHaveBeenCalledWith({
       cls: expect.stringContaining('claudian-setting-validation-warning'),
-      text: 'No Codex models are enabled. Go to Models below and enable at least one model.',
+      text: 'No Kiro models are enabled. Go to Models below and enable at least one model.',
     });
     expect(warningEl.toggleClass).toHaveBeenLastCalledWith('claudian-hidden', false);
 
     hasModels = true;
-    warning.context.notifyProviderModelOptionsChanged('codex');
-    expect(notifyProviderModelOptionsChanged).toHaveBeenCalledWith('codex');
+    warning.context.notifyProviderModelOptionsChanged('kiro');
+    expect(notifyProviderModelOptionsChanged).toHaveBeenCalledWith('kiro');
     expect(warningEl.toggleClass).toHaveBeenLastCalledWith('claudian-hidden', true);
 
     hasModels = false;

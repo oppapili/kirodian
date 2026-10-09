@@ -17,7 +17,7 @@ function createController(): SessionBrowser {
     plugin: {
       getConversationList: jest.fn().mockReturnValue([{
         id: 'session-1',
-        providerId: 'codex',
+        providerId: 'kiro',
         title: 'Review architecture',
         createdAt: 1_000,
         lastActivityAt: 2_000,

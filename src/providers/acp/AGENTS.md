@@ -1,10 +1,10 @@
 # Shared ACP constraints
 
 `src/providers/acp/` is the protocol layer shared by ACP-backed providers
-(currently grok and kiro). It owns Agent Client Protocol mechanics and
+(currently kiro). It owns Agent Client Protocol mechanics and
 protocol-level normalization only; provider launch policy, extensions,
 provider-specific normalization, and history stay provider-owned. Each provider
-guide (`../grok/AGENTS.md`, `../kiro/AGENTS.md`) states how it uses this layer.
+guide (`../kiro/AGENTS.md`) states how it uses this layer.
 
 ## Boundary
 

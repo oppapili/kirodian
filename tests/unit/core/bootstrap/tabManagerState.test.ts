@@ -11,14 +11,14 @@ describe('decodeTabWorkspaceViewState', () => {
       activeTabId: 'tab-2',
       openTabs: [
         { conversationId: 'conversation-1', tabId: 'tab-1' },
-        { conversationId: null, draftModel: 'codex:gpt-5', tabId: 'tab-2' },
+        { conversationId: null, draftModel: 'kiro:model-a', tabId: 'tab-2' },
       ],
       expandedTitleTabIds: ['tab-2'],
     })).toEqual({
       activeTabId: 'tab-2',
       openTabs: [
         { conversationId: 'conversation-1', tabId: 'tab-1' },
-        { conversationId: null, draftModel: 'codex:gpt-5', tabId: 'tab-2' },
+        { conversationId: null, draftModel: 'kiro:model-a', tabId: 'tab-2' },
       ],
       expandedTitleTabIds: ['tab-2'],
     });
@@ -117,14 +117,14 @@ describe('normalizeTabManagerState', () => {
       openTabs: [
         { tabId: 'tab-1', conversationId: 'conv-1' },
         { tabId: 'tab-1', conversationId: 'conv-2' },
-        { tabId: 'tab-2', conversationId: null, draftModel: 'codex:gpt-5' },
+        { tabId: 'tab-2', conversationId: null, draftModel: 'kiro:model-a' },
       ],
       activeTabId: 'tab-2',
     });
 
     expect(result?.openTabs).toEqual([
       { tabId: 'tab-1', conversationId: 'conv-1' },
-      { tabId: 'tab-2', conversationId: null, draftModel: 'codex:gpt-5' },
+      { tabId: 'tab-2', conversationId: null, draftModel: 'kiro:model-a' },
     ]);
   });
 });
@@ -133,7 +133,7 @@ describe('resolveTabRestorePlan', () => {
   const state = {
     openTabs: [
       { tabId: 'tab-1', conversationId: 'conv-1' },
-      { tabId: 'tab-2', conversationId: null, draftModel: 'codex:gpt-5' },
+      { tabId: 'tab-2', conversationId: null, draftModel: 'kiro:model-a' },
       { tabId: 'preview-tab', conversationId: 'conv-preview' },
     ],
     activeTabId: 'preview-tab',
@@ -181,13 +181,13 @@ describe('resolveTabRestorePlan', () => {
 it('preserves a blank tab provider through versioned and legacy decoding', () => {
   const state = {
     activeTabId: 'draft',
-    openTabs: [{ tabId: 'draft', conversationId: null, draftModel: 'retired-endpoint', providerId: 'codex' }],
+    openTabs: [{ tabId: 'draft', conversationId: null, draftModel: 'retired-endpoint', providerId: 'kiro' }],
   };
   expect(decodeTabWorkspaceViewState({ ...state, version: 1 })).toEqual(state);
   expect(normalizeTabManagerState(state)).toEqual(state);
 });
 
-it.each([null, 'codex'])('preserves explicit draft provider %s through snapshot decoding', providerId => {
+it.each([null, 'kiro'])('preserves explicit draft provider %s through snapshot decoding', providerId => {
   const state = { openTabs: [{ tabId: 'draft', conversationId: null, draftModel: 'retired', providerId }], activeTabId: 'draft' };
   expect(decodeTabWorkspaceViewState({ version: 1, ...state })).toEqual(state);
 });

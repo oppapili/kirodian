@@ -8,7 +8,6 @@ import {
   mkdirSync,
   promises as fsPromises,
   readFileSync,
-  rmSync,
 } from 'fs';
 import { assertRuntimeDependencyParity } from './scripts/runtimeDependencyParity.mjs';
 import rendererSafeUnrefHelpers from './scripts/rendererSafeUnref.js';
@@ -88,7 +87,7 @@ const patchSdkImportMeta = {
   setup(build) {
     build.onLoad(
       {
-        filter: /[\\/]node_modules[\\/](?:@openai[\\/]codex-sdk[\\/]dist[\\/]index\.js|@anthropic-ai[\\/]claude-agent-sdk[\\/]sdk\.mjs)$/,
+        filter: /[\\/]node_modules[\\/]@anthropic-ai[\\/]claude-agent-sdk[\\/]sdk\.mjs$/,
       },
       async (args) => {
         const contents = await fsPromises.readFile(args.path, 'utf8');
@@ -147,7 +146,6 @@ const copyToObsidian = {
   setup(build) {
     build.onEnd((result) => {
       if (result.errors.length > 0) return;
-      rmSync(path.join(process.cwd(), '.codex-vendor'), { recursive: true, force: true });
 
       if (!OBSIDIAN_PLUGIN_PATH) return;
 
@@ -162,9 +160,6 @@ const copyToObsidian = {
           console.log(`Copied ${file} to Obsidian plugin folder`);
         }
       }
-
-      const pluginVendorRoot = path.join(OBSIDIAN_PLUGIN_PATH, '.codex-vendor');
-      rmSync(pluginVendorRoot, { recursive: true, force: true });
     });
   }
 };

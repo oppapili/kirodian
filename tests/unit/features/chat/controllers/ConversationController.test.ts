@@ -526,8 +526,8 @@ describe('ConversationController - provider switching', () => {
     const ensureExecutionForConversation = jest.fn().mockResolvedValue(undefined);
     const switchedConversation = {
       id: 'new-conv',
-      providerId: 'codex',
-      title: 'Codex Conversation',
+      providerId: 'kiro',
+      title: 'Kiro Conversation',
       messages: [],
       sessionId: null,
       createdAt: Date.now(),
