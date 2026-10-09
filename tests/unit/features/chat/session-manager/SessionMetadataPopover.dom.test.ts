@@ -12,7 +12,7 @@ import {
   formatSessionLastActive,
 } from '@/features/chat/session-manager/SessionMetadataPopover';
 import { ChatState } from '@/features/chat/state/ChatState';
-import { OPENAI_PROVIDER_ICON } from '@/shared/icons';
+import { KIRO_PROVIDER_ICON } from '@/shared/icons';
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
@@ -28,7 +28,7 @@ function createController(conversations?: ConversationMeta[]): SessionBrowser {
     plugin: {
       getConversationList: jest.fn().mockReturnValue(conversations ?? [{
         id: 'session-1',
-        providerId: 'codex',
+        providerId: 'kiro',
         title: 'Review architecture',
         createdAt: testDate({ minutes: -1 }).getTime(),
         lastActivityAt: testDate().getTime(),
@@ -67,7 +67,7 @@ describe('SessionBrowser session metadata popover', () => {
     const createdAt = testDate({ days: -1 }).getTime();
     const lastActivityAt = testDate().getTime();
     const controller = createController([{
-      id: 'session-1', providerId: 'codex', selectedModel: 'gpt-5.1-codex', title: 'Review architecture',
+      id: 'session-1', providerId: 'kiro', selectedModel: 'claude-sonnet-4', title: 'Review architecture',
       createdAt, lastActivityAt, linkedContentPath, messageCount: 1, preview: '',
     }]);
     const container = document.createElement('div');
@@ -75,7 +75,7 @@ describe('SessionBrowser session metadata popover', () => {
     controller.renderHistoryDropdown(container, {
       onSelectConversation: jest.fn().mockResolvedValue(undefined), showMetadataPopover: true,
       organization: 'linked-content', language: 'en', contentExists: () => true, contentIsNote: () => false,
-      getProviderIcon: () => OPENAI_PROVIDER_ICON, getModelLabel: () => 'GPT-5.1 Codex',
+      getProviderIcon: () => KIRO_PROVIDER_ICON, getModelLabel: () => 'Claude Sonnet 4',
     });
     const content = within(container).getByRole('button', { name: /Review architecture/ });
     const item = content.closest<HTMLElement>('.claudian-history-item')!;

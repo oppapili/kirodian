@@ -10,10 +10,31 @@ import { Notice } from 'obsidian';
 
 import type { ProviderExecutionRequest } from '@/core/execution';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
+import type { ProviderQuestionReply } from '@/core/providers/types';
+import type { AskUserAnswers, ToolCallInfo } from '@/core/types';
 import { InputController, type InputControllerDeps } from '@/features/chat/input/InputController';
 import { InlineInteractionPrompts } from '@/features/chat/interactions/InlineInteractionPrompts';
 import { ChatState } from '@/features/chat/state/ChatState';
-import { formatCodexQuestionReply } from '@/providers/codex/normalization/codexQuestionNormalization';
+
+// A test-local reply formatter standing in for a provider's `formatQuestionReply` hook.
+// It drives the generic side-chat async-question delivery pipeline (queue, cancel, steer,
+// waiting indicator, draft preservation) without depending on any one provider's
+// normalization module; the exact serialized shape is this fixture's own contract.
+function formatQuestionReplyFixture(tool: ToolCallInfo, answers: AskUserAnswers): ProviderQuestionReply | null {
+  if (tool.name !== 'AskUserQuestion' || tool.input.replyMode !== 'user-message' || !Array.isArray(tool.input.questions)) return null;
+  const replies = tool.input.questions.map((question: Record<string, unknown>, index) => {
+    const text = typeof question.question === 'string' ? question.question : '';
+    const key = typeof question.id === 'string' || typeof question.id === 'number' ? String(question.id) : String(index);
+    const value = answers[key] ?? answers[text];
+    const answer = Array.isArray(value) ? value.join(', ') : value;
+    return { questionItemId: JSON.stringify(['request_user_input_async', tool.id, index]), question: text, answer };
+  });
+  if (replies.length === 0 || replies.some(reply => !reply.question || typeof reply.answer !== 'string' || !reply.answer.trim())) return null;
+  return {
+    content: `<send_user_message_question_reply>\n${JSON.stringify(replies).replace(/</g, '\\u003c')}\n</send_user_message_question_reply>`,
+    displayContent: '',
+  };
+}
 
 const taskResultInterpreter = ProviderRegistry.getTaskResultInterpreter('claude');
 
@@ -94,7 +115,7 @@ it('completing one approval leaves the other reachable for cancellation', async 
 
 
 async function showAsyncQuestion() {
-  const harness = createHarness({ formatQuestionReply: formatCodexQuestionReply, taskResultInterpreter });
+  const harness = createHarness({ formatQuestionReply: formatQuestionReplyFixture, taskResultInterpreter });
   const { started } = await startSideChat(harness);
   harness.controller.expand();
   const native = harness.backend.latest;

@@ -10,7 +10,6 @@ import type { ProviderPermissionModeOption } from '@/core/providers/types';
 import { createInputToolbar } from '@/features/chat/composer/toolbar/InputToolbar';
 import type { ToolbarCallbacks } from '@/features/chat/composer/toolbar/types';
 import { claudeChatUIConfig } from '@/providers/claude/ui/ClaudeChatUIConfig';
-import { codexChatUIConfig } from '@/providers/codex/ui/CodexChatUIConfig';
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
@@ -427,56 +426,21 @@ describe('model button', () => {
   it('rereads models and settings when the menu opens', () => {
     const { settings, ui, uiConfig } = renderToolbar();
     uiConfig.getModelOptions.mockImplementation(() => [
-      { value: 'gpt-new', label: 'GPT New', group: 'Codex' },
-      { value: 'gpt-fast', label: 'GPT Fast', group: 'Codex' },
+      { value: 'gpt-new', label: 'GPT New', group: 'Kiro' },
+      { value: 'gpt-fast', label: 'GPT Fast', group: 'Kiro' },
       { value: 'claude', label: 'Claude', group: 'Claude' },
     ]);
     settings.model = 'gpt-new';
     fireEvent.click(ui.getByRole('button', { name: /^Model: Sonnet/ }));
     expect(ui.getByRole('button', { name: /^Model: GPT New/ })).toBeDefined();
-    const codex = ui.getByRole('group', { name: 'Codex' });
-    expect(within(codex).getAllByRole('option').map(item => item.textContent)).toEqual(['GPT New', 'GPT Fast']);
+    const kiro = ui.getByRole('group', { name: 'Kiro' });
+    expect(within(kiro).getAllByRole('option').map(item => item.textContent)).toEqual(['GPT New', 'GPT Fast']);
     expect(within(ui.getByRole('group', { name: 'Claude' })).getAllByRole('option')).toHaveLength(1);
     expect(uiConfig.getModelOptions).toHaveBeenLastCalledWith({ ...settings, environmentVariables: 'ANTHROPIC_MODEL=opus' });
   });
 });
 
 describe('permission button', () => {
-  it('shows all Codex permissions and allows keyboard selection with accessible descriptions', async () => {
-    const { callbacks, host, toolbar, ui, uiConfig } = renderToolbar({
-      settings: { permissionMode: 'auto-review' },
-    });
-    uiConfig.getPermissionModeOptions = () => codexChatUIConfig.getPermissionModeOptions!()!;
-    toolbar.permissionToggle.updateDisplay();
-    const button = ui.getByRole('button', { name: 'Permission mode: Approve for me' });
-    const icon = button.querySelector<HTMLElement>('.claudian-toolbar-chip-icon')!;
-    expect(getComputedStyle(icon).display).toBe('none');
-    fireEvent.keyDown(button, { key: 'ArrowDown' });
-    const items = ui.getAllByRole('menuitemradio');
-    expect(items).toHaveLength(3);
-    expect(items[0]).toBe(ui.getByRole('menuitemradio', { name: /^Approve for me/ }));
-    expect(items[1]).toBe(ui.getByRole('menuitemradio', { name: /^Ask for approval/ }));
-    expect(ui.getByRole('menuitemradio', { name: /^Approve for me/, checked: true })).toBe(document.activeElement);
-    expect(ui.getByText('Auto-review extra access.')).toBeTruthy();
-    expect((await axe(host)).violations).toEqual([]);
-    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
-    expect(document.activeElement).toBe(items[1]);
-    fireEvent.keyDown(document.activeElement!, { key: 'ArrowDown' });
-    const fullAccess = ui.getByRole('menuitemradio', { name: /^Full access/ });
-    expect(document.activeElement).toBe(fullAccess);
-    fireEvent.click(fullAccess);
-    await flush();
-    expect(callbacks.onPermissionModeChange).toHaveBeenLastCalledWith('yolo');
-    expect(button.classList.contains('claudian-toolbar-chip--alert')).toBe(true);
-    expect(getComputedStyle(icon).display).not.toBe('none');
-    fireEvent.click(button);
-    fireEvent.click(ui.getByRole('menuitemradio', { name: /^Ask for approval/ }));
-    await flush();
-    expect(callbacks.onPermissionModeChange).toHaveBeenLastCalledWith('normal');
-    expect(ui.getByRole('button', { name: 'Permission mode: Ask for approval' })).toBe(button);
-    expect(getComputedStyle(icon).display).toBe('none');
-  });
-
   it('offers both provider modes, marks the active one, and closes after a choice', async () => {
     jest.mocked(setIcon).mockClear();
     const { callbacks, host, toolbar, ui } = renderToolbar();

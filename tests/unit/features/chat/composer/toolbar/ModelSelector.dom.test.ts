@@ -2,7 +2,6 @@
 
 import '@/providers';
 
-import { TEST_CODEX_CATALOG } from '@test/helpers/codexModels';
 import { fireEvent, within } from '@testing-library/dom';
 
 import { ModelSelector } from '@/features/chat/composer/toolbar/ModelSelector';
@@ -52,12 +51,14 @@ it('preserves provider group display order while keeping saved order inside each
         discoveredModels: ['opus', 'haiku'].map(value => ({ value, label: value, description: '' })),
         visibleModels: ['haiku', 'opus'],
       },
-      codex: {
+      kiro: {
         enabled: true,
-        discoveredModels: TEST_CODEX_CATALOG,
-        visibleModels: ['gpt-5.4-mini', 'gpt-5.5'],
+        discoveredModels: [
+          { value: 'claude-sonnet-4', label: 'Claude Sonnet 4', description: '' },
+          { value: 'claude-haiku-4.5', label: 'Claude Haiku 4.5', description: '' },
+        ],
+        visibleModels: ['claude-haiku-4.5', 'claude-sonnet-4'],
       },
-      grok: { enabled: false }, pi: { enabled: false }, opencode: { enabled: false },
     },
   };
   new ModelSelector(host, {
@@ -67,13 +68,13 @@ it('preserves provider group display order while keeping saved order inside each
   fireEvent.click(within(host).getByRole('button', { name: /^Set up models/ }));
   // Each row names its provider so it can carry that provider's brand colour.
   expect(within(host).getAllByRole('option').map(node => node.getAttribute('data-provider')))
-    .toEqual(['claude', 'claude', 'codex', 'codex']);
+    .toEqual(['claude', 'claude', 'kiro', 'kiro']);
   const groups = within(host).getAllByRole('group');
   expect(groups.map(group => [
     group.getAttribute('aria-labelledby') && host.querySelector(`#${group.getAttribute('aria-labelledby')}`)?.textContent,
     within(group).getAllByRole('option').map(item => item.textContent),
   ])).toEqual([
     ['Claude Code', ['haiku', 'opus']],
-    ['Codex CLI', ['GPT-5.4 Mini', 'GPT-5.5']],
+    ['Kiro', ['Claude Haiku 4.5', 'Claude Sonnet 4']],
   ]);
 });
