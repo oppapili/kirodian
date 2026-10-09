@@ -5,7 +5,7 @@ import {
 } from '@/core/commands/builtInCommands';
 
 const forkCapable = { providerId: 'claude' as const, supportsFork: true };
-const forkIncapable = { providerId: 'opencode' as const, supportsFork: false };
+const forkIncapable = { providerId: 'kiro' as const, supportsFork: false };
 
 describe('detectSideChatCommand', () => {
   it.each([

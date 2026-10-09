@@ -8,7 +8,7 @@ import type { TitleGenerationService } from '@/core/providers/types';
 import { ConversationController, type ConversationControllerDeps } from '@/features/chat/controllers/ConversationController';
 import { SessionBrowser } from '@/features/chat/session-manager/SessionBrowser';
 import { ChatState } from '@/features/chat/state/ChatState';
-import { OPENAI_PROVIDER_ICON } from '@/shared/icons';
+import { KIRO_PROVIDER_ICON } from '@/shared/icons';
 
 jest.mock('@/shared/modals/ConfirmModal', () => ({
   confirm: jest.fn().mockResolvedValue(true),
@@ -483,8 +483,8 @@ describe('SessionBrowser', () => {
         const container = createMockEl();
         (deps.plugin.getConversationList as jest.Mock).mockReturnValue([{
           id: 'session-1',
-          providerId: 'codex',
-          selectedModel: 'gpt-5.1-codex',
+          providerId: 'kiro',
+          selectedModel: 'kiro-default',
           title: 'Review architecture',
           createdAt: 1_000,
           lastActivityAt: 2_000,
@@ -496,8 +496,8 @@ describe('SessionBrowser', () => {
         controller.renderHistoryDropdown(container, {
           onSelectConversation: jest.fn(),
           showMetadataPopover: true,
-          getProviderIcon: () => OPENAI_PROVIDER_ICON,
-          getModelLabel: () => 'GPT-5.1 Codex',
+          getProviderIcon: () => KIRO_PROVIDER_ICON,
+          getModelLabel: () => 'Kiro Default',
         });
 
         const item = container.querySelector('.claudian-history-item')!;
@@ -535,7 +535,7 @@ describe('SessionBrowser', () => {
           .map((value: { textContent: string }) => value.textContent))
           .toEqual([
             'Architecture',
-            'GPT-5.1 Codex',
+            'Kiro Default',
             'Aug 3, 2026',
             'Aug 5, 2026, 14:28',
           ]);
@@ -601,8 +601,8 @@ describe('SessionBrowser', () => {
         const container = createMockEl();
         (deps.plugin.getConversationList as jest.Mock).mockReturnValue([{
           id: 'session-1',
-          providerId: 'codex',
-          selectedModel: 'gpt-5.1-codex',
+          providerId: 'kiro',
+          selectedModel: 'kiro-default',
           title: 'Review architecture',
           createdAt: 1_000,
           lastActivityAt: 2_000,
@@ -613,8 +613,8 @@ describe('SessionBrowser', () => {
         controller.renderHistoryDropdown(container, {
           onSelectConversation: jest.fn(),
           showMetadataPopover: true,
-          getProviderIcon: () => OPENAI_PROVIDER_ICON,
-          getModelLabel: () => 'GPT-5.1 Codex',
+          getProviderIcon: () => KIRO_PROVIDER_ICON,
+          getModelLabel: () => 'Kiro Default',
         });
 
         const item = container.querySelector('.claudian-history-item')!;
@@ -630,7 +630,7 @@ describe('SessionBrowser', () => {
         expect(popover.querySelectorAll('.claudian-session-metadata-row')).toHaveLength(3);
         expect(popover.querySelectorAll('.claudian-session-metadata-value')
           .map((value: { textContent: string }) => value.textContent))
-          .toEqual(['GPT-5.1 Codex', 'Aug 3, 2026', 'Aug 5, 2026, 14:28']);
+          .toEqual(['Kiro Default', 'Aug 3, 2026', 'Aug 5, 2026, 14:28']);
       });
 
       it('hides the pinned section when no sessions are pinned', () => {

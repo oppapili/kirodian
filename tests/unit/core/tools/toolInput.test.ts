@@ -62,7 +62,7 @@ describe('extractResolvedAnswersFromResultText', () => {
     });
   });
 
-  it('extracts nested Codex answer objects from JSON result text', () => {
+  it('extracts nested agent answer objects from JSON result text', () => {
     expect(extractResolvedAnswersFromResultText('{"answers":{"q1":{"answers":["yes"]}}}')).toEqual({
       q1: 'yes',
     });

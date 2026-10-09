@@ -267,21 +267,21 @@ describe('SessionStorage', () => {
 
     it('preserves explicit providerId on load', async () => {
       const metadata = {
-        id: 'session-codex',
-        providerId: 'codex',
-        title: 'Codex Session',
+        id: 'session-kiro',
+        providerId: 'kiro',
+        title: 'Kiro Session',
         createdAt: 1700000000,
         lastActivityAt: 1700001000,
       };
 
       mockAdapter.exists.mockImplementation(async (path: string) => (
-        path === `${getDeviceSessionsPath(DEVICE_KEY)}/session-codex.meta.json`
+        path === `${getDeviceSessionsPath(DEVICE_KEY)}/session-kiro.meta.json`
       ));
       mockAdapter.read.mockResolvedValue(JSON.stringify(metadata));
 
-      const result = await storage.loadMetadata('session-codex');
+      const result = await storage.loadMetadata('session-kiro');
 
-      expect(result!.providerId).toBe('codex');
+      expect(result!.providerId).toBe('kiro');
     });
 
     it('returns null on parse error', async () => {

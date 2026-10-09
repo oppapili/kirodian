@@ -2441,7 +2441,7 @@ describe('ClaudianPlugin', () => {
         sessionId: null,
         providerState: { previousProviderSessionIds: ['post-commit-thread'] },
       }));
-      expect(plugin.settings.pendingProviderSessionInvalidations.codex).toBeUndefined();
+      expect(plugin.settings.pendingProviderSessionInvalidations.kiro).toBeUndefined();
     });
   });
 

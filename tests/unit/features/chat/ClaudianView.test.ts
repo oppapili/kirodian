@@ -39,7 +39,7 @@ function createOwnershipSession() {
   };
 }
 
-function createModelRefreshTab(providerId: 'codex' | 'grok') {
+function createModelRefreshTab(providerId: 'kiro' | 'claude') {
   return {
     conversationId: `${providerId}-conversation`,
     dom: {
@@ -67,7 +67,7 @@ function createModelRefreshTab(providerId: 'codex' | 'grok') {
   };
 }
 
-function createBlankModelRefreshTab(providerId: 'codex' | 'grok') {
+function createBlankModelRefreshTab(providerId: 'kiro' | 'claude') {
   return {
     ...createModelRefreshTab(providerId),
     conversationId: null,
@@ -109,13 +109,13 @@ describe('ClaudianView model refresh routing', () => {
       providerId,
       supportsImageAttachments: false,
     } as any));
-    jest.spyOn(ProviderRegistry, 'getEnabledProviderIds').mockReturnValue(['codex', 'grok']);
+    jest.spyOn(ProviderRegistry, 'getEnabledProviderIds').mockReturnValue(['kiro', 'claude']);
     jest.spyOn(ProviderRegistry, 'getTaskResultInterpreter')
       .mockReturnValue(null as any);
 
-    const codexTab = createModelRefreshTab('codex');
-    const grokTab = createModelRefreshTab('grok');
-    const blankGrokTab = createBlankModelRefreshTab('grok');
+    const kiroTab = createModelRefreshTab('kiro');
+    const claudeTab = createModelRefreshTab('claude');
+    const blankClaudeTab = createBlankModelRefreshTab('claude');
     const primeProviderExecution = jest.fn();
     const view = Object.create(ClaudianView.prototype) as any;
     attachSessionBrowser(view);
@@ -125,19 +125,19 @@ describe('ClaudianView model refresh routing', () => {
       settings: {},
     };
     view.tabManager = {
-      getAllTabs: jest.fn().mockReturnValue([codexTab, grokTab, blankGrokTab]),
+      getAllTabs: jest.fn().mockReturnValue([kiroTab, claudeTab, blankClaudeTab]),
       primeProviderExecution,
       reconcileProviderAvailability: jest.fn(),
     };
 
-    view.refreshModelSelector('codex');
+    view.refreshModelSelector('kiro');
 
-    expect(codexTab.ui.modelSelector.updateDisplay).toHaveBeenCalledTimes(1);
-    expect(codexTab.ui.modelSelector.renderOptions).toHaveBeenCalledTimes(1);
-    expect(grokTab.ui.modelSelector.updateDisplay).not.toHaveBeenCalled();
-    expect(grokTab.ui.modelSelector.renderOptions).not.toHaveBeenCalled();
-    expect(blankGrokTab.ui.modelSelector.updateDisplay).toHaveBeenCalled();
-    expect(blankGrokTab.ui.modelSelector.renderOptions).toHaveBeenCalled();
+    expect(kiroTab.ui.modelSelector.updateDisplay).toHaveBeenCalledTimes(1);
+    expect(kiroTab.ui.modelSelector.renderOptions).toHaveBeenCalledTimes(1);
+    expect(claudeTab.ui.modelSelector.updateDisplay).not.toHaveBeenCalled();
+    expect(claudeTab.ui.modelSelector.renderOptions).not.toHaveBeenCalled();
+    expect(blankClaudeTab.ui.modelSelector.updateDisplay).toHaveBeenCalled();
+    expect(blankClaudeTab.ui.modelSelector.renderOptions).toHaveBeenCalled();
     expect(view.tabManager.reconcileProviderAvailability).toHaveBeenCalledTimes(1);
     expect(primeProviderExecution).not.toHaveBeenCalled();
   });
@@ -1866,7 +1866,7 @@ describe('ClaudianView tab controls', () => {
       getReasoningOptions: () => [],
       isAdaptiveReasoningModel: () => false,
       getModelOptions: jest.fn().mockReturnValue([
-        { value: 'gpt-5.1-codex', label: 'GPT-5.1 Codex' },
+        { value: 'kiro-default', label: 'Kiro Default' },
       ]),
     } as any);
     const view = Object.create(ClaudianView.prototype) as any;
@@ -1874,9 +1874,9 @@ describe('ClaudianView tab controls', () => {
     view.plugin = { settings: {} };
 
     expect(view.getConversationModelLabel({
-      providerId: 'codex',
-      selectedModel: 'gpt-5.1-codex',
-    })).toBe('GPT-5.1 Codex');
+      providerId: 'kiro',
+      selectedModel: 'kiro-default',
+    })).toBe('Kiro Default');
   });
 
   it('ignores malformed persisted model metadata in the session hover card', () => {
@@ -2505,7 +2505,7 @@ describe('ClaudianView tab workspace persistence', () => {
       activeTabId: 'tab-2',
       openTabs: [
         { conversationId: 'conversation-1', tabId: 'tab-1' },
-        { conversationId: null, draftModel: 'codex:gpt-5', tabId: 'tab-2' },
+        { conversationId: null, draftModel: 'kiro:model-a', tabId: 'tab-2' },
       ],
     };
     view.tabManager = {
@@ -2606,7 +2606,7 @@ describe('ClaudianView tab workspace persistence', () => {
       openTabs: [
         { conversationId: 'conversation-1', tabId: 'tab-1' },
         { conversationId: 'conversation-2', tabId: 'tab-2' },
-        { conversationId: null, draftModel: 'codex:gpt-5', tabId: 'tab-3' },
+        { conversationId: null, draftModel: 'kiro:model-a', tabId: 'tab-3' },
       ],
       expandedTitleTabIds: ['tab-1'],
     };

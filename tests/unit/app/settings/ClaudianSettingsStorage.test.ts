@@ -140,7 +140,7 @@ describe('ClaudianSettingsStorage', () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         lastSelectedChatModel: {
-          providerId: 'codex',
+          providerId: 'kiro',
           model: 42,
         },
       }));

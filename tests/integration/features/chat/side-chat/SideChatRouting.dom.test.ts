@@ -432,9 +432,9 @@ it('uses saved native execution when the provider requires persistent forks', as
 it('uses the configured provider environment when preparing the native side fork', async () => {
   let database: string | undefined;
   const harness = createHarness({
-    settings: { providerConfigs: { claude: { environmentVariables: 'OPENCODE_DB=/custom/chat.db' } } },
+    settings: { providerConfigs: { claude: { environmentVariables: 'KIRO_DB=/custom/chat.db' } } },
     buildForkProviderState: (_session, _checkpoint, _state, _vault, context) => {
-      database = context?.environment.OPENCODE_DB;
+      database = context?.environment.KIRO_DB;
       return {};
     },
   });

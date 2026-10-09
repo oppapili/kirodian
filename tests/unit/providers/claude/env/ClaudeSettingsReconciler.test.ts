@@ -71,11 +71,11 @@ describe('claudeSettingsReconciler', () => {
         },
         messages: [{ id: 'message', role: 'user', content: 'Keep me', timestamp: 1 }],
       } as unknown as Conversation;
-      const codexConversation = {
-        id: 'codex-conversation',
-        providerId: 'codex',
-        sessionId: 'codex-session',
-        providerState: { threadId: 'codex-thread' },
+      const kiroConversation = {
+        id: 'kiro-conversation',
+        providerId: 'kiro',
+        sessionId: 'kiro-session',
+        providerState: { threadId: 'kiro-thread' },
         messages: [],
       } as unknown as Conversation;
       const settings: Record<string, unknown> = {
@@ -90,7 +90,7 @@ describe('claudeSettingsReconciler', () => {
 
       const result = claudeSettingsReconciler.reconcileModelWithEnvironment(
         settings,
-        [claudeConversation, codexConversation],
+        [claudeConversation, kiroConversation],
       );
 
       expect(result.invalidatedConversations).toEqual([claudeConversation]);
@@ -102,9 +102,9 @@ describe('claudeSettingsReconciler', () => {
         uiMetadata: { keep: true },
       });
       expect(claudeConversation.messages).toHaveLength(1);
-      expect(codexConversation).toMatchObject({
-        sessionId: 'codex-session',
-        providerState: { threadId: 'codex-thread' },
+      expect(kiroConversation).toMatchObject({
+        sessionId: 'kiro-session',
+        providerState: { threadId: 'kiro-thread' },
       });
     });
 

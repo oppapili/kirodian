@@ -32,15 +32,15 @@ function createUIConfig(config: TestProviderConfig): ProviderChatUIConfig {
 describe('conversation model resolution', () => {
   const providers: Record<ProviderId, TestProviderConfig> = {
     claude: { defaultModel: 'opus', options: ['haiku', 'opus'] },
-    codex: { defaultModel: 'codex/gpt-5', options: ['codex/gpt-5', 'codex/gpt-5-mini'] },
+    kiro: { defaultModel: 'kiro/model-a', options: ['kiro/model-a', 'kiro/model-b'] },
     empty: { defaultModel: null, options: [] },
   };
 
   beforeEach(() => {
     providers.claude = { defaultModel: 'opus', options: ['haiku', 'opus'] };
-    providers.codex = {
-      defaultModel: 'codex/gpt-5',
-      options: ['codex/gpt-5', 'codex/gpt-5-mini'],
+    providers.kiro = {
+      defaultModel: 'kiro/model-a',
+      options: ['kiro/model-a', 'kiro/model-b'],
     };
     providers.empty = { defaultModel: null, options: [] };
     jest.spyOn(ProviderRegistry, 'getRegisteredProviderIds')
@@ -60,7 +60,7 @@ describe('conversation model resolution', () => {
 
   it('preserves an unavailable last-selected model', () => {
     expect(resolveNewConversationModel({
-      enabledProviders: ['claude', 'codex'], displayOrder: ['claude', 'codex'],
+      enabledProviders: ['claude', 'kiro'], displayOrder: ['claude', 'kiro'],
       lastSelectedChatModel: { providerId: 'claude', model: 'retired' },
     })).toEqual({ providerId: 'claude', model: 'retired', source: 'last-selected' });
   });
@@ -72,14 +72,14 @@ describe('conversation model resolution', () => {
   describe('resolveNewConversationModel', () => {
     it('uses the provider-qualified global selection when it is currently available', () => {
       const result = resolveNewConversationModel({
-        displayOrder: ['claude', 'codex'],
-        enabledProviders: ['claude', 'codex'],
-        lastSelectedChatModel: { providerId: 'codex', model: 'codex/gpt-5-mini' },
+        displayOrder: ['claude', 'kiro'],
+        enabledProviders: ['claude', 'kiro'],
+        lastSelectedChatModel: { providerId: 'kiro', model: 'kiro/model-b' },
       });
 
       expect(result).toEqual({
-        model: 'codex/gpt-5-mini',
-        providerId: 'codex',
+        model: 'kiro/model-b',
+        providerId: 'kiro',
         source: 'last-selected',
       });
     });
@@ -106,38 +106,38 @@ describe('conversation model resolution', () => {
 
     it('preserves the unavailable last selected model', () => {
       const result = resolveNewConversationModel({
-        displayOrder: ['claude', 'codex'],
-        enabledProviders: ['claude', 'codex'],
-        lastSelectedChatModel: { providerId: 'codex', model: 'codex/retired' },
+        displayOrder: ['claude', 'kiro'],
+        enabledProviders: ['claude', 'kiro'],
+        lastSelectedChatModel: { providerId: 'kiro', model: 'kiro/retired' },
       });
 
       expect(result).toEqual({
-        model: 'codex/retired',
-        providerId: 'codex',
+        model: 'kiro/retired',
+        providerId: 'kiro',
         source: 'last-selected',
       });
     });
 
     it('preserves the unavailable last selected model over variant defaults', () => {
-      providers.codex.defaultModel = 'codex/gpt-ordered';
-      providers.codex.options = ['codex/gpt-ordered', 'codex/gpt-native'];
-      providers.codex.variantFallback = 'codex/gpt-native';
+      providers.kiro.defaultModel = 'kiro/model-ordered';
+      providers.kiro.options = ['kiro/model-ordered', 'kiro/model-native'];
+      providers.kiro.variantFallback = 'kiro/model-native';
 
       expect(resolveNewConversationModel({
-        displayOrder: ['codex'],
-        enabledProviders: ['codex'],
-        lastSelectedChatModel: { providerId: 'codex', model: 'codex/retired' },
+        displayOrder: ['kiro'],
+        enabledProviders: ['kiro'],
+        lastSelectedChatModel: { providerId: 'kiro', model: 'kiro/retired' },
       })).toEqual({
-        model: 'codex/retired',
-        providerId: 'codex',
+        model: 'kiro/retired',
+        providerId: 'kiro',
         source: 'last-selected',
       });
     });
 
     it('falls back to the first available provider default in explicit display order', () => {
       const result = resolveNewConversationModel({
-        displayOrder: ['claude', 'codex'],
-        enabledProviders: ['claude', 'codex'],
+        displayOrder: ['claude', 'kiro'],
+        enabledProviders: ['claude', 'kiro'],
         lastSelectedChatModel: { providerId: 'disabled', model: 'disabled/model' },
       });
 
@@ -150,8 +150,8 @@ describe('conversation model resolution', () => {
 
     it('preserves selection from an enabled provider with no available options', () => {
       const result = resolveNewConversationModel({
-        displayOrder: ['empty', 'codex'],
-        enabledProviders: ['empty', 'codex'],
+        displayOrder: ['empty', 'kiro'],
+        enabledProviders: ['empty', 'kiro'],
         lastSelectedChatModel: { providerId: 'empty', model: 'empty/model' },
       });
 
@@ -243,16 +243,16 @@ describe('conversation model resolution', () => {
     });
 
     it('preserves the stored model over ordered defaults and variant fallbacks', () => {
-      providers.codex.defaultModel = 'codex/gpt-ordered';
-      providers.codex.options = ['codex/gpt-ordered', 'codex/gpt-native'];
-      providers.codex.variantFallback = 'codex/gpt-native';
+      providers.kiro.defaultModel = 'kiro/model-ordered';
+      providers.kiro.options = ['kiro/model-ordered', 'kiro/model-native'];
+      providers.kiro.variantFallback = 'kiro/model-native';
 
       expect(resolveConversationModel(
         {},
-        'codex',
-        { selectedModel: 'codex/retired' } as any,
+        'kiro',
+        { selectedModel: 'kiro/retired' } as any,
       )).toEqual({
-        model: 'codex/retired',
+        model: 'kiro/retired',
         shouldPersist: false,
         source: 'selected',
       });

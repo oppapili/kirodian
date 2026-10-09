@@ -126,7 +126,7 @@ jest.mock('@/core/providers/ProviderRegistry', () => ({
     getVisibleProviderIds: jest.fn((settings?: unknown) => (
       (ProviderRegistry.getEnabledProviderIds as jest.Mock)(settings)
     )),
-    getRegisteredProviderIds: jest.fn().mockReturnValue(['claude', 'codex']),
+    getRegisteredProviderIds: jest.fn().mockReturnValue(['claude', 'kiro']),
     getProviderDisplayName: jest.fn().mockReturnValue('Claude'),
     getTaskResultInterpreter: jest.fn(),
     isEnabled: jest.fn().mockReturnValue(true),
@@ -1076,9 +1076,9 @@ describe('Tab provider execution ownership', () => {
     const plugin = createPlugin();
     (ProviderRegistry.resolveProviderForModel as jest.Mock).mockReturnValue(null);
     const tab = await createTestTab({ plugin, containerEl: createMockEl() as any,
-      draftModel: 'retired-endpoint', providerId: 'codex',
+      draftModel: 'retired-endpoint', providerId: 'kiro',
     });
-    expect(tab.providerId).toBe('codex');
+    expect(tab.providerId).toBe('kiro');
     expect(tab.draftModel).toBe('retired-endpoint');
   });
 
@@ -1126,16 +1126,16 @@ describe('Tab provider execution ownership', () => {
     await reopened.destroy();
   });
 
-  it('keeps a legacy Codex draft on its recorded provider when that provider is disabled', async () => {
+  it('keeps a legacy draft on its recorded provider when that provider is disabled', async () => {
     const plugin = createPlugin();
     const tab = await createTestTab({ plugin, containerEl: createMockEl() as any });
-    tab.providerId = 'codex';
+    tab.providerId = 'kiro';
     tab.draftModel = 'gpt-5.4';
     (ProviderRegistry.getEnabledProviderIds as jest.Mock).mockReturnValue(['claude']);
     (ProviderRegistry.resolveProviderForModel as jest.Mock).mockReturnValue('claude');
     onProviderAvailabilityChanged(tab, plugin);
-    expect(getTabProviderId(tab, plugin)).toBe('codex');
-    expect(tab.providerId).toBe('codex');
+    expect(getTabProviderId(tab, plugin)).toBe('kiro');
+    expect(tab.providerId).toBe('kiro');
     expect(tab.draftModel).toBe('gpt-5.4');
   });
 
@@ -1191,18 +1191,18 @@ describe('Tab provider execution ownership', () => {
     const getEnabledProviderIds = ProviderRegistry.getEnabledProviderIds as jest.Mock;
     const resolveProviderForModel = ProviderRegistry.resolveProviderForModel as jest.Mock;
     const claudeConfig = getChatUIConfig('claude');
-    const codexConfig = {
+    const kiroAltConfig = {
       ...claudeConfig,
       getModelOptions: jest.fn().mockReturnValue([
-        { label: 'Codex', value: 'codex-default' },
+        { label: 'Kiro Alt', value: 'kiro-alt-default' },
       ]),
     };
     getChatUIConfig.mockImplementation((providerId: string) => (
-      providerId === 'codex' ? codexConfig : claudeConfig
+      providerId === 'kiro-alt' ? kiroAltConfig : claudeConfig
     ));
-    getEnabledProviderIds.mockReturnValue(['claude', 'codex']);
+    getEnabledProviderIds.mockReturnValue(['claude', 'kiro-alt']);
     resolveProviderForModel.mockImplementation((model: string) => (
-      model.startsWith('codex-') ? 'codex' : 'claude'
+      model.startsWith('kiro-alt-') ? 'kiro-alt' : 'claude'
     ));
     const initialization = deferred<void>();
     const onProviderChanged = jest.fn(() => initialization.promise);
@@ -1217,11 +1217,11 @@ describe('Tab provider execution ownership', () => {
           '.claudian-model-option',
         ) as NodeListOf<HTMLElement>,
       );
-      const codex = modelOptions.find(option =>
-        Array.from(option.children).some(child => child.textContent === 'Codex')
+      const kiroAlt = modelOptions.find(option =>
+        Array.from(option.children).some(child => child.textContent === 'Kiro Alt')
       );
 
-      (codex as HTMLElement | undefined)?.click();
+      (kiroAlt as HTMLElement | undefined)?.click();
       for (let attempt = 0;
         attempt < 10 && onProviderChanged.mock.calls.length === 0;
         attempt += 1) {
@@ -1245,18 +1245,18 @@ describe('Tab provider execution ownership', () => {
     const resolveProviderForModel = ProviderRegistry.resolveProviderForModel as jest.Mock;
     const getIfInitialized = ProviderWorkspaceRegistry.getIfInitialized as jest.Mock;
     const claudeConfig = getChatUIConfig('claude');
-    const codexConfig = {
+    const kiroAltConfig = {
       ...claudeConfig,
       getModelOptions: jest.fn().mockReturnValue([
-        { label: 'Codex', value: 'codex-default' },
+        { label: 'Kiro Alt', value: 'kiro-alt-default' },
       ]),
     };
     getChatUIConfig.mockImplementation((providerId: string) => (
-      providerId === 'codex' ? codexConfig : claudeConfig
+      providerId === 'kiro-alt' ? kiroAltConfig : claudeConfig
     ));
-    getEnabledProviderIds.mockReturnValue(['claude', 'codex']);
+    getEnabledProviderIds.mockReturnValue(['claude', 'kiro-alt']);
     resolveProviderForModel.mockImplementation((model: string) => (
-      model.startsWith('codex-') ? 'codex' : 'claude'
+      model.startsWith('kiro-alt-') ? 'kiro-alt' : 'claude'
     ));
     getIfInitialized.mockReturnValue({});
     const initialization = deferred<void>();
@@ -1272,22 +1272,22 @@ describe('Tab provider execution ownership', () => {
           '.claudian-model-option',
         ) as NodeListOf<HTMLElement>,
       );
-      const codex = modelOptions.find(option =>
-        Array.from(option.children).some(child => child.textContent === 'Codex')
+      const kiroAlt = modelOptions.find(option =>
+        Array.from(option.children).some(child => child.textContent === 'Kiro Alt')
       );
 
-      (codex as HTMLElement | undefined)?.click();
+      (kiroAlt as HTMLElement | undefined)?.click();
       for (let attempt = 0;
         attempt < 10 && onProviderChanged.mock.calls.length === 0;
         attempt += 1) {
         await Promise.resolve();
       }
       await destroyTab(tab);
-      expect(tab.providerId).toBe('codex');
-      initialization.reject(new Error('Codex initialization failed'));
+      expect(tab.providerId).toBe('kiro-alt');
+      initialization.reject(new Error('Kiro Alt initialization failed'));
       await new Promise<void>(resolve => setImmediate(resolve));
 
-      expect(tab.providerId).toBe('codex');
+      expect(tab.providerId).toBe('kiro-alt');
       expect(plugin.settings.lastSelectedChatModel).toBeUndefined();
     } finally {
       getIfInitialized.mockReturnValue(null);
@@ -1338,29 +1338,29 @@ describe('Tab provider execution ownership', () => {
     const getEnabledProviderIds = ProviderRegistry.getEnabledProviderIds as jest.Mock;
     const resolveProviderForModel = ProviderRegistry.resolveProviderForModel as jest.Mock;
     const claudeConfig = getChatUIConfig('claude');
-    const codexConfig = {
+    const kiroAltConfig = {
       ...claudeConfig,
       getModelOptions: jest.fn().mockReturnValue([
-        { label: 'Codex First', value: 'codex-first' },
-        { label: 'Codex Latest', value: 'codex-latest' },
+        { label: 'Kiro Alt First', value: 'kiro-alt-first' },
+        { label: 'Kiro Alt Latest', value: 'kiro-alt-latest' },
       ]),
     };
     getChatUIConfig.mockImplementation((providerId: string) => (
-      providerId === 'codex' ? codexConfig : claudeConfig
+      providerId === 'kiro-alt' ? kiroAltConfig : claudeConfig
     ));
-    getEnabledProviderIds.mockReturnValue(['claude', 'codex']);
+    getEnabledProviderIds.mockReturnValue(['claude', 'kiro-alt']);
     resolveProviderForModel.mockImplementation((model: string) => (
-      model.startsWith('codex-') ? 'codex' : 'claude'
+      model.startsWith('kiro-alt-') ? 'kiro-alt' : 'claude'
     ));
-    let rejectCodexSwitch!: (error: Error) => void;
-    const codexSwitch = new Promise<void>((_resolve, reject) => {
-      rejectCodexSwitch = reject;
+    let rejectKiroAltSwitch!: (error: Error) => void;
+    const kiroAltSwitch = new Promise<void>((_resolve, reject) => {
+      rejectKiroAltSwitch = reject;
     });
 
     try {
       const plugin = createPlugin();
       const tab = await createTestTab({ plugin, containerEl: createMockEl() as any }, {
-        onProviderChanged: () => codexSwitch,
+        onProviderChanged: () => kiroAltSwitch,
       });
       const modelOptions = Array.from(
         tab.dom.inputWrapper.querySelectorAll(
@@ -1368,20 +1368,20 @@ describe('Tab provider execution ownership', () => {
         ) as NodeListOf<HTMLElement>,
       );
       const first = modelOptions.find(option =>
-        Array.from(option.children).some(child => child.textContent === 'Codex First')
+        Array.from(option.children).some(child => child.textContent === 'Kiro Alt First')
       );
       const latest = modelOptions.find(option =>
-        Array.from(option.children).some(child => child.textContent === 'Codex Latest')
+        Array.from(option.children).some(child => child.textContent === 'Kiro Alt Latest')
       );
 
       (first as HTMLElement | undefined)?.click();
       (latest as HTMLElement | undefined)?.click();
       await new Promise<void>(resolve => setImmediate(resolve));
 
-      expect(tab.providerId).toBe('codex');
-      expect(tab.draftModel).toBe('codex-latest');
+      expect(tab.providerId).toBe('kiro-alt');
+      expect(tab.draftModel).toBe('kiro-alt-latest');
 
-      rejectCodexSwitch(new Error('Codex initialization failed'));
+      rejectKiroAltSwitch(new Error('Kiro Alt initialization failed'));
       await new Promise<void>(resolve => setImmediate(resolve));
 
       expect(tab.providerId).toBe('claude');
