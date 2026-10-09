@@ -25,8 +25,6 @@ import { updateTabProviderSettings } from '@/features/chat/tabs/tabProviderSetti
 import { refreshTabProviderUI } from '@/features/chat/tabs/tabProviderUI';
 import { createTabRuntime } from '@/features/chat/tabs/TabRuntimeFactory';
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
-import { getCodexProviderSettings, updateCodexProviderSettings } from '@/providers/codex/settings';
-import { updateCurrentGrokCatalog } from '@/providers/grok/settings';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
 const originalResizeObserver = globalThis.ResizeObserver;
@@ -49,22 +47,8 @@ function createSettings({ id, populate }: typeof modelCatalogCases[number], adve
   const config = settings.providerConfigs[id]!;
   const levels = advertisesHigh ? ['low', 'medium', 'high'] : ['low', 'medium'];
   if (id === 'claude') (config.discoveredModels as Array<Record<string, unknown>>)[0].supportedEffortLevels = levels;
-  if (id === 'codex' && !advertisesHigh) Object.assign((config.discoveredModels as Array<Record<string, unknown>>)[0], {
-    supportedReasoningEfforts: levels.map(value => ({ value, description: value })), defaultReasoningEffort: 'medium',
-  });
-  if (id === 'pi') (config.discoveredModels as Array<Record<string, unknown>>)[0].thinkingLevels = ['off', ...levels];
-  if (id === 'opencode') config.thinkingOptionsByModel = {
-    'anthropic/selected': [{ value: 'default', label: 'Default' }, ...levels.map(value => ({ value, label: formatReasoningValueLabel(value) }))],
-  };
-  if (id === 'grok') updateCurrentGrokCatalog(settings, {
-    defaultModelId: 'selected', fingerprint: 'test', refreshedAt: 10,
-    models: [{ rawId: 'selected', displayName: 'Selected label', reasoningMetadataResolved: true,
-      defaultReasoningEffort: 'medium', supportsReasoning: true,
-      reasoningEfforts: levels.map(value => ({ value, label: formatReasoningValueLabel(value) })) }],
-  });
   settings.savedProviderModel = { [id]: 'old-model' };
-  settings.savedProviderEffort = { [id]: id === 'opencode' ? 'low' : 'high' };
-  if (id === 'opencode') config.preferredThinkingByModel = { 'anthropic/selected': 'high' };
+  settings.savedProviderEffort = { [id]: 'high' };
   return settings;
 }
 
@@ -205,7 +189,7 @@ it.each(modelCatalogCases.flatMap(entry => [true, false].map(advertisesHigh => (
       expect(getChatSettingsSnapshot(settings, id, selected).reasoning).toBe('high');
       expect(settings).not.toHaveProperty('reasoning');
       const permissionButton = within(tab.dom.inputComposerEl).queryByRole('button', { name: /^Permission mode:/ });
-      expect(permissionButton !== null).toBe(id !== 'pi');
+      expect(permissionButton).not.toBeNull();
       for (const reasoning of ['high', 'low']) {
         if (reasoning !== 'high') await selectReasoning(tab, reasoning);
         await expectSubmission(tab, sessions, getChatSettingsSnapshot(settings, id, selected).model, reasoning);
@@ -217,53 +201,12 @@ it.each(modelCatalogCases.flatMap(entry => [true, false].map(advertisesHigh => (
   },
 );
 
-it('defaults Codex to automatic review and persists and submits each permission selection', async () => {
-  const entry = modelCatalogCases.find(({ id }) => id === 'codex')!;
-  const settings = createSettings(entry);
-  const initialPermissionMode = settings.permissionMode;
-  const { createTab, sessions, tabs } = createChatHarness(settings, entry.id, entry.selected);
-  try {
-    const tab = await createTab();
-    const ui = within(tab.dom.inputComposerEl);
-    expect(ui.getByRole('button', { name: 'Permission mode: Approve for me' })).toBeDefined();
-    for (const [label, mode] of [
-      ['Ask for approval', 'normal'], ['Full access', 'yolo'], ['Approve for me', 'auto-review'],
-    ]) {
-      fireEvent.click(ui.getByRole('button', { name: /^Permission mode:/ }));
-      fireEvent.click(ui.getByRole('menuitemradio', { name: new RegExp(`^${label}`) }));
-      await waitFor(() => expect(settings.savedProviderPermissionMode.codex).toBe(mode));
-      await expectSubmission(tab, sessions, getChatSettingsSnapshot(settings, entry.id, entry.selected).model, 'high');
-      expect(sessions.at(-1)?.requests.at(-1)?.configuration.permissionMode).toBe(mode);
-    }
-    const reopened = await createTab();
-    expect(within(reopened.dom.inputComposerEl).getByRole('button', { name: 'Permission mode: Approve for me' })).toBeDefined();
-    expect(settings.permissionMode).toBe(initialPermissionMode);
-  } finally {
-    for (const tab of tabs) await destroyTab(tab);
-  }
-});
-
-it('displays and submits High for a saved OpenCode Default preference', async () => {
-  const entry = modelCatalogCases.find(({ id }) => id === 'opencode')!;
-  const settings = createSettings(entry);
-  settings.savedProviderEffort.opencode = 'default';
-  settings.providerConfigs.opencode!.preferredThinkingByModel = { 'anthropic/selected': 'default' };
-  const { createTab, sessions, tabs } = createChatHarness(settings, entry.id, entry.selected);
-  try {
-    const tab = await createTab();
-    expect(reasoningStops(tab)).not.toContain('Default');
-    await expectSubmission(tab, sessions, entry.selected, 'high');
-  } finally {
-    for (const tab of tabs) await destroyTab(tab);
-  }
-});
-
 it.each(modelCatalogCases)('$id keeps displayed and submitted reasoning independent across tabs', async (entry) => {
   const { id, selected } = entry;
   const settings = createSettings(entry);
   const { createTab, sessions, tabs } = createChatHarness(settings, id, selected);
   const model = getChatSettingsSnapshot(settings, id, selected).model;
-  const otherReasoning = id === 'codex' ? 'medium' : 'low';
+  const otherReasoning = 'low';
   try {
     const tabA = await createTab();
     const tabB = await createTab();
@@ -286,161 +229,6 @@ it.each(modelCatalogCases)('$id keeps displayed and submitted reasoning independ
   }
 });
 
-it('restores the tab effort when returning to a previously selected model', async () => {
-  const entry = modelCatalogCases.find(candidate => candidate.id === 'codex')!;
-  const settings = createSettings(entry);
-  const catalog = getCodexProviderSettings(settings).discoveredModels;
-  updateCodexProviderSettings(settings, {
-    visibleModels: [entry.selected, 'gpt-alternate'],
-    discoveredModels: [catalog[0], { ...catalog[0], model: 'gpt-alternate', displayName: 'Alternate' }],
-  });
-  const { createTab, sessions, tabs } = createChatHarness(settings, entry.id, entry.selected);
-  try {
-    const tab = await createTab();
-    const ui = within(tab.dom.inputComposerEl);
-    const selectModel = async (label: string) => {
-      fireEvent.click(ui.getByText(label, { selector: '.claudian-model-option span' }));
-      await waitFor(() => expect(ui.getByText(label, { selector: '.claudian-model-label' })).toBeDefined());
-    };
-    await selectReasoning(tab, 'low');
-    await selectModel('Alternate');
-    await selectReasoning(tab, 'high');
-    await expectSubmission(tab, sessions, 'openai-codex/gpt-alternate', 'high');
-    await selectModel('GPT-5.5');
-    await expectSubmission(tab, sessions, 'openai-codex/gpt-5.5', 'low');
-  } finally {
-    for (const tab of tabs) await destroyTab(tab);
-  }
-});
-
-it('keeps the displayed SDK report across model selection until the new model reports a window', async () => {
-  const entry = modelCatalogCases.find(candidate => candidate.id === 'codex')!;
-  const settings = createSettings(entry);
-  const catalog = getCodexProviderSettings(settings).discoveredModels;
-  updateCodexProviderSettings(settings, {
-    visibleModels: [entry.selected, 'gpt-alternate'],
-    discoveredModels: [catalog[0], { ...catalog[0], model: 'gpt-alternate', displayName: 'Alternate' }],
-  });
-  const { createTab, tabs } = createChatHarness(settings, entry.id, entry.selected);
-  try {
-    const tab = await createTab();
-    const ui = within(tab.dom.inputComposerEl);
-    const report = async (model: string, contextTokens: number, contextWindow: number) => {
-      await tab.controllers.streamController.handleStreamChunk({ type: 'usage', usage: {
-        model, contextTokens, contextWindow, inputTokens: contextTokens,
-        cacheCreationInputTokens: 0, cacheReadInputTokens: 0,
-        percentage: contextWindow ? Math.round(contextTokens / contextWindow * 100) : 0,
-      } }, tab.state.messages[0]);
-    };
-    const selectModel = async (label: string) => {
-      // The existing model picker exposes text options rather than option roles.
-      fireEvent.click(ui.getByText(label, { selector: '.claudian-model-option span' }));
-      await waitFor(() => expect(ui.getByText(label, { selector: '.claudian-model-label' })).toBeDefined());
-    };
-    await report('gpt-5.5', 100_000, 1_000_000);
-    const meter = ui.getByRole('progressbar', { name: 'Context usage: 10% · 100k / 1000k' });
-    await selectModel('Alternate');
-    expect(ui.getByRole('progressbar', { name: 'Context usage: 10% · 100k / 1000k' })).toBe(meter);
-    expect(meter.classList.contains('claudian-hidden')).toBe(false);
-    await report('gpt-alternate', 50_000, 0);
-    expect(meter.getAttribute('aria-valuetext')).toBe('100k / 1000k');
-    await report('gpt-alternate', 50_000, 200_000);
-    expect(meter.getAttribute('aria-valuetext')).toBe('50k / 200k');
-    expect(meter.getAttribute('aria-valuenow')).toBe('25');
-    await selectModel('GPT-5.5');
-    expect(meter.getAttribute('aria-valuetext')).toBe('50k / 200k');
-    expect(meter.classList.contains('claudian-hidden')).toBe(false);
-    expect((await axe(meter)).violations).toEqual([]);
-  } finally {
-    for (const tab of tabs) await destroyTab(tab);
-  }
-});
-
-it('keeps the previous tab effort and future-tab seed when saving a selection fails', async () => {
-  const entry = modelCatalogCases.find(candidate => candidate.id === 'codex')!;
-  const settings = createSettings(entry);
-  const { createTab, sessions, tabs, persist } = createChatHarness(settings, entry.id, entry.selected);
-  try {
-    const tab = await createTab();
-    await selectReasoning(tab, 'medium');
-    persist.mockRejectedValueOnce(new Error('disk full'));
-    chooseReasoning(tab, 'High');
-    await waitFor(() => expect(Notice).toHaveBeenCalledWith('Failed to change effort level'));
-    refreshTabProviderUI(tab);
-    await expectSubmission(tab, sessions, 'openai-codex/gpt-5.5', 'medium');
-    await expectSubmission(await createTab(), sessions, 'openai-codex/gpt-5.5', 'medium');
-  } finally {
-    for (const tab of tabs) await destroyTab(tab);
-  }
-});
-
-it('refreshes a cached effort when provider settings remove it from the available choices', async () => {
-  const entry = modelCatalogCases.find(candidate => candidate.id === 'codex')!;
-  const settings = createSettings(entry);
-  const catalog = getCodexProviderSettings(settings).discoveredModels;
-  updateCodexProviderSettings(settings, {
-    enableUltraEffort: true,
-    discoveredModels: [{
-      ...catalog[0],
-      supportedReasoningEfforts: [...catalog[0].supportedReasoningEfforts, { value: 'ultra', description: 'Ultra' }],
-    }],
-  });
-  const { createTab, sessions, tabs } = createChatHarness(settings, entry.id, entry.selected);
-  try {
-    const tab = await createTab();
-    await selectReasoning(tab, 'ultra');
-    const peer = await createTab();
-    await selectReasoning(peer, 'medium');
-    updateCodexProviderSettings(settings, { enableUltraEffort: false });
-    refreshTabProviderUI(tab);
-    expect(reasoningStops(tab)).not.toContain('Ultra');
-    // Losing a supported choice uses the model default, not another tab's saved effort.
-    await expectSubmission(tab, sessions, 'openai-codex/gpt-5.5', 'high');
-    await expectSubmission(peer, sessions, 'openai-codex/gpt-5.5', 'medium');
-  } finally {
-    for (const tab of tabs) await destroyTab(tab);
-  }
-});
-
-it.each([true, false])('seeds tabs from committed reasoning while a save is pending (succeeds: %s)', async (succeeds) => {
-  const entry = modelCatalogCases.find(candidate => candidate.id === 'codex')!;
-  const settings = createSettings(entry);
-  const { createTab, sessions, tabs, persist, plugin } = createChatHarness(settings, entry.id, entry.selected);
-  let resolveSave!: (value: undefined) => void;
-  let rejectSave!: (error: Error) => void;
-  const save = new Promise<undefined>((resolve, reject) => {
-    resolveSave = resolve;
-    rejectSave = reject;
-  });
-  const mutate = jest.spyOn(plugin, 'mutateSettings');
-  const saveError = new Error('disk full');
-  try {
-    const source = await createTab();
-    persist.mockImplementationOnce(() => save);
-    chooseReasoning(source, 'Medium');
-    await waitFor(() => expect(persist).toHaveBeenCalled());
-
-    const duringSave = await createTab();
-    await expectSubmission(duringSave, sessions, 'openai-codex/gpt-5.5', 'high');
-    if (succeeds) {
-      resolveSave(undefined);
-    } else {
-      rejectSave(saveError);
-    }
-    const result = await Promise.allSettled([mutate.mock.results[0].value]);
-    expect(result).toEqual([succeeds
-      ? { status: 'fulfilled', value: undefined }
-      : { status: 'rejected', reason: saveError }]);
-    refreshTabProviderUI(duringSave);
-    await expectSubmission(duringSave, sessions, 'openai-codex/gpt-5.5', 'high');
-    await expectSubmission(await createTab(), sessions, 'openai-codex/gpt-5.5', succeeds ? 'medium' : 'high');
-  } finally {
-    resolveSave(undefined);
-    await mutate.mock.results[0]?.value.catch(() => undefined);
-    for (const tab of tabs) await destroyTab(tab);
-  }
-});
-
 test.each(['provider switch', 'switch back', 'closing'] as const)('queued toolbar changes cannot survive %s', async transition => {
   const entry = modelCatalogCases.find(entry => entry.id === 'claude')!;
   const settings = createSettings(entry);
@@ -455,7 +243,7 @@ test.each(['provider switch', 'switch back', 'closing'] as const)('queued toolba
     const pending = updateTabProviderSettings(tab, plugin, snapshot => { snapshot.permissionMode = 'normal'; });
     if (transition === 'closing') tab.session.beginClose();
     else {
-      tab.session.selectDraft('codex', 'openai-codex/gpt-5.5');
+      tab.session.selectDraft('kiro', 'kiro:claude-sonnet-4');
       if (transition === 'switch back') tab.session.selectDraft(entry.id, entry.selected);
     }
     release();
