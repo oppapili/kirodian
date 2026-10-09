@@ -8,10 +8,10 @@ import type {
   ImageAttachment,
   ImageMediaType,
   ToolCallInfo,
+  ToolResultDetails,
 } from '../../../core/types';
-import type { SDKToolUseResult } from '../../../core/types/diff';
-import { extractDiffData } from '../../../utils/diff';
-import { extractACPDiffToolUseResult } from '../../acp/ACPToolResultNormalization';
+import { resolveToolDiffData } from '../../../core/tools/toolDiff';
+import { extractACPDiffResultDetails } from '../../acp/ACPToolResultNormalization';
 import {
   type KiroRawToolNameResolution,
   normalizeKiroToolCall,
@@ -59,7 +59,7 @@ interface StoredTool {
   rawNameProvenance: KiroRawToolNameResolution['provenance'];
   rawOutput: unknown;
   status: ToolCallInfo['status'];
-  toolUseResult?: SDKToolUseResult;
+  toolResultDetails?: ToolResultDetails;
 }
 
 interface PendingTurn {
@@ -436,8 +436,8 @@ function reconcileToolUpdate(turn: PendingTurn, update: Record<string, unknown>)
     title: rawName,
   }, rawNameResolution);
   const status = normalizeToolStatus(readString(update.status), current?.status);
-  const nativeToolUseResult = extractACPDiffToolUseResult(update.content)
-    ?? current?.toolUseResult;
+  const nativeToolResultDetails = extractACPDiffResultDetails(update.content)
+    ?? current?.toolResultDetails;
   const output = renderedContent || (update.rawOutput === undefined
     ? current?.output || normalized.output
     : normalized.output || current?.output) || '';
@@ -456,7 +456,7 @@ function reconcileToolUpdate(turn: PendingTurn, update: Record<string, unknown>)
     rawNameProvenance: rawNameResolution.provenance,
     rawOutput,
     status,
-    ...(nativeToolUseResult ? { toolUseResult: nativeToolUseResult } : {}),
+    ...(nativeToolResultDetails ? { toolResultDetails: nativeToolResultDetails } : {}),
   });
 }
 
@@ -496,10 +496,6 @@ function finalizeTurn(
       tool.rawOutput,
       tool.rawInput,
     );
-    const toolUseResult: SDKToolUseResult = {
-      ...tool.toolUseResult,
-      ...providerToolUseResult,
-    };
     const toolCall: ToolCallInfo = {
       id: tool.id,
       input: tool.input,
@@ -512,7 +508,7 @@ function finalizeTurn(
       toolCall.resolvedAnswers = providerToolUseResult.answers;
     }
     if (toolCall.status === 'completed' && isWriteEditTool(toolCall.name)) {
-      const diffData = extractDiffData(toolUseResult, toolCall);
+      const diffData = resolveToolDiffData(tool.toolResultDetails?.diff, toolCall);
       if (diffData) toolCall.diffData = diffData;
     }
     return [toolCall];

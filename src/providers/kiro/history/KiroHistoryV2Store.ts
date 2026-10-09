@@ -4,8 +4,7 @@ import type {
   ContentBlock,
   ToolCallInfo,
 } from '../../../core/types';
-import type { SDKToolUseResult } from '../../../core/types/diff';
-import { extractDiffData } from '../../../utils/diff';
+import { resolveToolDiffData } from '../../../core/tools/toolDiff';
 import {
   normalizeKiroToolCall,
   normalizeKiroToolUseResult,
@@ -260,7 +259,6 @@ function finalizeV2Turn(
       rawOutput,
       tool.rawInput,
     );
-    const toolUseResult: SDKToolUseResult = { ...providerToolUseResult };
     const toolCall: ToolCallInfo = {
       id: tool.id,
       input: tool.input,
@@ -273,7 +271,7 @@ function finalizeV2Turn(
       toolCall.resolvedAnswers = providerToolUseResult.answers;
     }
     if (toolCall.status === 'completed' && isWriteEditTool(toolCall.name)) {
-      const diffData = extractDiffData(toolUseResult, toolCall);
+      const diffData = resolveToolDiffData(undefined, toolCall);
       if (diffData) toolCall.diffData = diffData;
     }
     return [toolCall];
