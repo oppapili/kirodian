@@ -204,7 +204,7 @@ export function createHarness(options: {
   const registry = new ProviderExecutionLifecycleRegistry();
   const backends = new Map<ProviderId, FakeBackend>([
     ['claude', new FakeBackend('claude')],
-    ['codex', new FakeBackend('codex')],
+    ['kiro', new FakeBackend('kiro')],
   ]);
   const repository = {
     registerExecutionBinding: jest.fn(),

@@ -9,6 +9,17 @@ import * as sdkSession from '@/providers/claude/history/ClaudeHistoryStore';
 // Provider history readers touch the filesystem through Node's fs.
 jest.mock('fs');
 
+// Kiro is the default provider, so conversations with no explicit providerId
+// hydrate through the kiro native-history resolver, which reads the real fs sync
+// API directly. Under `jest.mock('fs')` those reads return undefined and crash
+// path containment. Mirror how the claude store is mocked below: resolve no
+// native session directory, so hydration is a no-op and returns the conversation
+// unchanged (the production path when no native history file exists).
+jest.mock('@/providers/kiro/history/KiroHistoryPathResolver', () => ({
+  ...jest.requireActual('@/providers/kiro/history/KiroHistoryPathResolver'),
+  resolveKiroSessionDirectory: () => null,
+}));
+
 import '@/providers';
 
 describe('startApplication', () => {
@@ -245,6 +256,7 @@ describe('startApplication', () => {
       const sessionMeta = JSON.stringify({
         id: 'conv-saved-1',
         title: 'Saved Chat',
+        providerId: 'claude',
         createdAt: timestamp,
         lastActivityAt: timestamp,
         sessionId: 'saved-session',

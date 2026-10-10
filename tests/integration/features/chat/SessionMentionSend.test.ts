@@ -23,7 +23,7 @@ function setup() {
     findConversationAcrossViews: () => null,
   });
   fixture.plugin.getConversationById.mockResolvedValue({
-    id, title: 'Current title', providerId: 'codex', createdAt: time, lastActivityAt: time,
+    id, title: 'Current title', providerId: 'kiro', createdAt: time, lastActivityAt: time,
     sessionId: 'native-source', messages: [
       { id: 'u', role: 'user', content: 'verbatim prompt', timestamp: time },
       { id: 'a', role: 'assistant', content: 'final answer', timestamp: time },
@@ -60,7 +60,7 @@ it.each([false, true])('resolves current titles once and carries snapshots throu
     const request = fixture.native.backends.get('claude')!.sessions.flatMap(session => session.requests)[0];
     expect(request.input).toEqual([{ type: 'text', text: 'Use @"Current title" and @"Current title"' }]);
     expect(request.context?.sessionReferences).toEqual([{
-      id, title: 'Current title', providerId: 'codex', updatedAt: new Date(time).toISOString(), snapshotPath: '/tmp/claudian-sessions/snapshot.md',
+      id, title: 'Current title', providerId: 'kiro', updatedAt: new Date(time).toISOString(), snapshotPath: '/tmp/claudian-sessions/snapshot.md',
     }]);
     expect(request.configuration.readableRoots).toEqual(['/tmp/claudian-sessions']);
     expect(fixture.write).toHaveBeenCalledTimes(1);
@@ -159,14 +159,14 @@ it('preserves submission order when a busy-main mention hydrates more slowly tha
 it('withdraws an expired async answer waiting behind busy-main reference preparation', async () => {
   holdNativeTurns();
   const fixture = setup();
-  fixture.deps.getTabProviderId = () => 'codex';
+  fixture.deps.getTabProviderId = () => 'kiro';
   const source = await fixture.plugin.getConversationById(id);
   const hydration = deferred<typeof source>();
   fixture.plugin.getConversationById.mockClear().mockReturnValue(hydration.promise);
-  await fixture.native.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'codex' });
+  await fixture.native.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'kiro' });
   const active = fixture.controller.sendMessage({ content: 'Active work' });
-  await until(() => fixture.native.backends.get('codex')!.sessions.some(session => session.requests.length > 0));
-  const native = fixture.native.backends.get('codex')!.sessions[0];
+  await until(() => fixture.native.backends.get('kiro')!.sessions.some(session => session.requests.length > 0));
+  const native = fixture.native.backends.get('kiro')!.sessions[0];
   native.steerResult = false;
   const tool: ToolCallInfo = { id: 'ask', name: 'AskUserQuestion', status: 'completed', input: {
     replyMode: 'user-message', questions: [{ id: '0', question: 'Which check?', options: [{ label: 'History' }] }],

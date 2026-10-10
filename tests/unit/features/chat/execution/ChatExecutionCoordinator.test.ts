@@ -11,7 +11,7 @@ const IDLE_MS = 30 * 60_000;
 afterEach(() => jest.useRealTimers());
 
 describe('ChatExecutionCoordinator', () => {
-  it.each(['claude', 'codex'] as const)(
+  it.each(['claude', 'kiro'] as const)(
     'validates %s events without serializing resume history after an equivalent rebind',
     async (providerId) => {
       const harness = createHarness();
@@ -191,9 +191,9 @@ describe('ChatExecutionCoordinator', () => {
 
     it('keeps a session with running children alive past the idle period', async () => {
       const harness = createHarness({ idleReleaseMs: IDLE_MS });
-      await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'codex' });
+      await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'kiro' });
       await harness.coordinator.prepare();
-      const session = harness.backends.get('codex')!.sessions[0];
+      const session = harness.backends.get('kiro')!.sessions[0];
       const hasBackgroundWork = jest.fn(() => true);
       Object.assign(session, { hasBackgroundWork });
 
@@ -256,7 +256,7 @@ describe('ChatExecutionCoordinator', () => {
     session.commands = [{ id: 'review', name: 'review', description: '', content: '' }];
     expect(harness.coordinator.getCommandSnapshot('one', 'claude')).toEqual(session.commands);
     expect(harness.coordinator.getCommandSnapshot('two', 'claude')).toBeUndefined();
-    expect(harness.coordinator.getCommandSnapshot('one', 'codex')).toBeUndefined();
+    expect(harness.coordinator.getCommandSnapshot('one', 'kiro')).toBeUndefined();
     await harness.coordinator.bindConversation({ conversationId: 'two', providerId: 'claude' });
     expect(harness.coordinator.getCommandSnapshot('two', 'claude')).toBeUndefined();
     await harness.coordinator.dispose();
@@ -760,10 +760,10 @@ describe('ChatExecutionCoordinator', () => {
 
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-2',
-      providerId: 'codex',
+      providerId: 'kiro',
     });
     await harness.coordinator.prepare();
-    expect(harness.coordinator.snapshot?.providerId).toBe('codex');
+    expect(harness.coordinator.snapshot?.providerId).toBe('kiro');
 
     nativeSteer.resolve(false);
 
@@ -789,10 +789,10 @@ describe('ChatExecutionCoordinator', () => {
 
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-2',
-      providerId: 'codex',
+      providerId: 'kiro',
     });
     await harness.coordinator.prepare();
-    expect(harness.coordinator.snapshot?.providerId).toBe('codex');
+    expect(harness.coordinator.snapshot?.providerId).toBe('kiro');
 
     nativeSteer.resolve(true);
 
@@ -895,7 +895,7 @@ describe('ChatExecutionCoordinator', () => {
       if (boundary === 'bind') {
         await harness.coordinator.bindConversation({
           conversationId: 'conversation-2',
-          providerId: 'codex',
+          providerId: 'kiro',
         });
       } else if (boundary === 'invalidation') {
         await harness.registry.runTransition(['claude'], async () => undefined);
@@ -952,7 +952,7 @@ describe('ChatExecutionCoordinator', () => {
     )).resolves.toBe(true);
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-2',
-      providerId: 'codex',
+      providerId: 'kiro',
     });
     nativeSteer.reject(new Error('late transport failure'));
 
@@ -1148,9 +1148,9 @@ describe('ChatExecutionCoordinator', () => {
   it('publishes background work only when running children and background turns change it', async () => {
     const onBackgroundWorkChanged = jest.fn();
     const harness = createHarness({ onBackgroundWorkChanged });
-    await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'codex' });
+    await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'kiro' });
     await harness.coordinator.prepare();
-    const session = harness.backends.get('codex')!.sessions[0];
+    const session = harness.backends.get('kiro')!.sessions[0];
     let childrenRunning = false;
     Object.assign(session, { hasBackgroundWork: () => childrenRunning });
     let sessionSequence = 0;
@@ -1205,7 +1205,7 @@ describe('ChatExecutionCoordinator', () => {
 
     const switchPromise = harness.coordinator.bindConversation({
       conversationId: 'conversation-2',
-      providerId: 'codex',
+      providerId: 'kiro',
     });
 
     expect(harness.coordinator.isEventContextCurrent(context)).toBe(false);
@@ -1213,7 +1213,7 @@ describe('ChatExecutionCoordinator', () => {
     expect(harness.coordinator.isEventContextCurrent(context)).toBe(false);
 
     await harness.coordinator.prepare();
-    const replacementSession = harness.backends.get('codex')!.sessions[0];
+    const replacementSession = harness.backends.get('kiro')!.sessions[0];
     replacementSession.emit({
       type: 'session_error',
       category: 'provider',
@@ -1228,7 +1228,7 @@ describe('ChatExecutionCoordinator', () => {
     const replacementContext = harness.sessionEventContexts[1];
     expect(harness.coordinator.isEventContextCurrent(replacementContext)).toBe(true);
 
-    const transition = harness.registry.runTransition(['codex'], async () => undefined);
+    const transition = harness.registry.runTransition(['kiro'], async () => undefined);
     for (
       let attempt = 0;
       attempt < 10 && harness.coordinator.isEventContextCurrent(replacementContext);
@@ -1282,7 +1282,7 @@ describe('ChatExecutionCoordinator', () => {
 
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-2',
-      providerId: 'codex',
+      providerId: 'kiro',
     });
     run.events.push({
       type: 'text_delta',
@@ -1300,7 +1300,7 @@ describe('ChatExecutionCoordinator', () => {
     expect(harness.requestedEvents).toHaveLength(0);
 
     await harness.coordinator.prepare();
-    expect(harness.backends.get('codex')!.sessions).toHaveLength(1);
+    expect(harness.backends.get('kiro')!.sessions).toHaveLength(1);
   });
 
   it('publishes a null binding before rejected lease release and cannot reacquire', async () => {
@@ -1412,8 +1412,8 @@ describe('ChatExecutionCoordinator', () => {
 
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-2',
-      providerId: 'codex',
-      resumeSeed: { providerSessionId: 'codex-native' },
+      providerId: 'kiro',
+      resumeSeed: { providerSessionId: 'kiro-native' },
     });
     resolution.resolve('reset');
 
@@ -1422,8 +1422,8 @@ describe('ChatExecutionCoordinator', () => {
       accepted: false,
     });
     await harness.coordinator.prepare();
-    expect(harness.backends.get('codex')!.configs[0]?.resumeSeed).toEqual({
-      providerSessionId: 'codex-native',
+    expect(harness.backends.get('kiro')!.configs[0]?.resumeSeed).toEqual({
+      providerSessionId: 'kiro-native',
     });
     expect(harness.backends.get('claude')!.sessions).toHaveLength(1);
     expect(session.disposeCalls).toBe(1);
@@ -1547,7 +1547,7 @@ describe('ChatExecutionCoordinator', () => {
     await harness.registry.runTransition(['claude'], async () => undefined);
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-2',
-      providerId: 'codex',
+      providerId: 'kiro',
     });
     await harness.coordinator.prepare();
     harness.repository.persistExecutionSnapshot.mockClear();
@@ -1563,7 +1563,7 @@ describe('ChatExecutionCoordinator', () => {
     });
     expect(harness.repository.persistExecutionSnapshot).not.toHaveBeenCalled();
     expect(harness.repository.releaseExecutionBinding).not.toHaveBeenCalled();
-    expect(harness.coordinator.snapshot?.providerId).toBe('codex');
+    expect(harness.coordinator.snapshot?.providerId).toBe('kiro');
   });
 
   it('drops the session on lifecycle invalidation and recreates it at the new generation', async () => {

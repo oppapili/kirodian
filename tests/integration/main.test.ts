@@ -34,6 +34,16 @@ import {
 // Mock fs for ClaudianService
 jest.mock('fs');
 
+// Kiro is the default provider, so conversations without an explicit providerId
+// hydrate through the kiro native-history resolver, which reads the real fs sync
+// API directly. Under `jest.mock('fs')` those reads return undefined and crash
+// path containment during onload. Resolve no native session directory so
+// hydration is a no-op (the production path when no native history file exists).
+jest.mock('@/providers/kiro/history/KiroHistoryPathResolver', () => ({
+  ...jest.requireActual('@/providers/kiro/history/KiroHistoryPathResolver'),
+  resolveKiroSessionDirectory: () => null,
+}));
+
 // Now import the plugin after mocking
 import ClaudianPlugin from '@/main';
 

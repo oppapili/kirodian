@@ -38,13 +38,13 @@ it.each(['asking', 'later'] as const)('keeps an unanswered question usable after
   const composer = host.createDiv();
   const execution = createExecutionHarness({ onRequestedEvent: event => fixture.controller.handleExecutionEvent(event) });
   const fixture = createFixture({
-    getTabProviderId: () => 'codex', getInputContainerEl: () => composer,
+    getTabProviderId: () => 'kiro', getInputContainerEl: () => composer,
     getExecutionCoordinator: () => execution.coordinator,
   });
   Object.assign(fixture.deps.renderer, { updateQuestionTool: jest.fn() });
-  await execution.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'codex' });
+  await execution.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'kiro' });
   const running = fixture.controller.sendMessage({ content: 'Start work' });
-  const backend = execution.backends.get('codex')!;
+  const backend = execution.backends.get('kiro')!;
   await waitFor(() => expect(backend.sessions[0]?.runs).toHaveLength(1));
   const native = backend.sessions[0];
   const run = native.runs[0];
@@ -90,13 +90,13 @@ it.each(['authority', 'cancel-and-replace'] as const)('fences an expired answer 
   const composer = host.createDiv();
   const execution = createExecutionHarness({ onRequestedEvent: event => fixture.controller.handleExecutionEvent(event) });
   const fixture = createFixture({
-    getTabProviderId: () => 'codex', getInputContainerEl: () => composer,
+    getTabProviderId: () => 'kiro', getInputContainerEl: () => composer,
     getExecutionCoordinator: () => execution.coordinator,
   });
   Object.assign(fixture.deps.renderer, { updateQuestionTool: jest.fn() });
-  await execution.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'codex' });
+  await execution.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'kiro' });
   const running = fixture.controller.sendMessage({ content: 'Start work' });
-  const backend = execution.backends.get('codex')!;
+  const backend = execution.backends.get('kiro')!;
   await waitFor(() => expect(backend.sessions[0]?.runs).toHaveLength(1));
   const native = backend.sessions[0];
   const run = native.runs[0];
@@ -142,13 +142,13 @@ it.each(['initialization', 'authority', 'cancelled-initialization', 'failed-init
   const composer = host.createDiv();
   const execution = createExecutionHarness({ onRequestedEvent: event => fixture.controller.handleExecutionEvent(event) });
   const fixture = createFixture({
-    getTabProviderId: () => 'codex', getInputContainerEl: () => composer,
+    getTabProviderId: () => 'kiro', getInputContainerEl: () => composer,
     getExecutionCoordinator: () => execution.coordinator,
   });
   Object.assign(fixture.deps.renderer, { updateQuestionTool: jest.fn() });
-  await execution.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'codex' });
+  await execution.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'kiro' });
   const running = fixture.controller.sendMessage({ content: 'Start work' });
-  const backend = execution.backends.get('codex')!;
+  const backend = execution.backends.get('kiro')!;
   await waitFor(() => expect(backend.sessions[0]?.runs).toHaveLength(1));
   const native = backend.sessions[0];
   const run = native.runs[0];
@@ -201,7 +201,7 @@ it.each(['initialization', 'authority', 'cancelled-initialization', 'failed-init
 it('does not restart main chat when an answer outlives cancellation during handoff', async () => {
   const host = document.body.createDiv();
   const composer = host.createDiv();
-  const fixture = createFixture({ getTabProviderId: () => 'codex', getInputContainerEl: () => composer });
+  const fixture = createFixture({ getTabProviderId: () => 'kiro', getInputContainerEl: () => composer });
   Object.assign(fixture.deps.renderer, { updateQuestionTool: jest.fn() });
   const execution = deferred<{ accepted: boolean; status: string }>();
   fixture.coordinator.execute.mockReturnValueOnce(execution.promise);
@@ -234,7 +234,7 @@ it('does not restart main chat when an answer outlives cancellation during hando
 it.each([true, false])('settles an active-turn answer without consuming the draft (steer accepted: %s)', async accepted => {
   const host = document.body.createDiv();
   const composer = host.createDiv();
-  const fixture = createFixture({ getTabProviderId: () => 'codex', getInputContainerEl: () => composer });
+  const fixture = createFixture({ getTabProviderId: () => 'kiro', getInputContainerEl: () => composer });
   Object.assign(fixture.deps.renderer, { updateQuestionTool: jest.fn() });
   fixture.state.queueIndicatorEl = composer.createDiv();
   fixture.holdResponse();
