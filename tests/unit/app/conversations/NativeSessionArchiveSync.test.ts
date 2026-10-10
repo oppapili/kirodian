@@ -54,7 +54,7 @@ describe('NativeSessionArchiveSync', () => {
     await sync.sync(['a', 'b']);
 
     expect(changesByCall).toHaveLength(1);
-    expect(changesByCall[0].map(change => [change.conversation.id, change.isArchived])).toEqual([
+    expect(changesByCall[0].map(change => [(change.conversation as unknown as { id: string }).id, change.isArchived])).toEqual([
       ['a', true],
       ['b', false],
     ]);

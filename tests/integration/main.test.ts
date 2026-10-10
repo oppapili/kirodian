@@ -73,13 +73,6 @@ describe('ClaudianPlugin', () => {
     }
   }
 
-  async function waitForCondition(condition: () => boolean): Promise<void> {
-    for (let attempt = 0; attempt < 50 && !condition(); attempt += 1) {
-      await new Promise(resolve => setTimeout(resolve, 0));
-    }
-    expect(condition()).toBe(true);
-  }
-
   function getRegisteredCommand(commandId: string) {
     const call = (plugin.addCommand as jest.Mock).mock.calls.find(
       ([config]) => config.id === commandId,
