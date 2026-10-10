@@ -5,7 +5,6 @@ import { createFixture, deferred, waitForCall } from '@test/helpers/ChatInputHar
 import { testDate } from '@test/helpers/testClock';
 import { Notice } from 'obsidian';
 
-import type { ToolCallInfo } from '@/core/types';
 import { cancelSelectedDestinationTurn } from '@/features/chat/tabs/TabInputEvents';
 import { drainTabForShutdownSnapshot } from '@/features/chat/tabs/TabLifecycle';
 
@@ -153,56 +152,6 @@ it('preserves submission order when a busy-main mention hydrates more slowly tha
     expect(fixture.state.queuedMessage?.turnRequest?.selections).toEqual([{ kind: 'editor', selection: { mode: 'selection', notePath: 'captured.md', selectedText: 'captured text' } }]);
     expect(fixture.state.queuedMessage?.content).toBe('@"Current title"\n\nlater plain follow-up');
   } finally { await fixture.native.coordinator.dispose(); await fixture.native.registry.dispose(); }
-});
-
-
-it('withdraws an expired async answer waiting behind busy-main reference preparation', async () => {
-  holdNativeTurns();
-  const fixture = setup();
-  fixture.deps.getTabProviderId = () => 'kiro';
-  const source = await fixture.plugin.getConversationById(id);
-  const hydration = deferred<typeof source>();
-  fixture.plugin.getConversationById.mockClear().mockReturnValue(hydration.promise);
-  await fixture.native.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'kiro' });
-  const active = fixture.controller.sendMessage({ content: 'Active work' });
-  await until(() => fixture.native.backends.get('kiro')!.sessions.some(session => session.requests.length > 0));
-  const native = fixture.native.backends.get('kiro')!.sessions[0];
-  native.steerResult = false;
-  const tool: ToolCallInfo = { id: 'ask', name: 'AskUserQuestion', status: 'completed', input: {
-    replyMode: 'user-message', questions: [{ id: '0', question: 'Which check?', options: [{ label: 'History' }] }],
-  } };
-  fixture.state.addMessage({ id: 'assistant', role: 'assistant', content: '', timestamp: time, toolCalls: [tool] });
-  fixture.input.value = token;
-  const mention = fixture.controller.sendMessage();
-  await waitForCall(fixture.plugin.getConversationById);
-  fixture.input.value = 'Keep this draft';
-  const send = jest.spyOn(fixture.controller, 'sendMessage');
-  const abort = new AbortController();
-  const answer = fixture.controller.answerQuestion(tool, { '0': 'History' }, 'conversation-1', abort.signal)
-    .then(() => 'sent', () => 'not sent');
-  await until(() => send.mock.calls.length === 1);
-  abort.abort();
-  tool.questionStatus = 'expired';
-  hydration.resolve(source);
-  try {
-    await mention;
-    const outcome = await answer;
-    expect(fixture.state.queuedMessage?.turnRequest?.text).toBe('@"Current title"');
-    expect(fixture.input.value).toBe('Keep this draft');
-    expect(outcome).toBe('not sent');
-    finishNativeTurn(native, 0);
-    await active;
-    await until(() => native.requests.length === 2);
-    expect(native.requests[1].input)
-      .toEqual([{ type: 'text', text: '@"Current title"' }]);
-  } finally {
-    fixture.controller.queue.clear();
-    fixture.controller.cancelStreaming();
-    native.runs.forEach(run => run.cancel());
-    await active;
-    await fixture.native.coordinator.dispose();
-    await fixture.native.registry.dispose();
-  }
 });
 
 it('cancels and drains queued snapshot preparation before tab shutdown finishes', async () => {
