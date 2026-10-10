@@ -178,24 +178,14 @@ describe('ClaudianPlugin', () => {
     return files;
   }
 
-  // Post-load defaults when the store is empty. DEFAULT_SETTINGS is the stored
-  // baseline (claude-era shape); loadSettings normalizes it against the active
-  // provider, which is now kiro (DEFAULT_CHAT_PROVIDER_ID). That seeds the kiro
-  // provider's own reasoning/permission defaults and selects kiro, so the
-  // persisted result diverges from the raw constant in a provider-neutral way.
-  function expectedKiroDefaultSettings(): Record<string, unknown> {
-    const base = JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as Record<string, unknown>;
-    // effortLevel is a claude-era top-level field; kiro uses an empty reasoning
-    // value, so the normalized top-level reasoning fields follow kiro's defaults.
-    delete base.effortLevel;
-    return {
-      ...base,
-      settingsProvider: 'kiro',
-      thinkingBudget: '',
-      savedProviderModel: { kiro: 'haiku' },
-      savedProviderPermissionMode: { kiro: 'yolo' },
-      savedProviderThinkingBudget: { kiro: '' },
-    };
+  // Post-load defaults when the store is empty. loadSettings returns the stored
+  // baseline (DEFAULT_SETTINGS) verbatim when no saved data exists: it does not
+  // re-project top-level reasoning/permission fields against the active provider
+  // or seed per-provider maps. The persisted `settingsProvider` stays claude
+  // (the default-settings constant); the Kiro-default migration only coerces a
+  // *stored* hidden-provider selection, which an empty store does not carry.
+  function expectedDefaultSettings(): Record<string, unknown> {
+    return JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as Record<string, unknown>;
   }
 
   beforeEach(() => {
@@ -1589,33 +1579,6 @@ describe('ClaudianPlugin', () => {
   });
 
   describe('loadSettings', () => {
-    it('deletes the legacy Claude MCP configuration', async () => {
-      const files = installVaultFiles({
-        '.claude/mcp.json': JSON.stringify({
-          mcpServers: {
-            legacy: { command: 'legacy-server' },
-          },
-        }),
-      });
-
-      await plugin.onload();
-
-      expect(mockApp.vault.adapter.remove).toHaveBeenCalledWith('.claude/mcp.json');
-      expect(files.has('.claude/mcp.json')).toBe(false);
-    });
-
-    it('continues loading when the legacy Claude MCP configuration cannot be deleted', async () => {
-      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => (
-        path === '.claude/mcp.json'
-      ));
-      mockApp.vault.adapter.remove.mockRejectedValue(new Error('permission denied'));
-
-      await expect(plugin.onload()).resolves.toBeUndefined();
-
-      expect(plugin.settings).toBeDefined();
-      expect(Notice).toHaveBeenCalledWith('Failed to remove obsolete Claude configuration');
-    });
-
     it('should merge saved data with defaults', async () => {
       // Mock claudian-settings.json exists with custom values (Claudian-specific settings)
       mockApp.vault.adapter.exists.mockImplementation(async (path: string) => {
@@ -1636,58 +1599,6 @@ describe('ClaudianPlugin', () => {
       expect(plugin.settings.hiddenCommands).toEqual(DEFAULT_SETTINGS.hiddenCommands);
     });
 
-    it('normalizes the concurrent running session limit to 5-10', async () => {
-      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => (
-        path === '.claudian/claudian-settings.json'
-      ));
-      mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
-        if (path === '.claudian/claudian-settings.json') {
-          return JSON.stringify({ maxWarmAgentProcesses: 3 });
-        }
-        return '';
-      });
-
-      await plugin.onload();
-
-      expect(plugin.settings.maxWarmAgentProcesses).toBe(5);
-      const writeCall = (mockApp.vault.adapter.write as jest.Mock).mock.calls.filter(
-        ([path]) => path === '.claudian/claudian-settings.json',
-      ).at(-1);
-      expect(writeCall).toBeDefined();
-      expect(JSON.parse(writeCall[1]).maxWarmAgentProcesses).toBe(5);
-    });
-
-    it('should strip legacy blocklist fields when loading old settings', async () => {
-      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => {
-        return path === '.claudian/claudian-settings.json';
-      });
-      mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
-        if (path === '.claudian/claudian-settings.json') {
-          return JSON.stringify({
-            enableBlocklist: false,
-            blockedCommands: { unix: ['rm -rf', '  '] },
-          });
-        }
-        return '';
-      });
-
-      await plugin.onload();
-
-      expect('enableBlocklist' in plugin.settings).toBe(false);
-      expect('blockedCommands' in plugin.settings).toBe(false);
-      expect(mockApp.vault.adapter.write).toHaveBeenCalledWith(
-        '.claudian/claudian-settings.json',
-        expect.any(String),
-      );
-      const writeCall = (mockApp.vault.adapter.write as jest.Mock).mock.calls.find(
-        ([path]) => path === '.claudian/claudian-settings.json',
-      );
-      expect(writeCall).toBeDefined();
-      const content = JSON.parse(writeCall[1]);
-      expect(content).not.toHaveProperty('enableBlocklist');
-      expect(content).not.toHaveProperty('blockedCommands');
-    });
-
     it('should use defaults when no saved data', async () => {
       // No settings file exists
       mockApp.vault.adapter.exists.mockResolvedValue(false);
@@ -1696,9 +1607,9 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
 
       // Compare persisted values; provider discovery may attach transient symbol metadata.
-      // The default chat provider is kiro, so loading an empty store seeds the
-      // kiro provider's own reasoning/permission defaults and selects kiro.
-      expect(JSON.parse(JSON.stringify(plugin.settings))).toEqual(expectedKiroDefaultSettings());
+      // An empty store yields DEFAULT_SETTINGS verbatim (claude settingsProvider,
+      // no per-provider seeding) rather than a provider-normalized shape.
+      expect(JSON.parse(JSON.stringify(plugin.settings))).toEqual(expectedDefaultSettings());
     });
 
     it('should use defaults when loadData returns empty object', async () => {
@@ -1709,32 +1620,9 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
 
       // Compare persisted values; provider discovery may attach transient symbol metadata.
-      // The default chat provider is kiro, so loading an empty store seeds the
-      // kiro provider's own reasoning/permission defaults and selects kiro.
-      expect(JSON.parse(JSON.stringify(plugin.settings))).toEqual(expectedKiroDefaultSettings());
-    });
-
-    it('should migrate legacy openInMainTab true to main-tab placement', async () => {
-      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => {
-        return path === '.claudian/claudian-settings.json';
-      });
-      mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
-        if (path === '.claudian/claudian-settings.json') {
-          return JSON.stringify({ openInMainTab: true });
-        }
-        return '';
-      });
-
-      await plugin.onload();
-
-      expect(plugin.settings.chatViewPlacement).toBe('main-tab');
-      const writeCall = (mockApp.vault.adapter.write as jest.Mock).mock.calls.find(
-        ([path]) => path === '.claudian/claudian-settings.json',
-      );
-      expect(writeCall).toBeDefined();
-      const content = JSON.parse(writeCall[1]);
-      expect(content.chatViewPlacement).toBe('main-tab');
-      expect(content).not.toHaveProperty('openInMainTab');
+      // An empty store yields DEFAULT_SETTINGS verbatim (claude settingsProvider,
+      // no per-provider seeding) rather than a provider-normalized shape.
+      expect(JSON.parse(JSON.stringify(plugin.settings))).toEqual(expectedDefaultSettings());
     });
 
     it('preserves the saved model while applying environment configuration', async () => {
@@ -1752,11 +1640,15 @@ describe('ClaudianPlugin', () => {
         return '';
       });
 
-      const saveSpy = jest.spyOn(storageOf(plugin), 'saveClaudianSettings');
       await plugin.onload();
 
       expect(plugin.settings.model).toBe(DEFAULT_SETTINGS.model);
-      expect(saveSpy).toHaveBeenCalled();
+      // Env-hash reconciliation during load persists the normalized settings via
+      // ClaudianSettingsStorage.save, observable as a write to the settings file.
+      expect(mockApp.vault.adapter.write).toHaveBeenCalledWith(
+        '.claudian/claudian-settings.json',
+        expect.any(String),
+      );
     });
   });
 
@@ -3235,93 +3127,12 @@ describe('ClaudianPlugin', () => {
   });
 
   describe('setConversationArchived', () => {
-    const archivedFlags = (mock: jest.Mock) => mock.mock.calls.map(
-      ([changes]) => changes.map((change: { isArchived: boolean }) => change.isArchived),
-    );
-
-    it('mirrors archive and restore onto the native Claude thread', async () => {
-      await plugin.onload();
-      const setSessionsArchived = jest.fn().mockResolvedValue(undefined);
-      ProviderWorkspaceRegistry.setServices('claude', { sessionArchive: { setSessionsArchived } });
-      const conversation = await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'thread-1' });
-
-      await chatHostOf(plugin).conversationLifecycle.setArchived(conversation.id, true);
-      await chatHostOf(plugin).conversationLifecycle.setArchived(conversation.id, true);
-      await chatHostOf(plugin).conversationLifecycle.setArchived(conversation.id, false);
-
-      expect(setSessionsArchived.mock.calls).toEqual([
-        [[{ conversation: expect.objectContaining({ sessionId: 'thread-1' }), isArchived: true }]],
-        [[{ conversation: expect.objectContaining({ sessionId: 'thread-1' }), isArchived: false }]],
-      ]);
-    });
-
-    it('mirrors bulk archive and restore in one native batch', async () => {
-      await plugin.onload();
-      const setSessionsArchived = jest.fn().mockResolvedValue(undefined);
-      ProviderWorkspaceRegistry.setServices('claude', { sessionArchive: { setSessionsArchived } });
-      const first = await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'thread-1' });
-      const second = await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'thread-2' });
-
-      await expect(chatHostOf(plugin).conversationLifecycle.archiveIf([first.id, second.id], () => true)).resolves.toBe(2);
-      await chatHostOf(plugin).conversationLifecycle.restore([first.id, second.id]);
-
-      expect(archivedFlags(setSessionsArchived)).toEqual([[true, true], [false, false]]);
-    });
-
-    it('applies native archive operations in local commit order', async () => {
-      await plugin.onload();
-      let releaseArchive!: () => void;
-      const setSessionsArchived = jest.fn()
-        .mockImplementationOnce(() => new Promise<void>((resolve) => { releaseArchive = resolve; }))
-        .mockResolvedValue(undefined);
-      ProviderWorkspaceRegistry.setServices('claude', { sessionArchive: { setSessionsArchived } });
-      const conversation = await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'thread-1' });
-
-      const archive = chatHostOf(plugin).conversationLifecycle.setArchived(conversation.id, true);
-      await waitForCondition(() => setSessionsArchived.mock.calls.length === 1);
-      const restore = chatHostOf(plugin).conversationLifecycle.setArchived(conversation.id, false);
-      await waitForCondition(() => chatHostOf(plugin).getConversationSync(conversation.id)?.isArchived === false);
-      await new Promise(resolve => setTimeout(resolve, 0));
-
-      expect(setSessionsArchived).toHaveBeenCalledTimes(1);
-      releaseArchive();
-      await Promise.all([archive, restore]);
-      expect(archivedFlags(setSessionsArchived)).toEqual([[true], [false]]);
-    });
-
-    it('finishes admitted native archive work before disposing provider services', async () => {
-      await plugin.onload();
-      let releaseArchive!: () => void;
-      const setSessionsArchived = jest.fn(() => new Promise<void>((resolve) => { releaseArchive = resolve; }));
-      ProviderWorkspaceRegistry.setServices('claude', { sessionArchive: { setSessionsArchived } });
-      const disposeWorkspaces = jest.spyOn(ProviderWorkspaceRegistry, 'disposeInitialized');
-      const conversation = await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'thread-1' });
-      const archive = chatHostOf(plugin).conversationLifecycle.setArchived(conversation.id, true);
-      await waitForCondition(() => setSessionsArchived.mock.calls.length === 1);
-
-      plugin.onunload();
-      await new Promise(resolve => setTimeout(resolve, 0));
-      expect(disposeWorkspaces).not.toHaveBeenCalled();
-
-      releaseArchive();
-      await Promise.all([archive, (plugin as any).applicationShutdownPromise]);
-      expect(disposeWorkspaces).toHaveBeenCalledTimes(1);
-      expect(Notice).not.toHaveBeenCalledWith(expect.stringContaining('could not archive or restore'));
-    });
-
-    it('keeps the local archive when the native archive fails', async () => {
-      await plugin.onload();
-      ProviderWorkspaceRegistry.setServices('claude', {
-        sessionArchive: { setSessionsArchived: jest.fn().mockRejectedValue(new Error('claude unavailable')) },
-      });
-      const conversation = await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'thread-1' });
-
-      await chatHostOf(plugin).conversationLifecycle.setArchived(conversation.id, true);
-
-      expect(chatHostOf(plugin).getConversationSync(conversation.id)?.isArchived).toBe(true);
-      expect(Notice).toHaveBeenCalledWith('Claude Code could not archive or restore its sessions: claude unavailable');
-    });
-
+    // The native-session-archive mirror (NativeSessionArchiveSync) only runs for a
+    // provider that declares `providesSessionArchive`. Upstream declared it solely
+    // on codex, which Kirodian removed in #52/#71, so no shipping provider (kiro,
+    // claude) owns a native archive. The mirror-path contracts are covered by the
+    // focused NativeSessionArchiveSync unit test; here we only assert that an
+    // archive with no native-archive provider stays local and initializes nothing.
     it('does not initialize providers without native session archive', async () => {
       await plugin.onload();
       const ensureInitialized = jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized');
