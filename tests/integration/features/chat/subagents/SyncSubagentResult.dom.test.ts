@@ -9,9 +9,9 @@ import { fireEvent, within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
 import { Component } from 'obsidian';
 
+import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ChatMessage } from '@/core/types';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
-import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { providerOutputEventToStreamChunk } from '@/features/chat/rendering/providerOutputChunks';
 import { ChatState } from '@/features/chat/state/ChatState';
 import { SubagentManager } from '@/features/chat/subagents/SubagentManager';

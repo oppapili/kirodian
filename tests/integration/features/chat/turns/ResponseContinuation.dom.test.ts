@@ -9,8 +9,8 @@ import { fireEvent, within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
 import { Component, MarkdownRenderer } from 'obsidian';
 
-import type { ChatMessage } from '@/core/types';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
+import type { ChatMessage } from '@/core/types';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 import { ChatState } from '@/features/chat/state/ChatState';
 import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
