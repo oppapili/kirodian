@@ -1,29 +1,28 @@
 import { Notice } from 'obsidian';
 
-import type { ProviderInteractionPort } from '../../../../core/execution';
-import { resolveNewConversationModel } from '../../../../core/providers/conversationModel';
-import { getProviderForModel } from '../../../../core/providers/modelRouting';
-import { ProviderRegistry } from '../../../../core/providers/ProviderRegistry';
-import { DEFAULT_CHAT_PROVIDER_ID } from '../../../../core/providers/types';
-import { getVaultPath } from '../../../../utils/path';
-import { ComposerEditor } from '../../composer/ComposerEditor';
-import { ChatExecutionCoordinator } from '../../execution/ChatExecutionCoordinator';
-import { cleanupThinkingBlock } from '../../rendering/ThinkingBlockRenderer';
-import { createWelcomeElement } from '../../rendering/WelcomeRenderer';
-import { ChatState } from '../../state/ChatState';
-import { refreshTabContextUsage } from '../TabProviderState';
-import { TabSession } from '../TabSession';
-import {
-  createTabMessageId,
-  enqueueTabSessionEvent,
-} from '../TabSessionEvents';
-import type { TabDOMElements, TabId, TabProviderCatalogContext } from '../types';
-import { generateTabId } from '../types';
+import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
+import { ComposerEditor } from '@/features/chat/composer/ComposerEditor';
+import { ChatExecutionCoordinator } from '@/features/chat/execution/ChatExecutionCoordinator';
+import { createInteractionPromptPort } from '@/features/chat/interactions/interactionPromptPort';
+import { cleanupThinkingBlock } from '@/features/chat/rendering/ThinkingBlockRenderer';
+import { createWelcomeElement } from '@/features/chat/rendering/WelcomeRenderer';
+import { ChatState } from '@/features/chat/state/ChatState';
+import type { TabProviderCatalogContext } from '@/features/chat/tabs/ChatTab';
 import type {
   PublishedTabRuntimeRef,
   TabRuntimeConstructionContext,
   TabRuntimeShellBundle,
-} from './TabRuntimeConstruction';
+} from '@/features/chat/tabs/runtime/TabRuntimeConstruction';
+import { createTabSessionState, generateTabId } from '@/features/chat/tabs/TabIdentity';
+import { refreshTabContextUsage } from '@/features/chat/tabs/tabProviderUI';
+import { TabSession } from '@/features/chat/tabs/TabSession';
+import {
+  createTabMessageId,
+  enqueueTabSessionEvent,
+} from '@/features/chat/tabs/TabSessionEvents';
+import type { TabDOMElements } from '@/features/chat/tabs/types';
+import { TurnCoordinator } from '@/features/chat/turns/TurnCoordinator';
+import { getVaultPath } from '@/utils/path';
 
 export function buildTabRuntimeShell(
   options: TabRuntimeConstructionContext,
@@ -37,11 +36,16 @@ export function buildTabRuntimeShell(
   options.registerCleanup('tab DOM root', () => contentEl.remove());
 
   const dom = buildTabDOM(contentEl, options);
-  const state = new ChatState({
+  // Presentation state derives from the turn owner, so it exists before the session that owns it.
+  const turns: TurnCoordinator = new TurnCoordinator(() => session.admitsConversationOperations);
+  const state: ChatState = new ChatState({
     onStreamingStateChanged: isStreaming => {
+      if (isStreaming) runtimeRef.requirePublished().ui.promptSuggestion.beginTurn();
+      runtimeRef.requirePublished().renderer.refreshBranchButtonState();
       options.onStreamingChanged?.(runtimeRef.requirePublished(), isStreaming);
     },
     onRewindingStateChanged: isRewinding => {
+      runtimeRef.requirePublished().renderer.refreshBranchButtonState();
       options.onRewindingChanged?.(runtimeRef.requirePublished(), isRewinding);
     },
     onAttentionChanged: attention => {
@@ -52,7 +56,7 @@ export function buildTabRuntimeShell(
     },
     onUsageChanged: () => refreshTabContextUsage(runtimeRef.requirePublished(), plugin),
     onAutoScrollChanged: () => runtimeRef.requirePublished().ui.navigationSidebar.updateVisibility(),
-  });
+  }, { get: () => session.conversationId, set: id => session.setConversationId(id) }, turns);
   state.queueIndicatorEl = dom.queueIndicatorEl;
 
   options.registerCleanup('tab thinking state', () => {
@@ -60,43 +64,31 @@ export function buildTabRuntimeShell(
     state.currentThinkingState = null;
   });
 
-  const isBound = !!conversation?.id;
-  const restoredDraftModel = typeof options.draftModel === 'string'
-    ? options.draftModel.trim()
-    : '';
-  const newConversationModel = !isBound && !restoredDraftModel
-    ? resolveNewConversationModel(plugin.settings)
-    : null;
-  const draftModel = isBound
-    ? null
-    : (restoredDraftModel || newConversationModel?.model || null);
-  const restoredProviderId = options.providerId === undefined
-    ? (restoredDraftModel ? getProviderForModel(restoredDraftModel, plugin.settings) : null)
-    : options.providerId;
-  const initialProviderId = conversation?.providerId
-    ?? newConversationModel?.providerId
-    ?? (draftModel
-      ? restoredProviderId && ProviderRegistry.getRegisteredProviderIds().includes(restoredProviderId)
-        ? restoredProviderId : null
-      : DEFAULT_CHAT_PROVIDER_ID);
-  const sessionState = {
-    id,
-    lifecycleState: options.lifecycleState ?? 'cold',
-    draftModel,
-    providerId: initialProviderId,
-    conversationId: conversation?.id ?? null,
-  };
+  const sessionState = options.initialState
+    ? { ...options.initialState }
+    : createTabSessionState(plugin.settings, conversation, { ...options, tabId: id });
   const executionCoordinator = createTabExecutionCoordinator(
-    id,
     state,
     options,
     runtimeRef,
   );
-  const session = new TabSession(
-    sessionState,
-    executionCoordinator,
-    () => options.onWorkChanged?.(runtimeRef.requirePublished()),
-  );
+  const session: TabSession = new TabSession(sessionState, executionCoordinator, {
+    turns,
+    onIdentityChanged: () => runtimeRef.current()?.ui.promptSuggestion.discard(),
+    onWorkChanged: () => {
+      const tab = runtimeRef.requirePublished();
+      tab.renderer.refreshBranchButtonState();
+      options.onWorkChanged?.(tab);
+    },
+    isConversationBusy: () => state.isRewinding || state.isResettingToNewChat || state.isSwitchingConversation,
+    hasDetachedWork: () => {
+      const tab = runtimeRef.current();
+      return !!tab && (tab.services.subagentManager.hasActiveAsyncSubagents()
+        // Collapsed side work stays discoverable from the tab bar.
+        || (tab.controllers.sideChatController.runtime?.isWorking ?? false));
+    },
+    dismissInteractions: () => runtimeRef.current()?.controllers.inputController.dismissPendingApproval(),
+  });
   options.registerCleanup(
     'tab execution coordinator',
     () => session.disposeExecutionCoordinator(),
@@ -127,27 +119,15 @@ export function buildTabRuntimeShell(
     get lifecycleState() {
       return session.lifecycleState;
     },
-    set lifecycleState(value) {
-      session.lifecycleState = value;
-    },
-    hydrationState: isBound ? 'idle' : 'ready',
+    hydrationState: sessionState.conversationId ? 'idle' : 'ready',
     get draftModel() {
       return session.draftModel;
-    },
-    set draftModel(value) {
-      session.draftModel = value;
     },
     get providerId() {
       return session.providerId;
     },
-    set providerId(value) {
-      session.providerId = value;
-    },
     get conversationId() {
       return session.conversationId;
-    },
-    set conversationId(value) {
-      session.conversationId = value;
     },
     executionCoordinator,
     providerCatalogResolver: () => options.getProviderCatalogConfig(providerCatalogContext),
@@ -165,11 +145,13 @@ function buildTabDOM(contentEl: HTMLElement, options: TabRuntimeConstructionCont
   const welcomeEl = createWelcomeElement(messagesEl);
   const inputComposerEl = contentEl.createDiv({ cls: 'claudian-input-composer' });
   const inputContainerEl = inputComposerEl.createDiv({ cls: 'claudian-input-container' });
-  const queueIndicatorEl = inputContainerEl.createDiv({ cls: 'claudian-input-queue-row' });
   const navRowEl = inputContainerEl.createDiv({ cls: 'claudian-input-nav-row' });
   const inputWrapper = inputContainerEl.createDiv({ cls: 'claudian-input-wrapper' });
+  // A queued follow-up is attached to the top of the box it will be sent from.
+  const queueIndicatorEl = inputWrapper.createDiv({ cls: 'claudian-input-queue-strip claudian-hidden' });
   const contextRowEl = inputWrapper.createDiv({ cls: 'claudian-context-row' });
   const composerEditor = new ComposerEditor(inputWrapper, options.plugin.app, options.component);
+  const infoRowEl = inputContainerEl.createDiv({ cls: 'claudian-input-info-row' });
   options.registerCleanup('tab composer editor', () => composerEditor.destroy());
   const vault = options.plugin.app.vault;
   const refresh = () => composerEditor.refreshLinks();
@@ -195,72 +177,22 @@ function buildTabDOM(contentEl: HTMLElement, options: TabRuntimeConstructionCont
     inputEl,
     navRowEl,
     contextRowEl,
+    infoRowEl,
   };
 }
 
+const IDLE_SESSION_RELEASE_MS = 30 * 60_000;
+
 function createTabExecutionCoordinator(
-  id: TabId,
   state: ChatState,
   options: TabRuntimeConstructionContext,
   runtimeRef: PublishedTabRuntimeRef,
 ): ChatExecutionCoordinator {
   const { plugin } = options;
-  const interactionKinds = new Map<
-    string,
-    'approval' | 'question'
-  >();
-  const interactionPort: ProviderInteractionPort = {
-    requestApproval: async (request) => {
-      const tab = runtimeRef.requirePublished();
-      interactionKinds.set(request.interactionId, request.kind);
-      state.beginActionRequired(request.interactionId);
-      try {
-        const decision = await tab.controllers.inputController.handleApprovalRequest(
-          request.toolName,
-          { ...request.input },
-          request.description,
-          {
-            ...(request.decisionReason ? { decisionReason: request.decisionReason } : {}),
-            ...(request.blockedPath ? { blockedPath: request.blockedPath } : {}),
-            ...(request.decisionOptions
-              ? { decisionOptions: request.decisionOptions.map(option => ({ ...option })) }
-              : {}),
-            ...(request.additionalPermissions !== undefined
-              ? { additionalPermissions: request.additionalPermissions }
-              : {}),
-          },
-        );
-        return { interactionId: request.interactionId, decision };
-      } finally {
-        interactionKinds.delete(request.interactionId);
-        state.endActionRequired(request.interactionId);
-      }
-    },
-    askUserQuestion: async (request, signal) => {
-      const tab = runtimeRef.requirePublished();
-      interactionKinds.set(request.interactionId, request.kind);
-      state.beginActionRequired(request.interactionId);
-      try {
-        const answers = await tab.controllers.inputController.handleAskUserQuestion(
-          { ...request.input },
-          signal,
-        );
-        return { interactionId: request.interactionId, answers };
-      } finally {
-        interactionKinds.delete(request.interactionId);
-        state.endActionRequired(request.interactionId);
-      }
-    },
-    dismissInteraction: (interactionId) => {
-      const tab = runtimeRef.requirePublished();
-      const kind = interactionKinds.get(interactionId);
-      if (kind) {
-        tab.controllers.inputController.dismissProviderInteraction(kind);
-        interactionKinds.delete(interactionId);
-        state.endActionRequired(interactionId);
-      }
-    },
-  };
+  const interactionPort = createInteractionPromptPort(
+    state,
+    () => runtimeRef.requirePublished().controllers.inlinePrompts,
+  );
   return new ChatExecutionCoordinator({
     lifecycleRegistry: plugin.providerHost.executionLifecycleRegistry,
     resolveBackend: providerId => ProviderRegistry.createExecutionBackend(
@@ -271,9 +203,14 @@ function createTabExecutionCoordinator(
     interactionPort,
     vaultWorkingDirectory: getVaultPath(plugin.app) ?? '.',
     createId: createTabMessageId,
-    onRequestedEvent: event => (
-      runtimeRef.requirePublished().controllers.inputController.handleExecutionEvent(event)
-    ),
+    onRequestedEvent: (event, context) => {
+      const tab = runtimeRef.requirePublished();
+      if (event.type === 'turn_started') {
+        // Identity and model switches discard eagerly through their owners; this fences delivery only.
+        tab.ui.promptSuggestion.bindTurn(event.scope.turnId, () => tab.executionCoordinator.isEventContextCurrent(context));
+      }
+      return tab.controllers.inputController.handleExecutionEvent(event);
+    },
     onSessionEvent: (event, context) => {
       const tab = runtimeRef.requirePublished();
       if (event.type === 'commands_changed') {
@@ -283,30 +220,23 @@ function createTabExecutionCoordinator(
       return enqueueTabSessionEvent(tab, plugin, event, context);
     },
     onBackgroundWorkChanged: () => {
-      options.onWorkChanged?.(runtimeRef.requirePublished());
+      const tab = runtimeRef.requirePublished();
+      tab.renderer.refreshBranchButtonState();
+      options.onWorkChanged?.(tab);
     },
     resolveMissingProviderSession: (conversationId, missingProviderSessionId) =>
       plugin.handleMissingProviderSession(conversationId, missingProviderSessionId),
     onError: error => {
       new Notice(error instanceof Error ? error.message : 'Provider execution failed.');
     },
-    warmExecution: {
-      ownerId: id,
-      pool: plugin.warmExecutionPool,
-      canCool: () => {
-        const tab = runtimeRef.requirePublished();
-        return !state.isStreaming
-          && !state.isRewinding
-          && !state.requiresAction
-          && tab.session.activeTurn === null
-          && tab.lifecycleState !== 'closing';
-      },
-      onWarmStateChanged: (isWarm) => {
-        const tab = runtimeRef.requirePublished();
-        if (tab.lifecycleState === 'closing') return;
-        tab.lifecycleState = isWarm ? 'warm' : 'cold';
-        if (!isWarm) options.onCommandContextChanged?.(tab);
-      },
+    idleReleaseMs: IDLE_SESSION_RELEASE_MS,
+    isOwnerIdle: () => {
+      const tab = runtimeRef.requirePublished();
+      return tab.session.isIdle && !state.requiresAction;
+    },
+    onIdleRelease: () => {
+      const tab = runtimeRef.requirePublished();
+      if (tab.lifecycleState !== 'closing') options.onCommandContextChanged?.(tab);
     },
   });
 }

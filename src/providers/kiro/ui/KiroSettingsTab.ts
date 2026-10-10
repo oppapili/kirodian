@@ -8,6 +8,8 @@ import { getRuntimeEnvironmentVariables } from '@/core/providers/providerEnviron
 import { KIRO_PROVIDER_ICON } from '@/shared/icons';
 import { renderCLIInstallationSetting } from '@/shared/settings/CLIInstallationSetting';
 
+import { getInstallationKey as getHostnameKey } from '../../../core/device/InstallationKey';
+import { normalizeConfiguredCLIPath } from '../../../core/process/cliPath';
 import { ProviderSettingsCoordinator } from '../../../core/providers/ProviderSettingsCoordinator';
 import { ProviderWorkspaceRegistry } from '../../../core/providers/ProviderWorkspaceRegistry';
 import type { ProviderSettingsTabRenderer } from '../../../core/providers/types';
@@ -20,8 +22,6 @@ import {
   renderProviderModelEnablementWarning,
 } from '../../../shared/settings/ProviderModelEnablementWarning';
 import { renderProviderModelsSection } from '../../../shared/settings/ProviderModelsSection';
-import { getHostnameKey } from '../../../utils/env';
-import { normalizeConfiguredCLIPath } from '../../../utils/path';
 import type { KiroWorkspaceServices } from '../app/KiroWorkspaceServices';
 import {
   clearCurrentKiroCatalog,
@@ -148,13 +148,6 @@ export const kiroSettingsTabRenderer: ProviderSettingsTabRenderer = {
 
     new Setting(container).setName(t('settings.agentSkills.sectionTitle')).setHeading();
     context.renderAgentSkillSettings(container, KIRO_PROVIDER_ID);
-
-    new Setting(container).setName('Commands').setHeading();
-    context.renderHiddenProviderCommandSetting(container, KIRO_PROVIDER_ID, {
-      name: 'Hidden Kiro commands',
-      desc: 'Hide runtime commands advertised by Kiro from the command dropdown. Enter names without the leading slash, one per line.',
-      placeholder: 'compact\nreview',
-    });
 
     renderEnvironmentSettingsSection({
       container,

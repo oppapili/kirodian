@@ -1,3 +1,5 @@
+import type { ForkTestEnvironment } from '@test/helpers/features/chat/ProviderForkTestHarness';
+
 import type {
   ProviderExecutionBackend,
   ProviderExecutionEvent,
@@ -9,10 +11,8 @@ import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ChatMessage, ImageAttachment, ProviderId } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { SideChatSession } from '@/features/chat/side-chat/SideChatSession';
-import { handleForkRequest } from '@/features/chat/tabs/TabForking';
+import { handleForkRequest } from '@/features/chat/tabs/forking/ForkSource';
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
-
-import type { ForkTestEnvironment } from '../tabs/ProviderForkTestHarness';
 
 export const capturedImage: ImageAttachment = {
   id: 'captured-image', name: 'captured.png', mediaType: 'image/png', source: 'paste', size: 68,
@@ -46,6 +46,8 @@ export async function traceSideChild(
     readonly beforeStart?: () => Promise<void>;
     /** Overrides the inherited model when the source projection is not the enabled selection. */
     readonly model?: string;
+    /** A value from the provider's permission-mode policy; defaults to the shared Safe value. */
+    readonly permissionMode?: string;
   } = {},
 ): Promise<TracedSideChild | null> {
   const captured = await captureSideSource(env, chat, checkpointMessage);
@@ -86,7 +88,7 @@ export async function traceSideChild(
       const result = await session.execute({
         configuration: {
           model: options.model ?? captured.sourceSelectedModel,
-          permissionMode: 'normal',
+          permissionMode: options.permissionMode ?? 'normal',
           systemInstructions: { instructions: 'Answer the user.', kind: 'explicit' },
         },
         conversationHistory: history,
@@ -136,6 +138,7 @@ export async function captureSideSource(
   const plugin = {
     app: env.app,
     settings: (env.host as unknown as { settings: unknown }).settings,
+    getConversationSummary(id: string) { return (this as unknown as { getConversationSync: (id: string) => any }).getConversationSync(id); },
     getConversationSync: (id: string) => env.repository.getSync(id),
   } as unknown as ChatFeatureHost;
   const tab = {

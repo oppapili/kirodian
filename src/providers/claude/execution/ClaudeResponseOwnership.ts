@@ -12,6 +12,11 @@ export class ClaudeResponseOwnership {
     pending: boolean;
     main: boolean;
   }>();
+  // Pending main-scope tools per channel; hasPending runs for every SDK message.
+  private readonly pendingMainTools: Record<ClaudeExecutionEventChannel, number> = {
+    requested: 0,
+    background: 0,
+  };
 
   current(requested: boolean): ClaudeExecutionEventChannel {
     const stream = this.streams.get('main');
@@ -25,16 +30,16 @@ export class ClaudeResponseOwnership {
   hasPending(channel: ClaudeExecutionEventChannel): boolean {
     // Async child streams must not hold ownership of the main response.
     return this.streams.get('main') === channel
-      || [...this.tools.values()].some(tool => tool.channel === channel && tool.main && tool.pending);
+      || this.pendingMainTools[channel] > 0;
   }
 
   toolChannel(toolId: string): ClaudeExecutionEventChannel | undefined {
     return this.tools.get(toolId)?.channel;
   }
 
-  resolve(message: SDKMessage, requested: boolean, inputId?: string): ClaudeExecutionEventChannel {
+  resolve(message: SDKMessage, requested: boolean, inputIds?: readonly string[]): ClaudeExecutionEventChannel {
     const fallback = this.current(requested);
-    if (message.type === 'result' && getClaudeInputMatch(message, inputId) === false) return 'background';
+    if (message.type === 'result' && getClaudeInputMatch(message, inputIds) === false) return 'background';
     if (message.type !== 'assistant' && message.type !== 'stream_event' && message.type !== 'user') {
       if ('tool_use_id' in message && typeof message.tool_use_id === 'string') {
         return this.toolChannel(message.tool_use_id) ?? fallback;
@@ -47,7 +52,7 @@ export class ClaudeResponseOwnership {
       const existing = message.type === 'assistant'
         ? this.messages.get(message.message.id)
         : message.event.type === 'message_start' ? undefined : this.streams.get('main');
-      const inputMatch = getClaudeInputMatch(message, inputId);
+      const inputMatch = getClaudeInputMatch(message, inputIds);
       if (inputMatch !== undefined) this.echoedChannel = inputMatch && requested ? 'requested' : 'background';
       // A consumption echo can arrive inside an already-started message. Keep
       // that message intact; the echo governs subsequent uncorrelated output.
@@ -88,9 +93,12 @@ export class ClaudeResponseOwnership {
       if (normalized.type !== 'output') continue;
       const event = normalized.event;
       if (event.type === 'tool_started' && !this.tools.has(event.toolCallId)) {
-        this.tools.set(event.toolCallId, { channel, pending: true, main: event.toolScope.kind === 'main' });
+        const main = event.toolScope.kind === 'main';
+        this.tools.set(event.toolCallId, { channel, pending: true, main });
+        if (main) this.pendingMainTools[channel] += 1;
       } else if (event.type === 'tool_completed') {
         const tool = this.tools.get(event.toolCallId);
+        if (tool?.pending && tool.main) this.pendingMainTools[tool.channel] -= 1;
         if (tool) tool.pending = false;
       }
     }
@@ -101,12 +109,13 @@ export class ClaudeResponseOwnership {
     for (const [key, owner] of this.streams) if (owner === channel) this.streams.delete(key);
     for (const [key, owner] of this.messages) if (owner === channel) this.messages.delete(key);
     for (const [key, tool] of this.tools) if (tool.channel === channel) this.tools.delete(key);
+    this.pendingMainTools[channel] = 0;
   }
 }
 
 /** Undefined preserves compatibility with producers that omit consumption echoes. */
-export function getClaudeInputMatch(message: SDKMessage, inputId?: string): boolean | undefined {
-  if (!inputId || (message.type !== 'assistant' && message.type !== 'stream_event' && message.type !== 'result')) {
+export function getClaudeInputMatch(message: SDKMessage, inputIds?: readonly string[]): boolean | undefined {
+  if (!inputIds?.length || (message.type !== 'assistant' && message.type !== 'stream_event' && message.type !== 'result')) {
     return undefined;
   }
   if (!message.user_message_uuid && !message.user_message_uuids?.length) {
@@ -115,5 +124,5 @@ export function getClaudeInputMatch(message: SDKMessage, inputId?: string): bool
     if (message.type === 'result' && 'queued_turn_count' in message && (message.queued_turn_count ?? 0) > 0) return false;
     return undefined;
   }
-  return message.user_message_uuid === inputId || message.user_message_uuids?.includes(inputId) === true;
+  return inputIds.some(id => message.user_message_uuid === id || message.user_message_uuids?.includes(id) === true);
 }

@@ -1,9 +1,9 @@
+import { getInstallationKey as getHostnameKey } from '../../core/device/InstallationKey';
 import { getProviderConfig, setProviderConfig } from '../../core/providers/providerConfig';
 import { getProviderEnvironmentVariables } from '../../core/providers/providerEnvironment';
 import { STANDARD_REASONING_VALUES } from '../../core/providers/reasoning';
 import { normalizeHostnameStringMap } from '../../core/providers/settings/HostnameStringMap';
 import type { HostnameCLIPaths } from '../../core/types/settings';
-import { getHostnameKey } from '../../utils/env';
 import type { KiroAgentMode } from './execution/KiroSessionModeMetadata';
 import {
   clearKiroReasoningMetadata,

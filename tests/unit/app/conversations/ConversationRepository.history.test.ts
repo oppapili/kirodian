@@ -1,8 +1,9 @@
 import '@/providers';
 
 import { ConversationRepository } from '@/app/conversations/ConversationRepository';
-import type { ConversationPersistence } from '@/core/bootstrap/ConversationPersistenceStore';
+import type { ConversationPersistence } from '@/app/storage/ConversationPersistenceStore';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
+import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import type { Conversation } from '@/core/types';
 import { ClaudeConversationHistoryService } from '@/providers/claude/history/ClaudeConversationHistoryService';
 import * as claudeHistory from '@/providers/claude/history/ClaudeHistoryStore';
@@ -22,6 +23,7 @@ function createConversation(id = 'conversation-1'): Conversation {
 function createRepository(conversation = createConversation()) {
   const persistence: jest.Mocked<ConversationPersistence> = {
     metadataReader: {
+      revalidate: jest.fn().mockResolvedValue([]),
       load: jest.fn().mockResolvedValue(null),
       scan: jest.fn().mockResolvedValue({
         records: [],
@@ -38,10 +40,11 @@ function createRepository(conversation = createConversation()) {
     },
     saveMetadata: jest.fn().mockResolvedValue(undefined),
     deleteCurrentMetadata: jest.fn().mockResolvedValue(undefined),
-    deleteLegacyMetadata: jest.fn().mockResolvedValue(undefined),
     assignMetadataToDevice: jest.fn().mockResolvedValue(undefined),
   };
   const repository = new ConversationRepository({
+    providers: ProviderRegistry,
+    providerSettings: ProviderSettingsCoordinator,
     getSettings: () => ({}),
     getVaultPath: () => '/vault',
     persistence,
@@ -57,14 +60,13 @@ test('does not publish recovered identity after concurrent deletion', async () =
   const conversation = createConversation();
   const { repository, persistence } = createRepository(conversation);
   jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
-    hydrateConversationHistory: async () => undefined,
+    hydrateConversationHistory: async () => ({}),
     resolveSessionIdForConversation: value => value?.sessionId ?? null,
     isPendingForkConversation: () => false,
     buildForkProviderState: () => ({}),
-    recoverConversationSessionReference: async draft => {
-      draft.sessionId = 'recovered-session';
+    recoverConversationSessionReference: async () => {
       await repository.delete(conversation.id);
-      return true;
+      return { sessionId: 'recovered-session' };
     },
   });
   expect(await repository.ensureHydrated(conversation.id)).toBeNull();
@@ -91,6 +93,7 @@ test('keeps relocated Claude history readable after its metadata save fails', as
   expect(repository.getCachedConversation(conversation.id)?.sessionId).toBe('session-1');
 });
 
+
 test('restores the conversation when missing-session metadata removal fails', async () => {
   const conversation = createConversation();
   const { repository, persistence } = createRepository(conversation);
@@ -103,7 +106,7 @@ test('restores the conversation when missing-session metadata removal fails', as
 
   await expect(repository.handleMissingProviderSession(conversation.id, 'session-1'))
     .rejects.toThrow('Metadata cleanup failed');
-  expect(repository.getCachedConversation(conversation.id)).toBe(conversation);
+  expect(repository.getCachedConversation(conversation.id)).toMatchObject({ id: conversation.id });
 });
 
 test('late accepted binding survives a missing-session decision', async () => {
@@ -111,7 +114,7 @@ test('late accepted binding survives a missing-session decision', async () => {
   const { repository } = createRepository(conversation);
   let updating: Promise<void> | undefined;
   jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
-    hydrateConversationHistory: async () => undefined,
+    hydrateConversationHistory: async () => ({}),
     resolveSessionIdForConversation: value => value?.sessionId ?? null,
     isPendingForkConversation: () => false,
     buildForkProviderState: () => ({}),
@@ -119,7 +122,7 @@ test('late accepted binding survives a missing-session decision', async () => {
       queueMicrotask(() => queueMicrotask(() => queueMicrotask(() => {
         updating = repository.update(conversation.id, { sessionId: 'new-session' });
       })));
-      return 'delete';
+      return { outcome: 'delete' };
     },
   });
   const outcome = await repository.handleMissingProviderSession(conversation.id, 'session-1');

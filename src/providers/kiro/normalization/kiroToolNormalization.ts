@@ -20,7 +20,6 @@ import {
   TOOL_WRITE,
 } from '../../../core/tools/toolNames';
 import type { AskUserAnswers } from '../../../core/types';
-import type { SDKToolUseResult } from '../../../core/types/diff';
 import type { ACPToolRawNameProvenance } from '../../acp/ACPToolStreamAdapter';
 import { KIRO_SUBAGENT_LIFECYCLE_TOOL_NAMES } from './kiroLifecycleToolNames';
 
@@ -64,7 +63,7 @@ export interface KiroToolProviderPayload {
   rawOutput?: unknown;
 }
 
-export interface KiroNormalizedToolUseResult extends SDKToolUseResult {
+export interface KiroNormalizedToolUseResult {
   answers?: AskUserAnswers;
   providerPayload: KiroToolProviderPayload;
 }
@@ -262,9 +261,9 @@ function formatToolOutput(value: unknown): string {
     return value;
   }
   try {
-    return JSON.stringify(value);
+    return JSON.stringify(value) ?? '';
   } catch {
-    return String(value);
+    return Object.prototype.toString.call(value);
   }
 }
 

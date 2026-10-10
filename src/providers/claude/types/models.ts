@@ -8,7 +8,7 @@ import {
 import { toClaudeRuntimeModelId } from '../modelSelection';
 import {
   CLAUDE_MODEL_TIER_DEFINITIONS,
-  resolveClaudeModelTierAlias,
+  isClaudeModelTier,
 } from '../modelTiers';
 
 /** Model identifier (string to support custom models via environment variables). */
@@ -24,7 +24,7 @@ export const DEFAULT_CLAUDE_MODELS: { value: ClaudeModel; label: string; descrip
 /** Effort levels for adaptive thinking models. */
 export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
-export const EFFORT_LEVEL_VALUES: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+const EFFORT_LEVEL_VALUES: readonly EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 export function isEffortLevel(value: unknown): value is EffortLevel {
   return typeof value === 'string'
@@ -35,12 +35,8 @@ function normalizeModelId(model: string): string {
   return toClaudeRuntimeModelId(model).trim().toLowerCase();
 }
 
-export function normalizeLegacyClaudeModelAlias(model: string): string {
-  return resolveClaudeModelTierAlias(normalizeModelId(model)) ?? model;
-}
-
 export function isDefaultClaudeModel(model: string): boolean {
-  return resolveClaudeModelTierAlias(normalizeModelId(model)) !== null;
+  return isClaudeModelTier(normalizeModelId(model));
 }
 
 /**

@@ -1,8 +1,9 @@
 import type {
   CitationGroup,
-  PermissionMode,
-  SDKToolUseResult,
+  SubagentInfo,
+  SubagentProgress,
   ToolProviderPayload,
+  ToolResultDetails,
   TurnStats,
   UsageInfo,
 } from '../types';
@@ -141,7 +142,8 @@ export type ProviderToolOutputEvent = ProviderEventBase<
   ProviderToolIdentity & {
     readonly content: string;
     readonly isError?: boolean;
-    readonly toolUseResult?: SDKToolUseResult;
+    /** Latest structured snapshot of the running tool, replacing earlier ones. */
+    readonly resultDetails?: ToolResultDetails;
     readonly providerPayload?: ToolProviderPayload;
   };
 
@@ -154,7 +156,8 @@ export type ProviderToolCompletedEvent = ProviderEventBase<
     readonly isError?: boolean;
     /** Authoritative provider outcome; never infer this from result content. */
     readonly isBlocked?: boolean;
-    readonly toolUseResult?: SDKToolUseResult;
+    /** Structured result data the provider decoded from its native payload. */
+    readonly resultDetails?: ToolResultDetails;
     readonly providerPayload?: ToolProviderPayload;
   };
 
@@ -194,7 +197,8 @@ export type ProviderPermissionModeChangedEvent = ProviderEventBase<
   ProviderExecutionEventScope
 > &
   ProviderOpaqueEventPayload & {
-    readonly permissionMode: PermissionMode;
+    /** A value from the provider's permission-mode policy. */
+    readonly permissionMode: string;
     readonly snapshot: ProviderSessionSnapshot;
   };
 
@@ -209,6 +213,8 @@ export type ProviderTurnCompletedEvent = ProviderEventBase<
   ProviderRequestedEventScope
 > &
   ProviderOpaqueEventPayload & {
+    /** Native identity of the final user message in this turn, including late correlation. */
+    readonly nativeUserMessageId?: string;
     readonly nativeAssistantId?: string;
     readonly nativeCheckpointId?: string;
     readonly turnStats?: TurnStats;
@@ -298,6 +304,18 @@ export type ProviderAsyncSubagentCompletedEvent = ProviderEventBase<
     readonly snapshotRevision?: number;
   };
 
+export type ProviderSubagentUpdatedEvent = ProviderEventBase<
+  'subagent_updated', ProviderSessionEventScope
+> & { readonly subagent: SubagentInfo };
+
+export type ProviderSubagentProgressEvent = ProviderEventBase<
+  'subagent_progress',
+  ProviderSessionEventScope
+> &
+  ProviderOpaqueEventPayload & {
+    readonly progress: SubagentProgress;
+  };
+
 export type ProviderTaskNotificationEvent = ProviderEventBase<
   'task_notification',
   ProviderExecutionEventScope
@@ -340,14 +358,23 @@ export type ProviderCommandsChangedEvent = ProviderEventBase<
 >;
 
 export type ProviderSessionEvent =
+  | (ProviderEventBase<'prompt_suggestion', ProviderSessionEventScope> & {
+      readonly originatingTurnId: string;
+      readonly suggestion: string;
+    })
   | ProviderCommandsChangedEvent
   | (ProviderTaskNotificationEvent & { readonly scope: ProviderSessionEventScope })
   | ProviderBackgroundTurnStartedEvent
   | ProviderBackgroundOutputEvent
   | ProviderBackgroundTurnCompletedEvent
   | ProviderAsyncSubagentCompletedEvent
+  | ProviderSubagentUpdatedEvent
+  | ProviderSubagentProgressEvent
   | (ProviderSessionStateChangedEvent & { readonly scope: ProviderSessionEventScope })
   | (ProviderPermissionModeChangedEvent & { readonly scope: ProviderSessionEventScope })
   | ProviderSessionErrorEvent;
 
 export type ProviderExecutionEvent = ProviderRequestedExecutionEvent;
+
+/** An event before its owner assigns the correlation envelope. */
+export type WithoutEventScope<T> = T extends unknown ? Omit<T, 'scope'> : never;

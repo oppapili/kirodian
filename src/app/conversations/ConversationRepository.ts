@@ -1,24 +1,16 @@
-import type { ConversationPersistence } from '../../core/bootstrap/ConversationPersistenceStore';
-import type {
-  SessionMetadataAuthority,
-  SessionMetadataReadResult,
-} from '../../core/bootstrap/SessionStorage';
+import { extractUserDisplayContent } from '@/core/prompt/promptContext';
+
 import type { ProviderSessionSnapshot } from '../../core/execution';
 import {
   assertLinkedContentPath,
   normalizeLinkedContentPath,
 } from '../../core/path/LinkedContentPath';
-import {
-  getConversationModelPersistenceTarget,
-  normalizeProviderModelSelection,
-  resolveConversationModel,
-} from '../../core/providers/conversationModel';
+import { normalizeProviderModelSelection } from '../../core/providers/conversationModel';
 import { getRuntimeEnvironmentVariables } from '../../core/providers/providerEnvironment';
-import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
-import { ProviderSettingsCoordinator } from '../../core/providers/ProviderSettingsCoordinator';
 import type {
-  ProviderConversationHistoryService,
+  ProviderHistoryInput,
   ProviderHistoryPathContext,
+  ProviderHistoryResult,
 } from '../../core/providers/types';
 import {
   DEFAULT_CHAT_PROVIDER_ID,
@@ -27,35 +19,44 @@ import {
 import {
   type Conversation,
   type ConversationMeta,
-  type ConversationModelRecoverySource,
   type ConversationMutablePatch,
+  type ConversationSummary,
   type SessionMetadata,
 } from '../../core/types';
-import { mapWithConcurrency } from '../../utils/concurrency';
-import { extractUserDisplayContent } from '../../utils/context';
 import { rewriteVaultPathAfterRename } from '../../utils/path';
+import type { ConversationPersistence } from '../storage/ConversationPersistenceStore';
+import type {
+  SessionMetadataAuthority,
+  SessionMetadataReadResult,
+} from '../storage/SessionStorage';
+import {
+  ConversationExecutionBindings,
+  type ExecutionBindingState,
+} from './ConversationExecutionBindings';
+import {
+  cloneModelRecoverySource,
+  ConversationModelRecovery,
+  getStoredModelSelection,
+} from './ConversationModelRecovery';
+import type {
+  ConversationProviderCatalog,
+  ConversationProviderSettings,
+  ConversationRecordFence,
+} from './ConversationRecordFence';
 
-interface ConversationRepositoryBaseDeps {
+export interface ConversationRepositoryDeps {
+  ensureProviderWorkspace?: (providerId: ProviderId) => Promise<void>;
   getSettings: () => Record<string, unknown>;
   getVaultPath: () => string | null;
   onConversationDeleted: (conversationId: string) => Promise<void>;
-}
-
-export type ConversationRepositoryDeps = ConversationRepositoryBaseDeps & {
   persistence: ConversationPersistence;
-};
-
-interface ExecutionBindingState {
-  readonly bindingId: string;
-  readonly providerId: ProviderId;
-  readonly providerGeneration: number;
-  closed: boolean;
-  latestSnapshot: ProviderSessionSnapshot | null;
-  lastPersistedRevision: number;
+  providers: ConversationProviderCatalog;
+  providerSettings: ConversationProviderSettings;
 }
 
 interface ConversationDeletionState {
   readonly conversation: Conversation;
+  readonly generation: number;
   readonly executionBinding: ExecutionBindingState | null;
 }
 
@@ -64,17 +65,6 @@ interface LinkedContentPathRename {
   newPath: string;
   includeDescendants: boolean;
 }
-
-type HistoricalModelRecoveryResult =
-  | 'recovered'
-  | 'superseded'
-  | 'unresolved';
-
-type HistoricalModelRecovery = NonNullable<
-  ProviderConversationHistoryService['recoverConversationModelSelection']
->;
-
-const HISTORICAL_MODEL_RECOVERY_CONCURRENCY = 2;
 
 const IMMUTABLE_CONVERSATION_PATCH_FIELDS = [
   'id',
@@ -90,78 +80,16 @@ type MutableLinkedContentConversation = Omit<
   linkedContentPath?: string;
 };
 
-function getStoredModelSelection(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function cloneModelRecoverySource(
-  source: ConversationModelRecoverySource,
-): ConversationModelRecoverySource {
-  return {
-    sessionId: source.sessionId,
-    ...(source.providerState
-      ? { providerState: { ...source.providerState } }
-      : {}),
-    ...(source.resumeAtMessageId
-      ? { resumeAtMessageId: source.resumeAtMessageId }
-      : {}),
-  };
-}
-
-function getModelRecoverySource(
-  conversation: Conversation,
-): ConversationModelRecoverySource | null {
-  if (conversation.modelRecoverySource) {
-    return cloneModelRecoverySource(conversation.modelRecoverySource);
-  }
-  if (
-    conversation.sessionId === null
-    && !conversation.providerState
-    && !conversation.resumeAtMessageId
-  ) {
-    return null;
-  }
-  return {
-    sessionId: conversation.sessionId,
-    ...(conversation.providerState
-      ? { providerState: { ...conversation.providerState } }
-      : {}),
-    ...(conversation.resumeAtMessageId
-      ? { resumeAtMessageId: conversation.resumeAtMessageId }
-      : {}),
-  };
-}
-
-function applyModelRecoverySource(
-  conversation: Conversation,
-  source: ConversationModelRecoverySource,
-): Conversation {
-  return {
-    ...conversation,
-    sessionId: source.sessionId,
-    providerState: source.providerState
-      ? { ...source.providerState }
-      : undefined,
-    resumeAtMessageId: source.resumeAtMessageId,
-  };
-}
-
 export class ConversationRepository {
   private conversations: Conversation[] = [];
+  private readonly recordsById = new Map<string, Conversation>();
   private hydratedConversationIds = new Set<string>();
   private hydrationPromises = new Map<string, Promise<Conversation | null>>();
   private conversationGenerations = new Map<string, number>();
   private deletedConversationIds = new Set<string>();
   private deletingConversationIds = new Set<string>();
   private readonly persistenceQueues = new Map<string, Promise<void>>();
-  private readonly executionBindings = new Map<string, ExecutionBindingState>();
   private readonly deletionStates = new Map<string, ConversationDeletionState>();
-  private readonly historicalModelRecoveryPromises = new Map<
-    string,
-    Promise<HistoricalModelRecoveryResult>
-  >();
-  private readonly historicalModelRecoverySources = new Map<string, Conversation>();
-  private readonly selectedModelMutationVersions = new WeakMap<Conversation, number>();
   private readonly linkedContentPathsByConversationId = new Map<
     string,
     string | undefined
@@ -170,12 +98,49 @@ export class ConversationRepository {
   private readonly pendingLinkedContentPathCorrectionIds = new Set<string>();
   private readonly metadataTargets = new Map<string, SessionMetadataAuthority>();
   private readonly persistence: ConversationPersistence;
+  private readonly snapshots = new WeakMap<Conversation, { record: Conversation; generation: number }>();
+  private readonly modelRecovery: ConversationModelRecovery;
+  private readonly executionBindings: ConversationExecutionBindings;
 
   constructor(private readonly deps: ConversationRepositoryDeps) {
     this.persistence = deps.persistence;
+    const fence: ConversationRecordFence = {
+      getRecord: id => this.#getRecord(id),
+      getGeneration: id => this.#getConversationGeneration(id),
+      isCurrent: (conversation, generation) => this.#isConversationCurrent(conversation, generation),
+      isRetained: conversation => this.#isConversationRetained(conversation),
+      canWrite: conversation => this.#canWriteConversation(conversation),
+      canAdopt: id => (
+        !this.#getRecord(id)
+        && !this.deletedConversationIds.has(id)
+        && !this.deletingConversationIds.has(id)
+      ),
+      isHydrated: id => this.hydratedConversationIds.has(id),
+      invalidate: id => this.#invalidateConversation(id),
+      enqueuePersistence: (id, operation) => this.#enqueuePersistence(id, operation),
+      writeMetadata: (conversation, options) => this.#writeMetadata(conversation, options),
+      getSettings: () => this.deps.getSettings(),
+      getVaultPath: () => this.deps.getVaultPath(),
+      getHistoryPathContext: (providerId, vaultPath) => this.#getHistoryPathContext(providerId, vaultPath),
+    };
+    this.modelRecovery = new ConversationModelRecovery(fence, deps.providers);
+    this.executionBindings = new ConversationExecutionBindings({
+      fence,
+      isTransientDeletionBinding: (conversationId, binding) => (
+        this.deletingConversationIds.has(conversationId)
+        && this.deletionStates.get(conversationId)?.executionBinding === binding
+      ),
+      discardModelRecovery: (conversation) => {
+        if (conversation.modelRecoverySource || this.modelRecovery.hasPendingRecovery(conversation.id)) {
+          conversation.modelRecoverySource = undefined;
+          this.#invalidateConversation(conversation.id);
+        }
+      },
+    });
   }
 
   replaceAll(conversations: Conversation[]): void {
+    conversations = structuredClone(conversations);
     for (const conversation of this.conversations) {
       this.#invalidateConversation(conversation.id);
     }
@@ -185,6 +150,8 @@ export class ConversationRepository {
     this.conversations = conversations.filter(
       ({ id }) => !this.deletedConversationIds.has(id),
     );
+    this.recordsById.clear();
+    for (const record of this.conversations) this.recordsById.set(record.id, record);
     this.metadataTargets.clear();
     for (const conversation of this.conversations) {
       this.metadataTargets.set(conversation.id, 'device');
@@ -199,8 +166,7 @@ export class ConversationRepository {
         .map(({ id }) => id),
     );
     this.hydrationPromises.clear();
-    this.historicalModelRecoveryPromises.clear();
-    this.historicalModelRecoverySources.clear();
+    this.modelRecovery.clear();
     this.executionBindings.clear();
     this.deletionStates.clear();
   }
@@ -212,15 +178,15 @@ export class ConversationRepository {
       source: SessionMetadataReadResult['source'];
     }>,
   ): Promise<void> {
+    entries = structuredClone(entries);
     for (const { conversation, source } of entries) {
       if (!this.metadataTargets.has(conversation.id)) {
-        const target = source === 'legacy' ? 'unscoped' : source;
-        this.metadataTargets.set(conversation.id, target);
+        this.metadataTargets.set(conversation.id, source);
       }
     }
     const linkedContentPathCorrectedIds = new Set<string>();
     for (const { conversation } of entries) {
-      const current = this.getSync(conversation.id);
+      const current = this.#getRecord(conversation.id);
       if (this.pendingLinkedContentPathCorrectionIds.has(conversation.id)) {
         linkedContentPathCorrectedIds.add(conversation.id);
       } else if (
@@ -230,13 +196,13 @@ export class ConversationRepository {
         linkedContentPathCorrectedIds.add(conversation.id);
       }
     }
-    const registeredProviderIds = new Set(ProviderRegistry.getRegisteredProviderIds());
+    const registeredProviderIds = new Set(this.deps.providers.getRegisteredProviderIds());
     for (const { conversation } of entries) {
       if (
-        !this.getSync(conversation.id)
+        !this.#getRecord(conversation.id)
         && registeredProviderIds.has(conversation.providerId)
       ) {
-        await this.#reconcileIncomingSelectedModel(conversation);
+        await this.modelRecovery.reconcileIncoming(conversation);
       }
     }
     const added = this.mergeMetadataConversations(
@@ -252,25 +218,22 @@ export class ConversationRepository {
     }
     const migrations = entries
       .filter(
-        ({ conversation, needsMigration, source }) =>
+        ({ conversation, needsMigration }) =>
           (
-            (source === 'legacy' || needsMigration)
-            && (addedIds.has(conversation.id) || !!this.getSync(conversation.id))
+            needsMigration
+            && (addedIds.has(conversation.id) || !!this.#getRecord(conversation.id))
           )
           || linkedContentPathCorrectedIds.has(conversation.id),
       )
-      .map(({ conversation, source }) => this.#enqueuePersistence(
+      .map(({ conversation }) => this.#enqueuePersistence(
         conversation.id,
         async () => {
-          const current = this.getSync(conversation.id);
+          const current = this.#getRecord(conversation.id);
           if (!current || !await this.#canWriteConversation(current)) return;
           await this.#writeMetadata(current, {
             preserveProviderState: !this.hydratedConversationIds.has(current.id),
           });
           this.pendingLinkedContentPathCorrectionIds.delete(current.id);
-          if (source === 'legacy') {
-            await this.persistence.deleteLegacyMetadata(current.id);
-          }
         },
       ));
     await Promise.all(migrations);
@@ -278,35 +241,37 @@ export class ConversationRepository {
 
   mergeMetadataConversations(
     conversations: Conversation[],
-    metadataTarget: SessionMetadataAuthority | null = 'device',
+    metadataTarget: SessionMetadataAuthority | ReadonlyMap<string, SessionMetadataAuthority> | null = 'device',
   ): Conversation[] {
+    conversations = structuredClone(conversations);
     const existingIds = new Set(this.conversations.map(({ id }) => id));
     for (const conversation of conversations) {
       if (existingIds.has(conversation.id)) {
-        this.getSync(conversation.id);
+        this.#getRecord(conversation.id);
         continue;
       }
       if (this.#applyLinkedContentPathRenamesToHydratedConversation(conversation)) {
         this.pendingLinkedContentPathCorrectionIds.add(conversation.id);
       }
     }
-    const added = conversations.filter(
-      ({ id }) =>
-        !existingIds.has(id)
-        && !this.deletedConversationIds.has(id)
-        && !this.deletingConversationIds.has(id),
-    );
-    if (added.length === 0) {
-      return [];
-    }
-
-    if (metadataTarget) {
-      for (const conversation of added) {
-        this.metadataTargets.set(conversation.id, metadataTarget);
+    const added = conversations.filter(({ id }) => {
+      if (existingIds.has(id) || this.deletedConversationIds.has(id) || this.deletingConversationIds.has(id)) {
+        return false;
       }
+      existingIds.add(id);
+      return true;
+    });
+    if (added.length === 0) return [];
+
+    for (const conversation of added) {
+      const target = typeof metadataTarget === 'string'
+        ? metadataTarget
+        : metadataTarget?.get(conversation.id);
+      if (target) this.metadataTargets.set(conversation.id, target);
     }
 
     this.conversations.push(...added);
+    for (const record of added) this.recordsById.set(record.id, record);
     this.conversations.sort(
       (left, right) =>
         right.lastActivityAt - left.lastActivityAt,
@@ -317,18 +282,21 @@ export class ConversationRepository {
         this.hydratedConversationIds.add(conversation.id);
       }
     }
-    return added;
+    return added.map(record => this.#snapshot(record));
   }
 
   discardUnresolvedMetadataShells(
     shells: readonly Conversation[],
   ): void {
-    for (const shell of shells) {
-      if (this.getSync(shell.id) !== shell) continue;
+    for (const snapshot of shells) {
+      const shell = this.#resolveSnapshot(snapshot);
+      const ownership = this.snapshots.get(snapshot);
+      if (!shell || (ownership && ownership.generation !== this.#getConversationGeneration(shell.id))) continue;
 
       const index = this.conversations.indexOf(shell);
       if (index === -1) continue;
       this.conversations.splice(index, 1);
+      this.recordsById.delete(shell.id);
       this.hydratedConversationIds.delete(shell.id);
       this.hydrationPromises.delete(shell.id);
       this.executionBindings.delete(shell.id);
@@ -340,7 +308,7 @@ export class ConversationRepository {
 
   getAll(): Conversation[] {
     this.#restoreAllLinkedContentIdentities();
-    return this.conversations;
+    return this.conversations.map(record => this.#snapshot(record));
   }
 
   async create(options?: {
@@ -357,7 +325,7 @@ export class ConversationRepository {
       throw new Error(`Conversation was deleted in this session: ${id}`);
     }
     const providerSettings =
-      ProviderSettingsCoordinator.getProviderSettingsSnapshot(
+      this.deps.providerSettings.getProviderSettingsSnapshot(
         settings,
         providerId,
       );
@@ -382,6 +350,7 @@ export class ConversationRepository {
 
     this.metadataTargets.set(conversation.id, 'device');
     this.conversations.unshift(conversation);
+    this.recordsById.set(conversation.id, conversation);
     this.#captureLinkedContentIdentity(conversation);
     if (!sessionId) {
       this.hydratedConversationIds.add(conversation.id);
@@ -392,7 +361,7 @@ export class ConversationRepository {
       this.discardUnresolvedMetadataShells([conversation]);
       throw error;
     }
-    return conversation;
+    return this.#snapshot(conversation);
   }
 
   async switchTo(id: string): Promise<Conversation | null> {
@@ -400,7 +369,7 @@ export class ConversationRepository {
   }
 
   async assignToCurrentDevice(id: string): Promise<boolean> {
-    const conversation = this.getSync(id);
+    const conversation = this.#getRecord(id);
     if (!conversation) return false;
 
     return this.#enqueuePersistence(id, async () => {
@@ -432,12 +401,14 @@ export class ConversationRepository {
     const pendingHydration = this.hydrationPromises.get(id) ?? null;
     const deletionState: ConversationDeletionState = {
       conversation,
-      executionBinding: this.executionBindings.get(id) ?? null,
+      generation: this.#getConversationGeneration(id),
+      executionBinding: this.executionBindings.get(id),
     };
     this.deletionStates.set(id, deletionState);
     this.deletingConversationIds.add(id);
     this.deletedConversationIds.add(id);
     this.conversations.splice(index, 1);
+    this.recordsById.delete(id);
     this.hydratedConversationIds.delete(id);
     this.hydrationPromises.delete(id);
     this.#invalidateConversation(id);
@@ -449,7 +420,6 @@ export class ConversationRepository {
     let metadataRemoved = false;
     try {
       await this.#enqueuePersistence(id, async () => {
-        await this.persistence.deleteLegacyMetadata(id);
         const target = this.#requireMetadataTarget(id);
         await (target === 'device'
           ? this.persistence.deleteCurrentMetadata(id)
@@ -470,11 +440,16 @@ export class ConversationRepository {
           0,
           conversation,
         );
+        this.recordsById.set(id, conversation);
         if (conversation.messages.length > 0) {
           this.hydratedConversationIds.add(id);
         }
         this.#invalidateConversation(id);
-        await this.#replayDeletionSnapshot(id, deletionState);
+        await this.executionBindings.replayAfterDeletionRollback(
+          id,
+          deletionState.executionBinding,
+          deletionState.conversation,
+        );
       }
       throw error;
     }
@@ -496,11 +471,11 @@ export class ConversationRepository {
     id: string,
     missingProviderSessionId?: string,
   ): Promise<'deleted' | 'reset' | 'preserved' | 'not_found'> {
-    const conversation = this.getSync(id);
+    const conversation = this.#getRecord(id);
     if (!conversation) return 'not_found';
     const generation = this.#getConversationGeneration(id);
 
-    const historyService = ProviderRegistry.getConversationHistoryService(
+    const historyService = this.deps.providers.getConversationHistoryService(
       conversation.providerId,
     );
     if (!historyService.resolveMissingConversationSession) return 'preserved';
@@ -514,7 +489,7 @@ export class ConversationRepository {
           draft,
           vaultPath,
           missingProviderSessionId,
-          this.#getHistoryPathContext(draft.providerId, vaultPath),
+          this.#getHistoryPathContext(conversation.providerId, vaultPath),
         );
         nativeReadCompleted = true;
         return result;
@@ -541,11 +516,9 @@ export class ConversationRepository {
   }
 
   async rename(id: string, title: string): Promise<void> {
-    const conversation = this.getSync(id);
-    if (!conversation) return;
-
-    conversation.title = title.trim() || this.#generateDefaultTitle();
-    await this.save(conversation);
+    await this.#mutateMetadata(id, () => ({
+      title: title.trim() || this.#generateDefaultTitle(),
+    }));
   }
 
   async update(id: string, updates: ConversationMutablePatch): Promise<void> {
@@ -557,11 +530,9 @@ export class ConversationRepository {
         `Conversation update cannot change immutable fields: ${attemptedImmutableFields.join(', ')}`,
       );
     }
-
-    const conversation = this.getSync(id);
+    const conversation = this.#getRecord(id);
     if (!conversation) return;
-
-    const safeUpdates = { ...updates };
+    const safeUpdates = structuredClone(updates);
     if ('selectedModel' in safeUpdates) {
       const selectedModel = normalizeProviderModelSelection(
         conversation.providerId,
@@ -570,62 +541,111 @@ export class ConversationRepository {
       );
       if (selectedModel) {
         safeUpdates.selectedModel = selectedModel;
-        this.#markSelectedModelMutation(conversation);
+        // Explicit intent supersedes pending automatic model recovery immediately.
+        this.modelRecovery.markSelectedModelMutation(conversation);
       } else {
         delete safeUpdates.selectedModel;
       }
     }
-    Object.assign(conversation, safeUpdates);
-    if (
-      'sessionId' in safeUpdates
-      || 'providerState' in safeUpdates
-      || 'resumeAtMessageId' in safeUpdates
-    ) {
+    if ('sessionId' in safeUpdates || 'providerState' in safeUpdates || 'resumeAtMessageId' in safeUpdates) {
+      // Fence native reads as soon as a replacement binding is accepted.
       this.hydratedConversationIds.delete(id);
       this.#invalidateConversation(id);
     }
-    await this.save(conversation);
+    await this.#mutateMetadata(id, () => safeUpdates);
   }
 
   async setPinned(id: string, isPinned: boolean): Promise<void> {
-    const conversation = this.getSync(id);
-    if (
-      !conversation
-      || (isPinned && conversation.isArchived)
-      || conversation.isPinned === isPinned
-    ) return;
-
-    conversation.isPinned = isPinned;
-    await this.save(conversation);
+    await this.#mutateMetadata(id, conversation => (
+      (isPinned && conversation.isArchived) || conversation.isPinned === isPinned
+        ? null
+        : { isPinned }
+    ));
   }
 
-  async setArchived(id: string, isArchived: boolean): Promise<void> {
-    const conversation = this.getSync(id);
-    if (!conversation) return;
-    if (
-      conversation.isArchived === isArchived
-      && (!isArchived || conversation.isPinned === false)
-    ) return;
+  /** Resolves true when the archive state changed. */
+  async setArchived(id: string, isArchived: boolean): Promise<boolean> {
+    let archiveChanged = false;
+    await this.#mutateMetadata(id, (conversation) => {
+      if (conversation.isArchived === isArchived && (!isArchived || conversation.isPinned === false)) {
+        return null;
+      }
+      archiveChanged = !!conversation.isArchived !== isArchived;
+      return { isArchived, ...(isArchived ? { isPinned: false } : {}) };
+    });
+    return archiveChanged;
+  }
 
-    conversation.isArchived = isArchived;
-    if (isArchived) {
-      conversation.isPinned = false;
-    }
-    await this.save(conversation);
+  /** Archives only when `shouldArchive` still holds at the serialized write; returns whether it archived. */
+  async archiveIf(
+    id: string,
+    shouldArchive: (conversation: Readonly<Conversation>) => boolean,
+  ): Promise<boolean> {
+    let didArchive = false;
+    await this.#mutateMetadata(id, (conversation) => {
+      if (conversation.isArchived || !shouldArchive(conversation)) return null;
+      didArchive = true;
+      return { isArchived: true, isPinned: false };
+    });
+    return didArchive;
+  }
+
+  /**
+   * Serializes a metadata decision through persistence and committed publication.
+   * `createPatch` must return a repository-owned patch; it is committed without another copy.
+   */
+  #mutateMetadata(
+    id: string,
+    createPatch: (conversation: Conversation) => ConversationMutablePatch | null,
+  ): Promise<void> {
+    const conversation = this.#getRecord(id);
+    if (!conversation) return Promise.resolve();
+    const generation = this.#getConversationGeneration(id);
+    return this.#enqueuePersistence(id, async () => {
+      if (!await this.#canWriteConversation(conversation)) return;
+      const patch = createPatch(conversation);
+      if (!patch) return;
+      const discardSupersededSessionFields = (): void => {
+        const deletion = this.deletionStates.get(id);
+        if (
+          this.#getConversationGeneration(id) === generation
+          || (deletion?.conversation === conversation && deletion.generation === generation)
+        ) return;
+        delete patch.sessionId;
+        delete patch.providerState;
+        delete patch.resumeAtMessageId;
+        delete patch.messages;
+      };
+      discardSupersededSessionFields();
+      await this.#writeMetadata({ ...conversation, ...patch });
+      if (!this.#isConversationRetained(conversation)) return;
+      // Session invalidation cannot cancel an unrelated committed title or pin edit.
+      discardSupersededSessionFields();
+      // update() already cloned caller input and #writeMetadata keeps only its own projection.
+      Object.assign(conversation, patch);
+      if ('sessionId' in patch || 'providerState' in patch || 'resumeAtMessageId' in patch) {
+        this.hydratedConversationIds.delete(id);
+        this.#invalidateConversation(id);
+      }
+    });
   }
 
   invalidateProviderSessions(providerIds: ProviderId[]): Conversation[] {
-    const drafts = this.conversations.map(conversation => cloneJSON(conversation));
-    const invalidated = ProviderSettingsCoordinator.invalidateConversationSessions(drafts, providerIds);
+    if (providerIds.length === 0) return [];
+    const providers = new Set(providerIds);
+    const drafts = this.conversations
+      .filter(conversation => providers.has(conversation.providerId))
+      .map(conversation => cloneJSON(conversation));
+    const invalidated = this.deps.providerSettings.invalidateConversationSessions(drafts, providerIds);
     return invalidated.flatMap(draft => {
-      const conversation = this.getSync(draft.id);
+      const conversation = this.#getRecord(draft.id);
       if (!conversation) return [];
       conversation.sessionId = draft.sessionId;
       conversation.providerState = draft.providerState;
       conversation.resumeAtMessageId = draft.resumeAtMessageId;
       this.hydratedConversationIds.delete(conversation.id);
       this.#invalidateConversation(conversation.id);
-      return [conversation];
+      return [this.#snapshot(conversation)];
     });
   }
 
@@ -638,154 +658,22 @@ export class ConversationRepository {
     conversations: readonly Conversation[],
   ): Promise<void> {
     await Promise.all(
-      conversations.map((conversation) => this.save(conversation)),
+      conversations.map((snapshot) => {
+        const record = this.#resolveSnapshot(snapshot);
+        return record ? this.save(record) : Promise.resolve();
+      }),
     );
   }
 
   registerHistoricalModelRecoverySources(
     conversations: readonly Conversation[],
   ): void {
-    for (const source of conversations) {
-      const target = this.getSync(source.id);
-      if (
-        !target
-        || getStoredModelSelection(target.selectedModel)
-        || getStoredModelSelection(source.selectedModel)
-        || this.historicalModelRecoverySources.has(source.id)
-      ) {
-        continue;
-      }
-      const recoverySource = getModelRecoverySource(source)
-        ?? getModelRecoverySource(target);
-      if (!recoverySource) continue;
-
-      target.modelRecoverySource ??= cloneModelRecoverySource(recoverySource);
-      this.historicalModelRecoverySources.set(
-        source.id,
-        applyModelRecoverySource(source, recoverySource),
-      );
-    }
+    this.modelRecovery.registerSources(conversations);
   }
 
   async recoverMissingSelectedModels(): Promise<Conversation[]> {
-    const candidates = this.conversations.filter(conversation => (
-      !getStoredModelSelection(conversation.selectedModel)
-    ));
-    const recovered = await mapWithConcurrency(
-      candidates,
-      async (conversation): Promise<Conversation | null> => {
-        const recovery = this.#recoverHistoricalModelSelection(conversation);
-        if (!recovery) return null;
-        const result = await recovery;
-        return result === 'recovered' && this.getSync(conversation.id) === conversation
-          ? conversation
-          : null;
-      },
-      HISTORICAL_MODEL_RECOVERY_CONCURRENCY,
-    );
-    return recovered.filter(
-      (conversation): conversation is Conversation => conversation !== null,
-    );
-  }
-
-  #recoverHistoricalModelSelection(
-    conversation: Conversation,
-  ): Promise<HistoricalModelRecoveryResult> | null {
-    if (getStoredModelSelection(conversation.selectedModel)) {
-      return null;
-    }
-
-    const existing = this.historicalModelRecoveryPromises.get(conversation.id);
-    if (existing) return existing;
-
-    const persistedRecoverySource = conversation.modelRecoverySource
-      ? cloneModelRecoverySource(conversation.modelRecoverySource)
-      : null;
-    const recoverySource = this.historicalModelRecoverySources.get(conversation.id)
-      ?? (persistedRecoverySource
-        ? applyModelRecoverySource(conversation, persistedRecoverySource)
-        : conversation);
-    let recoverModelSelection: HistoricalModelRecovery | undefined;
-    try {
-      const historyService = ProviderRegistry.getConversationHistoryService(
-        recoverySource.providerId,
-      );
-      if (historyService.hasConversationModelRecoverySource?.(recoverySource) === false) {
-        return null;
-      }
-      recoverModelSelection = historyService.recoverConversationModelSelection
-        ?.bind(historyService);
-    } catch {
-      return null;
-    }
-    if (!recoverModelSelection) return null;
-
-    const generation = this.#getConversationGeneration(conversation.id);
-    const recovery = this.#runHistoricalModelRecovery(
-      conversation,
-      generation,
-      recoverModelSelection,
-      recoverySource,
-    );
-    this.historicalModelRecoveryPromises.set(conversation.id, recovery);
-    return recovery;
-  }
-
-  async #runHistoricalModelRecovery(
-    conversation: Conversation,
-    generation: number,
-    recoverModelSelection: HistoricalModelRecovery,
-    recoverySource: Conversation,
-  ): Promise<HistoricalModelRecoveryResult> {
-    let selectedModel: string | null;
-    try {
-      const vaultPath = this.deps.getVaultPath();
-      selectedModel = (await recoverModelSelection(
-        recoverySource,
-        vaultPath,
-        this.#getHistoryPathContext(recoverySource.providerId, vaultPath),
-      ))?.trim() || null;
-    } catch {
-      return 'unresolved';
-    }
-    if (!selectedModel) return 'unresolved';
-    if (
-      !this.#isConversationCurrent(conversation, generation)
-      || getStoredModelSelection(conversation.selectedModel)
-    ) {
-      return 'superseded';
-    }
-
-    const resolvedRecoveredModel = resolveConversationModel(
-      this.deps.getSettings(),
-      conversation.providerId,
-      { ...conversation, selectedModel },
-    );
-    const recoveredModelToPersist = getConversationModelPersistenceTarget(
-      resolvedRecoveredModel,
-    );
-    selectedModel = recoveredModelToPersist || selectedModel;
-
-    let didPersist: boolean;
-    try {
-      didPersist = await this.#persistSelectedModelBeforePublish(
-        conversation,
-        selectedModel,
-        true,
-      );
-    } catch {
-      return 'unresolved';
-    }
-    if (
-      didPersist
-      &&
-      this.#isConversationCurrent(conversation, generation)
-      && conversation.selectedModel === selectedModel
-    ) {
-      this.historicalModelRecoverySources.delete(conversation.id);
-      return 'recovered';
-    }
-    return 'superseded';
+    const recovered = await this.modelRecovery.recoverMissing(this.conversations);
+    return recovered.map(record => this.#snapshot(record));
   }
 
   async rewriteLinkedContentPaths(
@@ -820,16 +708,7 @@ export class ConversationRepository {
     bindingId: string,
     providerGeneration: number,
   ): void {
-    const conversation = this.getSync(conversationId);
-    if (!conversation) return;
-    this.executionBindings.set(conversationId, {
-      bindingId,
-      providerId: conversation.providerId,
-      providerGeneration,
-      closed: false,
-      latestSnapshot: null,
-      lastPersistedRevision: -1,
-    });
+    this.executionBindings.register(conversationId, bindingId, providerGeneration);
   }
 
   persistExecutionSnapshot(
@@ -838,92 +717,11 @@ export class ConversationRepository {
     providerGeneration: number,
     snapshot: ProviderSessionSnapshot,
   ): Promise<boolean> {
-    const binding = this.executionBindings.get(conversationId);
-    const conversation = this.getSync(conversationId);
-    const deletionState = this.deletionStates.get(conversationId);
-    const isTransientDeletionBinding = (
-      !conversation
-      && this.deletingConversationIds.has(conversationId)
-      && deletionState?.executionBinding === binding
-    );
-    if (
-      !binding
-      || (!conversation && !isTransientDeletionBinding)
-      || binding.bindingId !== bindingId
-      || binding.providerGeneration !== providerGeneration
-      || binding.closed
-      || snapshot.providerId !== binding.providerId
-      || snapshot.revision < (binding.latestSnapshot?.revision ?? -1)
-      || snapshot.revision <= binding.lastPersistedRevision
-    ) {
-      return Promise.resolve(false);
-    }
-    if (
-      !binding.latestSnapshot
-      || snapshot.revision > binding.latestSnapshot.revision
-    ) {
-      binding.latestSnapshot = snapshot;
-    }
-
-    if (!conversation) {
-      return Promise.resolve(false);
-    }
-
-    return this.#persistLatestExecutionSnapshot(conversationId, binding);
-  }
-
-  #persistLatestExecutionSnapshot(
-    conversationId: string,
-    binding: ExecutionBindingState,
-  ): Promise<boolean> {
-    return this.#enqueuePersistence(conversationId, async () => {
-      if (
-        this.executionBindings.get(conversationId) !== binding
-        || !binding.latestSnapshot
-        || binding.latestSnapshot.revision <= binding.lastPersistedRevision
-      ) {
-        return false;
-      }
-      const current = this.getSync(conversationId);
-      if (!current || !await this.#canWriteConversation(current)) {
-        return false;
-      }
-      if (
-        this.executionBindings.get(conversationId) !== binding
-        || !binding.latestSnapshot
-        || binding.latestSnapshot.revision <= binding.lastPersistedRevision
-      ) {
-        return false;
-      }
-
-      const latest = binding.latestSnapshot;
-      this.#applySnapshot(current, latest);
-      await this.#writeMetadata(current);
-      binding.lastPersistedRevision = latest.revision;
-      return true;
-    });
-  }
-
-  #replayDeletionSnapshot(
-    conversationId: string,
-    deletionState: ConversationDeletionState,
-  ): Promise<boolean> {
-    const binding = deletionState.executionBinding;
-    if (
-      !binding
-      || binding.closed
-      || this.executionBindings.get(conversationId) !== binding
-      || this.getSync(conversationId) !== deletionState.conversation
-      || !binding.latestSnapshot
-      || binding.latestSnapshot.revision <= binding.lastPersistedRevision
-    ) {
-      return Promise.resolve(false);
-    }
-    return this.persistExecutionSnapshot(
+    return this.executionBindings.persistSnapshot(
       conversationId,
-      binding.bindingId,
-      binding.providerGeneration,
-      binding.latestSnapshot,
+      bindingId,
+      providerGeneration,
+      snapshot,
     );
   }
 
@@ -931,22 +729,19 @@ export class ConversationRepository {
     conversationId: string,
     bindingId: string,
   ): void {
-    const binding = this.executionBindings.get(conversationId);
-    if (binding?.bindingId === bindingId) {
-      binding.closed = true;
-    }
+    this.executionBindings.release(conversationId, bindingId);
   }
 
-  async assertConversationExecutionAuthority(conversationId: string): Promise<void> {
-    const conversation = this.getSync(conversationId);
-    if (!conversation || !await this.#canWriteConversation(conversation)
-      || this.getSync(conversationId) !== conversation) {
-      throw new Error(`Conversation is no longer available: ${conversationId}`);
-    }
+  assertConversationExecutionAuthority(
+    conversationId: string,
+    bindingId: string,
+    providerGeneration: number,
+  ): Promise<void> {
+    return this.executionBindings.assertAuthority(conversationId, bindingId, providerGeneration);
   }
 
   async recordConversationActivity(conversationId: string, timestamp: number): Promise<void> {
-    const conversation = this.getSync(conversationId);
+    const conversation = this.#getRecord(conversationId);
     if (!conversation) return;
     conversation.lastActivityAt = Math.max(conversation.lastActivityAt, timestamp);
     await this.save(conversation);
@@ -961,7 +756,12 @@ export class ConversationRepository {
   }
 
   async ensureHydrated(id: string): Promise<Conversation | null> {
-    const conversation = this.getSync(id);
+    const record = await this.#ensureHydratedRecord(id);
+    return record ? this.#snapshot(record) : null;
+  }
+
+  async #ensureHydratedRecord(id: string): Promise<Conversation | null> {
+    const conversation = this.#getRecord(id);
     if (!conversation) {
       return null;
     }
@@ -989,7 +789,7 @@ export class ConversationRepository {
     conversation: Conversation,
     generation: number,
   ): Promise<Conversation | null> {
-    await this.ensureSelectedModel(conversation);
+    await this.modelRecovery.ensureSelectedModel(conversation);
     if (!this.#isConversationCurrent(conversation, generation)) return null;
     return this.#isConversationCurrent(conversation, generation)
       ? conversation
@@ -1000,14 +800,14 @@ export class ConversationRepository {
     id: string,
     generation: number,
   ): Promise<Conversation | null> {
-    const conversation = this.getSync(id);
+    const conversation = this.#getRecord(id);
     if (!conversation) {
       return null;
     }
 
     if (!await this.#reconcileProviderSession(conversation)) return null;
     if (!this.#isConversationCurrent(conversation, generation)) return null;
-    await this.ensureSelectedModel(conversation);
+    await this.modelRecovery.ensureSelectedModel(conversation);
     if (!this.#isConversationCurrent(conversation, generation)) return null;
     if (!await this.#hydrateProviderHistory(conversation)) return null;
     if (!this.#isConversationCurrent(conversation, generation)) return null;
@@ -1016,10 +816,39 @@ export class ConversationRepository {
     return conversation;
   }
 
+  getSummary(id: string): ConversationSummary | null {
+    const record = this.#getRecord(id);
+    return record ? {
+      id: record.id, providerId: record.providerId, title: record.title,
+      selectedModel: record.selectedModel, isPinned: record.isPinned,
+      capabilities: { ...this.deps.providers.getCapabilities(record.providerId, record.providerState) },
+      ...(record.usage ? { usage: { model: record.usage.model } } : {}),
+    } : null;
+  }
+
+  /** Detached projections; mutation authority stays inside the repository. */
   getSync(id: string): Conversation | null {
-    const conversation = this.conversations.find(
-      (conversation) => conversation.id === id,
-    ) ?? null;
+    const record = this.#getRecord(id);
+    return record ? this.#snapshot(record) : null;
+  }
+
+  #snapshot(record: Conversation): Conversation {
+    const snapshot = structuredClone(record);
+    this.snapshots.set(snapshot, { record, generation: this.#getConversationGeneration(record.id) });
+    return snapshot;
+  }
+
+  isCurrentSnapshot(snapshot: Conversation): boolean {
+    return this.#resolveSnapshot(snapshot) !== null;
+  }
+
+  #resolveSnapshot(snapshot: Conversation): Conversation | null {
+    const record = this.snapshots.get(snapshot)?.record ?? snapshot;
+    return this.#getRecord(record.id) === record ? record : null;
+  }
+
+  #getRecord(id: string): Conversation | null {
+    const conversation = this.recordsById.get(id) ?? null;
     if (conversation) {
       this.#restoreLinkedContentIdentity(conversation);
     }
@@ -1042,48 +871,17 @@ export class ConversationRepository {
       isArchived: conversation.isArchived,
       titleGenerationStatus: conversation.titleGenerationStatus,
       isLegacySession: this.#isLegacyMetadataTarget(conversation.id),
+      hasSessionReference: Boolean(conversation.sessionId),
     }));
   }
 
   isSelectedModelPublicationSafe(conversation: Conversation): boolean {
-    const storedModel = getStoredModelSelection(conversation.selectedModel);
-    if (
-      !storedModel
-      || !ProviderRegistry.getRegisteredProviderIds().includes(conversation.providerId)
-    ) {
-      return true;
-    }
-
-    const resolved = resolveConversationModel(
-      this.deps.getSettings(),
-      conversation.providerId,
-      conversation,
-    );
-    const modelToPersist = getConversationModelPersistenceTarget(resolved);
-    return !(
-      resolved.shouldPersist
-      && modelToPersist
-      && modelToPersist !== storedModel
-    );
+    return this.modelRecovery.isPublicationSafe(conversation);
   }
 
   async reconcileSelectedModels(providerId: ProviderId): Promise<Conversation[]> {
-    const changed: Conversation[] = [];
-    for (const conversation of this.conversations) {
-      if (
-        conversation.providerId !== providerId
-        || !getStoredModelSelection(conversation.selectedModel)
-      ) {
-        continue;
-      }
-
-      const previousModel = conversation.selectedModel;
-      await this.ensureSelectedModel(conversation);
-      if (conversation.selectedModel !== previousModel) {
-        changed.push(conversation);
-      }
-    }
-    return changed;
+    const changed = await this.modelRecovery.reconcileProvider(this.conversations, providerId);
+    return changed.map(record => this.#snapshot(record));
   }
 
   #applyLinkedContentPathRenamesToHydratedConversation(
@@ -1180,7 +978,7 @@ export class ConversationRepository {
   async #reconcileProviderSession(
     conversation: Conversation,
   ): Promise<boolean> {
-    const historyService = ProviderRegistry.getConversationHistoryService(
+    const historyService = this.deps.providers.getConversationHistoryService(
       conversation.providerId,
     );
 
@@ -1191,9 +989,10 @@ export class ConversationRepository {
     );
     if (historyService.recoverConversationSessionReference) {
       try {
-        const outcome = await this.#readProviderHistory(conversation, draft => (
-          historyService.recoverConversationSessionReference!(draft, vaultPath, pathContext)
-        ), changed => changed);
+        const outcome = await this.#readProviderHistory(conversation, async input => {
+          const changes = await historyService.recoverConversationSessionReference!(input, vaultPath, pathContext);
+          return { outcome: changes !== null, changes: changes ?? undefined };
+        }, changed => changed);
         if (!outcome.current) return false;
       } catch {
         return true;
@@ -1202,17 +1001,18 @@ export class ConversationRepository {
 
     if (!historyService.getConversationSessionAvailability) return true;
     try {
-      const availability = await this.#readProviderHistory(conversation, draft => (
-        historyService.getConversationSessionAvailability!(draft, vaultPath, pathContext)
-      ));
+      const availability = await this.#readProviderHistory(conversation, async input => ({
+        outcome: await historyService.getConversationSessionAvailability!(input, vaultPath, pathContext),
+      }));
       if (!availability.current) return false;
       if (
         availability.value !== 'relocated'
         || !historyService.prepareRelocatedConversationSession
       ) return true;
-      const outcome = await this.#readProviderHistory(conversation, draft => (
-        historyService.prepareRelocatedConversationSession!(draft, vaultPath, pathContext)
-      ), changed => changed);
+      const outcome = await this.#readProviderHistory(conversation, async input => {
+        const changes = await historyService.prepareRelocatedConversationSession!(input, vaultPath, pathContext);
+        return { outcome: changes !== null, changes: changes ?? undefined };
+      }, changed => changed);
       return outcome.current;
     } catch {
       // Failed reads only discard their isolated draft.
@@ -1220,162 +1020,49 @@ export class ConversationRepository {
     }
   }
 
-  private async ensureSelectedModel(
-    conversation: Conversation,
-  ): Promise<void> {
-    let recoveryResult: HistoricalModelRecoveryResult | 'unsupported' = 'unsupported';
-    if (!getStoredModelSelection(conversation.selectedModel)) {
-      const recovery = this.#recoverHistoricalModelSelection(conversation);
-      if (recovery) recoveryResult = await recovery;
-    }
-    const resolved = resolveConversationModel(
-      this.deps.getSettings(),
-      conversation.providerId,
-      conversation,
-    );
-    const modelToPersist = getConversationModelPersistenceTarget(resolved);
-    if (
-      recoveryResult === 'unresolved' && resolved.source === 'usage'
-    ) {
-      return;
-    }
-    if (
-      !resolved.shouldPersist
-      || !modelToPersist
-      || conversation.selectedModel === modelToPersist
-    ) {
-      return;
-    }
-
-    await this.#persistSelectedModelBeforePublish(conversation, modelToPersist);
-  }
-
-  async #reconcileIncomingSelectedModel(conversation: Conversation): Promise<void> {
-    if (
-      !getStoredModelSelection(conversation.selectedModel)
-    ) {
-      return;
-    }
-
-    const resolved = resolveConversationModel(
-      this.deps.getSettings(),
-      conversation.providerId,
-      conversation,
-    );
-    const modelToPersist = getConversationModelPersistenceTarget(resolved);
-    if (
-      !resolved.shouldPersist
-      || !modelToPersist
-      || conversation.selectedModel === modelToPersist
-    ) {
-      return;
-    }
-
-    const snapshot = { ...conversation, selectedModel: modelToPersist };
-    const didPersist = await this.#enqueuePersistence(conversation.id, async () => {
-      if (
-        this.getSync(conversation.id)
-        || this.deletedConversationIds.has(conversation.id)
-        || this.deletingConversationIds.has(conversation.id)
-      ) {
-        return false;
-      }
-      await this.#writeMetadata(snapshot, {
-        preserveProviderState: true,
-      });
-      return true;
-    });
-    if (didPersist && !this.getSync(conversation.id)) {
-      conversation.selectedModel = modelToPersist;
-    }
-  }
-
-  async #persistSelectedModelBeforePublish(
-    conversation: Conversation,
-    selectedModel: string,
-    clearRecoverySource = false,
-  ): Promise<boolean> {
-    const previousSelectedModel = conversation.selectedModel;
-    const selectedModelMutationVersion = this.#markSelectedModelMutation(conversation);
-    const didPersist = await this.#enqueuePersistence(conversation.id, async () => {
-      if (
-        this.#getSelectedModelMutationVersion(conversation) !== selectedModelMutationVersion
-        || !await this.#canWriteConversation(conversation)
-        || this.#getSelectedModelMutationVersion(conversation) !== selectedModelMutationVersion
-      ) {
-        return false;
-      }
-      const snapshot = {
-        ...conversation,
-        selectedModel,
-        ...(clearRecoverySource ? { modelRecoverySource: undefined } : {}),
-      };
-      await this.#writeMetadata(snapshot, {
-        preserveProviderState: !this.hydratedConversationIds.has(conversation.id),
-      });
-      return true;
-    });
-    if (
-      !didPersist
-      || this.#getSelectedModelMutationVersion(conversation) !== selectedModelMutationVersion
-      || conversation.selectedModel !== previousSelectedModel
-    ) {
-      return false;
-    }
-
-    conversation.selectedModel = selectedModel;
-    if (clearRecoverySource) {
-      conversation.modelRecoverySource = undefined;
-    }
-    return true;
-  }
-
-  #markSelectedModelMutation(conversation: Conversation): number {
-    const nextVersion = this.#getSelectedModelMutationVersion(conversation) + 1;
-    this.selectedModelMutationVersions.set(conversation, nextVersion);
-    return nextVersion;
-  }
-
-  #getSelectedModelMutationVersion(conversation: Conversation): number {
-    return this.selectedModelMutationVersions.get(conversation) ?? 0;
-  }
-
   async #hydrateProviderHistory(
     conversation: Conversation,
   ): Promise<boolean> {
     const vaultPath = this.deps.getVaultPath();
-    const outcome = await this.#readProviderHistory(conversation, draft => (
-      ProviderRegistry.getConversationHistoryService(draft.providerId)
+    const outcome = await this.#readProviderHistory(conversation, async input => ({
+      outcome: undefined,
+      changes: await this.deps.providers.getConversationHistoryService(conversation.providerId)
         .hydrateConversationHistory(
-          draft,
+          input,
           vaultPath,
-          this.#getHistoryPathContext(draft.providerId, vaultPath),
-        )
-    ));
+          this.#getHistoryPathContext(conversation.providerId, vaultPath),
+        ),
+    }));
     return outcome.current;
   }
 
-  /** Native readers may mutate only this detached draft; the repository publishes it. */
+  /** Publish explicit native-history updates only while their captured binding remains current. */
   async #readProviderHistory<T>(
     conversation: Conversation,
-    read: (draft: Conversation) => Promise<T>,
+    read: (input: ProviderHistoryInput) => Promise<ProviderHistoryResult<T>>,
     shouldPersist: (value: T) => boolean = () => false,
   ): Promise<{ current: false } | { current: true; value: T }> {
     const generation = this.#getConversationGeneration(conversation.id);
+    // Reads must not decide against a binding whose replacement is still committing.
+    const pendingWrite = this.persistenceQueues.get(conversation.id);
+    if (pendingWrite) await pendingWrite;
+    if (!this.#isConversationCurrent(conversation, generation)) return { current: false };
     const fields = ['sessionId', 'providerState', 'resumeAtMessageId', 'messages'] as const;
-    const before = fields.map(field => JSON.stringify(conversation[field]));
-    const draft = cloneJSON(conversation);
-    const value = await read(draft);
+    const before = fields.map(field => conversation[field]);
+    const input: ProviderHistoryInput = structuredClone({
+      sessionId: conversation.sessionId,
+      providerState: conversation.providerState,
+      resumeAtMessageId: conversation.resumeAtMessageId,
+      messages: conversation.messages,
+      createdAt: conversation.createdAt,
+      lastActivityAt: conversation.lastActivityAt,
+    });
+    const { outcome: value, changes: patch = {} } = await read(input);
     const isCurrent = (): boolean => (
       this.#isConversationCurrent(conversation, generation)
-      && fields.every((field, index) => JSON.stringify(conversation[field]) === before[index])
+      && fields.every((field, index) => conversation[field] === before[index])
     );
     if (!isCurrent()) return { current: false };
-    const patch: ConversationMutablePatch = {};
-    if (JSON.stringify(draft.messages) !== before[3]) patch.messages = draft.messages;
-    if (JSON.stringify(draft.sessionId) !== before[0]) patch.sessionId = draft.sessionId;
-    if (JSON.stringify(draft.providerState) !== before[1]) patch.providerState = draft.providerState;
-    if (JSON.stringify(draft.resumeAtMessageId) !== before[2]) patch.resumeAtMessageId = draft.resumeAtMessageId;
     if (shouldPersist(value)) {
       const persisted = await this.#enqueuePersistence(conversation.id, async () => {
         if (!await this.#canWriteConversation(conversation) || !isCurrent()) return false;
@@ -1384,71 +1071,31 @@ export class ConversationRepository {
       });
       if (!persisted || !isCurrent()) return { current: false };
     }
-    Object.assign(conversation, patch);
+    Object.assign(conversation, structuredClone(patch));
     return { current: true, value };
-  }
-
-  #applySnapshot(
-    conversation: Conversation,
-    snapshot: ProviderSessionSnapshot,
-  ): void {
-    const establishesFreshProviderSession = snapshot.status !== 'invalidated'
-      && typeof snapshot.providerSessionId === 'string'
-      && snapshot.providerSessionId.trim().length > 0;
-    if (
-      establishesFreshProviderSession
-      && (
-        conversation.modelRecoverySource
-        || this.historicalModelRecoverySources.has(conversation.id)
-        || this.historicalModelRecoveryPromises.has(conversation.id)
-      )
-    ) {
-      conversation.modelRecoverySource = undefined;
-      this.#invalidateConversation(conversation.id);
-    }
-    if (snapshot.providerSessionId !== undefined) {
-      conversation.sessionId = snapshot.providerSessionId;
-    } else if (snapshot.status === 'invalidated') {
-      conversation.sessionId = null;
-    }
-    if (
-      snapshot.providerState !== undefined
-      || snapshot.providerStateDeletes !== undefined
-    ) {
-      const retainedProviderState = { ...conversation.providerState };
-      for (const key of snapshot.providerStateDeletes ?? []) {
-        delete retainedProviderState[key];
-      }
-      const nextProviderState = {
-        ...retainedProviderState,
-        ...snapshot.providerState,
-      };
-      conversation.providerState = Object.keys(nextProviderState).length > 0
-        ? nextProviderState
-        : undefined;
-    }
   }
 
   private save(conversation: Conversation): Promise<void> {
     this.#restoreLinkedContentIdentity(conversation);
-    const generation = this.#getConversationGeneration(conversation.id);
     return this.#enqueuePersistence(conversation.id, async () => {
-      if (
-        !this.#isConversationCurrent(conversation, generation)
-        || !await this.#canWriteConversation(conversation)
-      ) {
-        return;
-      }
+      // Flush the current projection; a binding change does not cancel its metadata.
+      if (!await this.#canWriteConversation(conversation)) return;
       this.#restoreLinkedContentIdentity(conversation);
       await this.#writeMetadata(conversation);
     });
+  }
+
+  /** A committed write also belongs in the projection retained for deletion rollback. */
+  #isConversationRetained(conversation: Conversation): boolean {
+    return this.#getRecord(conversation.id) === conversation
+      || this.deletionStates.get(conversation.id)?.conversation === conversation;
   }
 
   async #canWriteConversation(
     conversation: Conversation,
   ): Promise<boolean> {
     return (
-      this.getSync(conversation.id) === conversation
+      this.#getRecord(conversation.id) === conversation
       && !this.deletedConversationIds.has(conversation.id)
       && !this.deletingConversationIds.has(conversation.id)
     );
@@ -1458,7 +1105,9 @@ export class ConversationRepository {
     conversation: Conversation,
     options: { preserveProviderState?: boolean } = {},
   ): Promise<void> {
-    const metadata = this.toSessionMetadata(conversation, options);
+    // Metadata excludes message history: snapshot the projection, not the whole conversation.
+    // The shallow copy keeps projection-time repairs off the caller's record.
+    const metadata = structuredClone(this.toSessionMetadata({ ...conversation }, options));
     const target = this.#requireMetadataTarget(conversation.id);
     return target === 'device'
       ? this.persistence.saveMetadata(metadata)
@@ -1482,13 +1131,22 @@ export class ConversationRepository {
     options: { preserveProviderState?: boolean } = {},
   ): SessionMetadata {
     const linkedContentPath = this.#getAuthoritativeLinkedContentPath(conversation);
-    const historyService = ProviderRegistry.getConversationHistoryService(
+    const historyService = this.deps.providers.getConversationHistoryService(
       conversation.providerId,
     );
-    const providerState = !options.preserveProviderState
-      && historyService.buildPersistedProviderState
-      ? historyService.buildPersistedProviderState(conversation)
+    const providerState = historyService.buildPersistedProviderState
+      ? historyService.buildPersistedProviderState(conversation, options)
       : conversation.providerState;
+    const modelRecoverySource = !getStoredModelSelection(conversation.selectedModel)
+      && conversation.modelRecoverySource
+      ? cloneModelRecoverySource(conversation.modelRecoverySource)
+      : undefined;
+    if (modelRecoverySource && historyService.buildPersistedProviderState) {
+      modelRecoverySource.providerState = historyService.buildPersistedProviderState(
+        { ...modelRecoverySource, messages: [] },
+        { preserveProviderState: true },
+      );
+    }
     return {
       id: conversation.id,
       providerId: conversation.providerId,
@@ -1502,14 +1160,7 @@ export class ConversationRepository {
         providerState && Object.keys(providerState).length > 0
           ? providerState
           : undefined,
-      ...(!getStoredModelSelection(conversation.selectedModel)
-        && conversation.modelRecoverySource
-        ? {
-            modelRecoverySource: cloneModelRecoverySource(
-              conversation.modelRecoverySource,
-            ),
-          }
-        : {}),
+      ...(modelRecoverySource ? { modelRecoverySource } : {}),
       linkedContentPath,
       isPinned: conversation.isPinned,
       isArchived: conversation.isArchived,
@@ -1561,6 +1212,9 @@ export class ConversationRepository {
   ): ProviderHistoryPathContext {
     const settings = this.deps.getSettings();
     return {
+      ensureWorkspace: this.deps.ensureProviderWorkspace
+        ? () => this.deps.ensureProviderWorkspace!(providerId)
+        : undefined,
       environment: {
         ...process.env,
         ...getRuntimeEnvironmentVariables(settings, providerId),
@@ -1576,8 +1230,7 @@ export class ConversationRepository {
   }
 
   #invalidateConversation(id: string): void {
-    this.historicalModelRecoveryPromises.delete(id);
-    this.historicalModelRecoverySources.delete(id);
+    this.modelRecovery.forget(id);
     this.conversationGenerations.set(
       id,
       this.#getConversationGeneration(id) + 1,
@@ -1589,7 +1242,7 @@ export class ConversationRepository {
     generation: number,
   ): boolean {
     return (
-      this.getSync(conversation.id) === conversation
+      this.#getRecord(conversation.id) === conversation
       && this.#getConversationGeneration(conversation.id) === generation
     );
   }

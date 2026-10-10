@@ -2,12 +2,10 @@ import type {
   ConversationMeta,
   SessionManagerOrganization,
   SessionManagerSort,
-} from '../../../core/types';
-import { isProvisionalNotePath } from './ProvisionalNoteNames';
+} from '@/core/types';
+import { isProvisionalNotePath } from '@/features/chat/session-manager/ProvisionalNoteNames';
 
-export { isProvisionalNotePath } from './ProvisionalNoteNames';
-
-export type SessionListSectionKind = 'list' | 'content' | 'ungrouped' | 'missing';
+export type SessionListSectionKind = 'list' | 'recency' | 'content' | 'ungrouped' | 'missing';
 
 export interface SessionListSection {
   key: string;
@@ -24,7 +22,17 @@ interface OrganizeSessionListOptions {
   includeContentPaths?: readonly string[];
   contentExists?: (contentPath: string) => boolean;
   contentIsNote?: (contentPath: string) => boolean;
+  /** Splits the flat list into recency groups relative to `now`. */
+  groupByRecency?: { now: number };
 }
+
+const DAY_MS = 86_400_000;
+const RECENCY_GROUPS: ReadonlyArray<{ key: string; label: string; maxAgeDays: number }> = [
+  { key: 'recency:7d', label: 'Past week', maxAgeDays: 7 },
+  { key: 'recency:14d', label: 'Past 2 weeks', maxAgeDays: 14 },
+  { key: 'recency:30d', label: 'Past month', maxAgeDays: 30 },
+  { key: 'recency:older', label: 'Older', maxAgeDays: Infinity },
+];
 
 export function isLegacyProvisionalLinkedContent(
   contentPath: string,
@@ -37,6 +45,29 @@ export function isLegacyProvisionalLinkedContent(
 
 function getLastActivityTimestamp(conversation: ConversationMeta): number {
   return conversation.lastActivityAt;
+}
+
+function getSortTimestamp(conversation: ConversationMeta, sort: SessionManagerSort): number {
+  return sort === 'created' ? conversation.createdAt : getLastActivityTimestamp(conversation);
+}
+
+function groupByRecency(
+  sortedConversations: readonly ConversationMeta[],
+  sort: SessionManagerSort,
+  now: number,
+): SessionListSection[] {
+  const sections = RECENCY_GROUPS.map(({ key, label }): SessionListSection => ({
+    key,
+    kind: 'recency',
+    label,
+    conversations: [],
+  }));
+  for (const conversation of sortedConversations) {
+    const ageDays = (now - getSortTimestamp(conversation, sort)) / DAY_MS;
+    const index = RECENCY_GROUPS.findIndex(({ maxAgeDays }) => ageDays < maxAgeDays);
+    sections[index].conversations.push(conversation);
+  }
+  return sections.filter(section => section.conversations.length > 0);
 }
 
 function compareConversations(
@@ -91,6 +122,9 @@ export function organizeSessionList(
     compareConversations(left, right, options.sort)
   ));
   if (options.organization === 'list') {
+    if (options.groupByRecency) {
+      return groupByRecency(sortedConversations, options.sort, options.groupByRecency.now);
+    }
     return [{
       key: 'list',
       kind: 'list',
@@ -148,4 +182,157 @@ export function organizeSessionList(
   return sections.sort((left, right) => (
     compareSections(left, right, options.sort)
   ));
+}
+
+export interface SessionListModelOptions {
+  organization: SessionManagerOrganization;
+  sort: SessionManagerSort;
+  language: string;
+  scope?: 'active' | 'archived';
+  searchQuery?: string;
+  /** Partitions pinned sessions and pinned Linked content into their own section. */
+  showPinnedSection?: boolean;
+  pinnedLinkedContentPaths?: ReadonlySet<string>;
+  collapsedGroupKeys?: ReadonlySet<string>;
+  contentExists?: (contentPath: string) => boolean;
+  contentIsNote?: (contentPath: string) => boolean;
+  /** Divides an unpinned flat list into recency groups relative to `now`. */
+  groupByRecency?: { now: number };
+}
+
+/** What a session list shows, derived from the conversation list without any DOM. */
+export interface SessionListModel {
+  readonly hasSearchTerms: boolean;
+  /** No session or pinned Linked content group matches the scope and search. */
+  readonly isEmpty: boolean;
+  readonly pinnedContentSections: readonly SessionListSection[];
+  /** Pinned sessions outside pinned Linked content groups, in list order. */
+  readonly pinnedConversations: readonly ConversationMeta[];
+  readonly sections: readonly SessionListSection[];
+  /** Group keys in display order for Linked content organization; null for flat lists. */
+  readonly groupKeys: readonly string[] | null;
+  /** Every in-scope session per Linked content path, ignoring search, for group actions. */
+  readonly conversationsByLinkedContent: ReadonlyMap<string, readonly ConversationMeta[]>;
+  /** Sessions shown when every expanded group is fully paged in. */
+  readonly visibleConversationTotal: number;
+}
+
+function getSearchTerms(searchQuery: string | undefined): string[] {
+  return (searchQuery ?? '').trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+}
+
+/** Scopes, searches, partitions, and organizes sessions for one list render. */
+export function deriveSessionListModel(
+  conversations: readonly ConversationMeta[],
+  options: SessionListModelOptions,
+): SessionListModel {
+  const { organization, sort, language } = options;
+  const scopedConversations = options.scope === 'archived'
+    ? conversations.filter(conversation => conversation.isArchived)
+    : options.scope === 'active'
+      ? conversations.filter(conversation => !conversation.isArchived)
+      : conversations;
+  const searchTerms = getSearchTerms(options.searchQuery);
+  const filteredConversations = searchTerms.length === 0
+    ? scopedConversations
+    : scopedConversations.filter((conversation) => {
+        const searchableText = [conversation.title, conversation.linkedContentPath ?? '']
+          .join('\n')
+          .toLocaleLowerCase();
+        return searchTerms.every(term => searchableText.includes(term));
+      });
+  const conversationsByLinkedContent = new Map<string, ConversationMeta[]>();
+  for (const conversation of scopedConversations) {
+    if (!conversation.linkedContentPath) continue;
+    const contentConversations = conversationsByLinkedContent.get(conversation.linkedContentPath) ?? [];
+    contentConversations.push(conversation);
+    conversationsByLinkedContent.set(conversation.linkedContentPath, contentConversations);
+  }
+  const pinnedLinkedContentPaths = organization === 'linked-content'
+    && options.showPinnedSection
+    && options.scope !== 'archived'
+    ? options.pinnedLinkedContentPaths ?? new Set<string>()
+    : new Set<string>();
+  const isInPinnedContentGroup = (conversation: ConversationMeta): boolean => (
+    !!conversation.linkedContentPath
+    && pinnedLinkedContentPaths.has(conversation.linkedContentPath)
+  );
+  const pinnedContentConversations = filteredConversations.filter(isInPinnedContentGroup);
+  const pinnedConversations = options.showPinnedSection
+    ? filteredConversations.filter(conversation => (
+        conversation.isPinned && !isInPinnedContentGroup(conversation)
+      ))
+    : [];
+  const sessionConversations = options.showPinnedSection
+    ? filteredConversations.filter(conversation => (
+        !conversation.isPinned && !isInPinnedContentGroup(conversation)
+      ))
+    : filteredConversations;
+  const pinnedPathsWithMatchingSessions = new Set(
+    pinnedContentConversations.flatMap(conversation => (
+      conversation.linkedContentPath ? [conversation.linkedContentPath] : []
+    )),
+  );
+  const visiblePinnedContentPaths = [...pinnedLinkedContentPaths].filter(contentPath => (
+    searchTerms.length === 0
+    || pinnedPathsWithMatchingSessions.has(contentPath)
+    || searchTerms.every(term => contentPath.toLocaleLowerCase().includes(term))
+  ));
+  const pinnedContentSections = organizeSessionList(pinnedContentConversations, {
+    organization: 'linked-content',
+    sort,
+    language,
+    includeContentPaths: visiblePinnedContentPaths,
+    contentExists: options.contentExists,
+    contentIsNote: options.contentIsNote,
+  }).filter(section => section.contentPath !== undefined);
+  const isEmpty = filteredConversations.length === 0 && pinnedContentSections.length === 0;
+  if (isEmpty) {
+    return {
+      hasSearchTerms: searchTerms.length > 0,
+      isEmpty,
+      pinnedContentSections,
+      pinnedConversations: [],
+      sections: [],
+      groupKeys: organization === 'linked-content' ? [] : null,
+      conversationsByLinkedContent,
+      visibleConversationTotal: 0,
+    };
+  }
+
+  const sortedPinnedConversations = organizeSessionList(pinnedConversations, {
+    organization: 'list',
+    sort,
+    language,
+  })[0]?.conversations ?? [];
+  const sections = organizeSessionList(sessionConversations, {
+    organization,
+    sort,
+    language,
+    contentExists: options.contentExists,
+    contentIsNote: options.contentIsNote,
+    groupByRecency: options.groupByRecency,
+  });
+  const countExpanded = (groupSections: readonly SessionListSection[]): number => (
+    groupSections.reduce((total, section) => (
+      options.collapsedGroupKeys?.has(section.key) ? total : total + section.conversations.length
+    ), 0)
+  );
+  const visibleSessionConversationTotal = organization === 'linked-content'
+    ? countExpanded(sections)
+    : sessionConversations.length;
+  return {
+    hasSearchTerms: searchTerms.length > 0,
+    isEmpty,
+    pinnedContentSections,
+    pinnedConversations: sortedPinnedConversations,
+    sections,
+    groupKeys: organization === 'linked-content'
+      ? [...pinnedContentSections.map(({ key }) => key), ...sections.map(({ key }) => key)]
+      : null,
+    conversationsByLinkedContent,
+    visibleConversationTotal: countExpanded(pinnedContentSections)
+      + sortedPinnedConversations.length
+      + visibleSessionConversationTotal,
+  };
 }

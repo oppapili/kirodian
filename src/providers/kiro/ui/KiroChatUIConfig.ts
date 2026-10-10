@@ -1,9 +1,10 @@
 import type {
   ProviderChatUIConfig,
+  ProviderModelPolicy,
   ProviderModelSelectorLock,
   ProviderModeSelectorConfig,
-  ProviderPermissionModeToggleConfig,
-  ProviderReasoningOption,
+  ProviderPermissionModeOption,
+  ProviderPermissionModePolicy,
   ProviderUIOption,
 } from '../../../core/providers/types';
 import { KIRO_PROVIDER_ICON } from '../../../shared/icons';
@@ -23,14 +24,26 @@ import {
   updateKiroProviderSettings,
 } from '../settings';
 
-const KIRO_PERMISSION_MODE_TOGGLE: ProviderPermissionModeToggleConfig = {
-  inactiveValue: 'normal',
-  inactiveLabel: 'Safe',
-  activeValue: 'yolo',
-  activeLabel: 'YOLO',
-};
+const KIRO_PERMISSION_MODE_OPTIONS: readonly ProviderPermissionModeOption[] = Object.freeze([
+  { value: 'normal', label: 'Safe', description: 'Ask before running actions' },
+  {
+    value: 'yolo',
+    label: 'YOLO',
+    description: 'Accept all permissions without asking',
+    bypassesApprovals: true,
+  },
+]);
 
-export const kiroChatUIConfig: ProviderChatUIConfig = {
+// Kiro offers only Safe (`normal`) and YOLO. Retired upstream modes such as
+// `plan` are not Kiro values; a stored legacy mode fails closed to Safe.
+const KIRO_PERMISSION_MODE_POLICY: ProviderPermissionModePolicy = Object.freeze({
+  values: ['normal', 'yolo'],
+  fallbackValue: 'normal',
+  defaultValue: 'normal',
+});
+
+export const kiroChatUIConfig: ProviderChatUIConfig & Pick<ProviderModelPolicy, 'permissionModes'> = {
+  permissionModes: KIRO_PERMISSION_MODE_POLICY,
   getModelOptions(settings): ProviderUIOption[] {
     const kiroSettings = getKiroProviderSettings(settings);
     const catalogModels = kiroSettings.currentCatalog?.models ?? [];
@@ -58,13 +71,13 @@ export const kiroChatUIConfig: ProviderChatUIConfig = {
         .some(option => option.value === model.trim());
   },
 
-  isAdaptiveReasoningModel(model, settings): boolean {
+  supportsReasoningEffort(model, settings): boolean {
     return getKiroAvailableReasoningEfforts(
       getExplicitlySelectedKiroModel(model, settings),
     ).length > 0;
   },
 
-  getReasoningOptions(model, settings): ProviderReasoningOption[] {
+  getReasoningOptions(model, settings): ProviderUIOption[] {
     return getKiroAvailableReasoningEfforts(
       getExplicitlySelectedKiroModel(model, settings),
     ).map(option => ({
@@ -152,8 +165,8 @@ export const kiroChatUIConfig: ProviderChatUIConfig = {
     return new Set();
   },
 
-  getPermissionModeToggle(): ProviderPermissionModeToggleConfig {
-    return KIRO_PERMISSION_MODE_TOGGLE;
+  getPermissionModeOptions(): readonly ProviderPermissionModeOption[] {
+    return KIRO_PERMISSION_MODE_OPTIONS;
   },
 
   resolvePermissionMode(settings): string {

@@ -16,16 +16,17 @@ import type {
   RewindableExecutionSession,
   SteerableExecutionSession,
 } from '../../../core/execution';
-import type { ProviderHost } from '../../../core/providers/ProviderHost';
-import type { ChatMessage, PermissionMode } from '../../../core/types';
-import { appendBrowserContext } from '../../../utils/browser';
-import { appendCanvasContext } from '../../../utils/canvas';
-import { appendLinkedContent } from '../../../utils/context';
-import { appendEditorContext } from '../../../utils/editor';
+import { appendBrowserContext } from '../../../core/prompt/browserContext';
+import { appendCanvasContext } from '../../../core/prompt/canvasContext';
+import { appendEditorContext } from '../../../core/prompt/editorContext';
 import {
   buildContextFromHistory,
   buildPromptWithHistoryContext,
-} from '../../../utils/session';
+} from '../../../core/prompt/historyContext';
+import { appendLinkedContent } from '../../../core/prompt/promptContext';
+import type { ProviderHost } from '../../../core/providers/ProviderHost';
+import { normalizeToolResultDetails } from '../../../core/tools/toolResultDetails';
+import type { ChatMessage, PermissionMode } from '../../../core/types';
 import {
   type ACPContentBlock,
   ACPExecutionEventNormalizer,
@@ -51,6 +52,7 @@ import {
   normalizeKiroDiscoveredModels,
 } from '../models';
 import {
+  buildKiroToolProviderPayload,
   normalizeKiroToolCall,
   normalizeKiroToolName,
   normalizeKiroToolUseResult,
@@ -708,9 +710,7 @@ RewindableExecutionSession {
     return buildSessionMeta(
       request,
       request?.configuration.systemInstructions.kind === 'provider-default'
-        ? buildKiroSystemPrompt(this.getSystemPromptSettings(), {
-            dynamicSections: request.configuration.systemInstructions.dynamicSections,
-          })
+        ? buildKiroSystemPrompt(this.getSystemPromptSettings())
         : undefined,
     );
   }
@@ -1320,13 +1320,21 @@ function createKiroToolStreamAdapter(): ACPToolStreamAdapter {
     normalizeToolName(rawName) {
       return normalizeKiroToolName(rawName ?? 'tool');
     },
-    normalizeToolUseResult(rawName, _input, rawOutput, rawInput) {
-      return normalizeKiroToolUseResult(
+    normalizeToolResultDetails(rawName, input, rawOutput, rawInput) {
+      const { answers } = normalizeKiroToolUseResult(
         rawName ?? 'tool',
-        _input,
+        input,
         rawOutput,
         rawInput,
       );
+      return answers ? normalizeToolResultDetails({ resolvedAnswers: answers }) : undefined;
+    },
+    buildToolProviderPayload(rawName, rawInput, rawOutput) {
+      return buildKiroToolProviderPayload({
+        rawName: rawName ?? 'tool',
+        rawInput,
+        rawOutput,
+      });
     },
     resolveRawToolName(currentRawName, update) {
       return resolveKiroRawToolName(currentRawName, update);

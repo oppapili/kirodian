@@ -1,16 +1,21 @@
-
-import { getDefaultHiddenProviderCommands } from '../../core/providers/commands/hiddenCommands';
 import { DEFAULT_REASONING_VALUE } from '../../core/providers/reasoning';
-import { type ClaudianSettings } from '../../core/types/settings';
-import { getBuiltInProviderDefaultConfigs } from '../../providers/defaultProviderConfigs';
+import type { ClaudianSettings, ProviderConfigMap } from '../../core/types/settings';
 
+/**
+ * Application defaults. Provider-owned defaults are assembled by the composition
+ * root and injected, so app settings never import concrete providers.
+ */
+export function createDefaultClaudianSettings(providerConfigs: ProviderConfigMap): ClaudianSettings {
+  return structuredClone({ ...DEFAULT_CLAUDIAN_SETTINGS, providerConfigs });
+}
+
+/** Provider-neutral defaults; `providerConfigs` stays empty until providers inject theirs. */
 export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
   userName: '',
 
-  permissionMode: 'yolo',
+  permissionMode: 'auto',
 
   model: 'haiku',
-  thinkingBudget: 'off',
   effortLevel: DEFAULT_REASONING_VALUE,
   serviceTier: 'default',
   enableAutoTitleGeneration: true,
@@ -34,29 +39,31 @@ export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
 
   locale: 'en',
 
-  providerConfigs: getBuiltInProviderDefaultConfigs(),
+  providerConfigs: {},
 
   settingsProvider: 'claude',
   lastSelectedChatModel: null,
   savedProviderModel: {},
   savedProviderEffort: {},
   savedProviderServiceTier: {},
-  savedProviderThinkingBudget: {},
   savedProviderPermissionMode: {},
   pendingProviderSessionInvalidations: {},
 
-  maxWarmAgentProcesses: 5,
   enableAutoScroll: true,
   showMessageTimestamps: false,
   deferMathRenderingDuringStreaming: true,
   expandFileEditsByDefault: false,
   chatViewPlacement: 'right-sidebar',
+  enableZenMode: true,
+  zenModePosition: null,
   enableDualPane: true,
   dualPaneSide: 'right',
   restoreTabsOnStartup: true,
+  skillsSynced: false,
   sessionManagerOrganization: 'list',
   sessionManagerSort: 'last-updated',
+  sessionAutoArchiveAfter: 'off',
   pinnedLinkedContentPaths: [],
 
-  hiddenProviderCommands: getDefaultHiddenProviderCommands(),
+  hiddenCommands: [],
 };

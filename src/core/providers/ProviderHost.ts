@@ -1,6 +1,6 @@
 import type { App } from 'obsidian';
 
-import type { SharedAppStorage } from '../bootstrap/storage';
+import type { ProviderHostStorage } from '../bootstrap/storage';
 import type {
   ProviderExecutionLifecycleRegistry,
   ProviderExecutionTransitionScope,
@@ -19,8 +19,8 @@ import type { ProviderCLIResolutionContext, ProviderId } from './types';
 export interface ProviderHost {
   readonly app: App;
   readonly executionLifecycleRegistry: ProviderExecutionLifecycleRegistry;
-  readonly settings: ClaudianSettings;
-  readonly storage: SharedAppStorage;
+  readonly settings: Readonly<ClaudianSettings>;
+  readonly storage: ProviderHostStorage;
   readonly manifest?: { version?: string };
 
   mutateSettings(

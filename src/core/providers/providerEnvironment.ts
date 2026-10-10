@@ -1,4 +1,5 @@
-import { parseEnvironmentVariables } from '../../utils/env';
+import { parseEnvironmentVariables } from '@/core/process/env';
+
 import { getProviderConfig, setProviderConfig } from './providerConfig';
 import { ProviderRegistry } from './ProviderRegistry';
 import type { ProviderId } from './types';
@@ -101,21 +102,6 @@ function hasMeaningfulEnvironmentContent(envText: string): boolean {
     });
 }
 
-function getLegacyEnvironmentClassification(
-  settings: Record<string, unknown>,
-): ReturnType<typeof classifyEnvironmentVariablesByOwnership> {
-  const legacyEnvironmentVariables = settings.environmentVariables;
-  if (typeof legacyEnvironmentVariables !== 'string' || legacyEnvironmentVariables.length === 0) {
-    return {
-      shared: '',
-      providers: {},
-      reviewKeys: [],
-    };
-  }
-
-  return classifyEnvironmentVariablesByOwnership(legacyEnvironmentVariables);
-}
-
 export function classifyEnvironmentVariablesByOwnership(input: string): {
   shared: string;
   providers: Partial<Record<ProviderId, string>>;
@@ -174,7 +160,7 @@ export function getSharedEnvironmentVariables(settings: Record<string, unknown>)
     return sharedEnvironmentVariables;
   }
 
-  return getLegacyEnvironmentClassification(settings).shared;
+  return '';
 }
 
 export function setSharedEnvironmentVariables(
@@ -182,7 +168,6 @@ export function setSharedEnvironmentVariables(
   envText: string,
 ): void {
   settings.sharedEnvironmentVariables = envText;
-  delete settings.environmentVariables;
 }
 
 export function getProviderEnvironmentVariables(
@@ -194,7 +179,7 @@ export function getProviderEnvironmentVariables(
     return providerConfig.environmentVariables;
   }
 
-  return getLegacyEnvironmentClassification(settings).providers[providerId] ?? '';
+  return '';
 }
 
 export function setProviderEnvironmentVariables(
@@ -206,7 +191,6 @@ export function setProviderEnvironmentVariables(
     ...getProviderConfig(settings, providerId),
     environmentVariables: envText,
   });
-  delete settings.environmentVariables;
 }
 
 export function joinEnvironmentTexts(...parts: Array<string | undefined>): string {

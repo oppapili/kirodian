@@ -61,7 +61,7 @@ describe('ProviderRegistry', () => {
     });
 
     expect(claudeAdapter?.isSpawnTool('Agent')).toBe(true);
-    expect(claudeAdapter?.isSpawnTool('Task')).toBe(true);
+    expect(claudeAdapter?.isSpawnTool('Task')).toBe(false);
 
     for (const providerId of ['claude', 'kiro'] as const) {
       expect(ProviderRegistry.getCapabilities(providerId)).not.toHaveProperty(
@@ -168,12 +168,14 @@ describe('ProviderRegistry', () => {
       },
     });
 
+
+
     expect(options.find(option => option.value === 'sonnet')?.label)
-      .toBe('Claude: Sonnet');
+      .toBe('Claude Code: Sonnet');
   });
 
   it('returns the display name from provider registration metadata', () => {
-    expect(ProviderRegistry.getProviderDisplayName('claude')).toBe('Claude');
+    expect(ProviderRegistry.getProviderDisplayName('claude')).toBe('Claude Code');
     expect(ProviderRegistry.getProviderDisplayName('kiro')).toBe('Kiro');
   });
 

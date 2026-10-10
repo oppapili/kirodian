@@ -1,7 +1,7 @@
 /** @jest-environment jsdom */
 import { fireEvent, within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
-import { loadMermaid, MarkdownRenderer } from 'obsidian';
+import { Component, loadMermaid, MarkdownRenderer } from 'obsidian';
 
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 
@@ -17,7 +17,7 @@ beforeEach(() => {
   document.body.replaceChildren();
   host = document.body.createDiv();
   renderer = new MessageRenderer({ app: {}, settings: { mediaFolder: '' } } as any,
-    { registerDomEvent: jest.fn(), register: jest.fn() } as any, host);
+    new Component(), host);
   render.mockReset().mockResolvedValue({ svg });
   jest.mocked(loadMermaid).mockResolvedValue({ render });
   jest.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, target) => {
@@ -36,6 +36,7 @@ it.each(['mermaid', 'Mermaid', 'MERMAID'])('renders %s directly and retains acce
   expect(render).toHaveBeenCalledWith(expect.any(String), source, expect.any(HTMLElement));
   const toggle = within(host).getByRole('button', { name: 'Show diagram source' });
   expect(toggle.getAttribute('type')).toBe('button');
+  expect(toggle.hasAttribute('title')).toBe(false);
   expect(within(host).queryByRole('button', { name: 'Copy' })).toBeNull();
   toggle.focus();
   expect(document.activeElement).toBe(toggle);
@@ -51,6 +52,33 @@ it.each(['mermaid', 'Mermaid', 'MERMAID'])('renders %s directly and retains acce
   expect(within(host).queryByRole('button', { name: 'Copy' })).toBeNull();
   expect((await axe(host)).violations).toEqual([]);
   expect(jest.mocked(MarkdownRenderer.render).mock.calls.at(-1)?.[1]).not.toMatch(/```mermaid/i);
+});
+
+it('renders HTML-serialized label markup as a well-formed SVG image', async () => {
+  // Mermaid serializes HTML labels with HTML rules: void `<br>` and named entities are not XML.
+  render.mockResolvedValue({
+    svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50"><foreignObject width="100" height="50">'
+      + '<div xmlns="http://www.w3.org/1999/xhtml"><span class="nodeLabel"><p>First line<br>Second&nbsp;line</p>'
+      + '</span></div></foreignObject></svg>',
+  });
+  await renderer.renderContent(host, `\`\`\`mermaid\n${source}\`\`\``);
+  const src = within(host).getByRole('img', { name: 'Mermaid diagram' }).getAttribute('src')!;
+  const image = new DOMParser().parseFromString(
+    decodeURIComponent(src.slice(src.indexOf(',') + 1)), 'image/svg+xml');
+  expect(image.querySelector('parsererror')).toBeNull();
+  expect(image.documentElement.localName).toBe('svg');
+  const label = image.getElementsByTagNameNS('http://www.w3.org/1999/xhtml', 'p')[0];
+  expect(label.getElementsByTagNameNS('http://www.w3.org/1999/xhtml', 'br')).toHaveLength(1);
+  expect(label.textContent).toBe('First lineSecond\u00a0line');
+});
+
+it('passes well-formed SVG output through unchanged', async () => {
+  // Valid XML that an HTML reparse would truncate: `<br/>` inside SVG `<text>` breaks out of `<svg>`.
+  const wellFormed = '<svg xmlns="http://www.w3.org/2000/svg"><g><text>a<br/>b</text><rect/></g></svg>';
+  render.mockResolvedValue({ svg: wellFormed });
+  await renderer.renderContent(host, `\`\`\`mermaid\n${source}\`\`\``);
+  const src = within(host).getByRole('img', { name: 'Mermaid diagram' }).getAttribute('src')!;
+  expect(decodeURIComponent(src.slice(src.indexOf(',') + 1))).toBe(wellFormed);
 });
 
 it.each([undefined, '', '<svg><text>Syntax error</text><g class="error-icon"/></svg>'])('keeps source for invalid output %s', async output => {

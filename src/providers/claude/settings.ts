@@ -7,23 +7,23 @@ import {
   readStoredString,
 } from '../../core/providers/settings/storedSettings';
 import type { HostnameCLIPaths } from '../../core/types/settings';
-import { type ClaudeDiscoveredModel, decodeClaudeModels } from './modelCatalog';
+import { type ClaudeDiscoveredModel, decodeClaudeModels } from './models';
 
-export const CLAUDE_SAFE_MODES = ['acceptEdits', 'auto', 'default'] as const;
-export type ClaudeSafeMode = typeof CLAUDE_SAFE_MODES[number];
-export type ClaudeResponseStyle = 'Default' | 'Concise';
-export type ClaudeSettingSource = 'user' | 'project' | 'local';
+type ClaudeSettingSource = 'user' | 'project' | 'local';
 
 export interface ClaudeProviderSettings {
   enabled: boolean;
-  safeMode: ClaudeSafeMode;
-  responseStyle: ClaudeResponseStyle;
+  /** Native output style name; null inherits Claude Code's own setting. */
+  outputStyle: string | null;
+  promptSuggestions: boolean;
+  /** Output style names Claude Code last reported, built-in and custom. */
+  discoveredOutputStyles: string[];
   cliPath: string;
   cliPathsByHost: HostnameCLIPaths;
   loadUserSettings: boolean;
   enableChrome: boolean;
   discoveredModels: ClaudeDiscoveredModel[];
-  /** Records that the one-time selected-model effort metadata migration completed. */
+  /** Ordered enabled SDK identities; null seeds selections from legacy configuration. */
   visibleModels: string[] | null;
   modelAliases: Record<string, string>;
   environmentVariables: string;
@@ -32,8 +32,9 @@ export interface ClaudeProviderSettings {
 
 export const DEFAULT_CLAUDE_PROVIDER_SETTINGS: Readonly<ClaudeProviderSettings> = Object.freeze({
   enabled: true,
-  safeMode: 'acceptEdits',
-  responseStyle: 'Default',
+  outputStyle: null,
+  promptSuggestions: false,
+  discoveredOutputStyles: [],
   cliPath: '',
   cliPathsByHost: {},
   loadUserSettings: true,
@@ -47,28 +48,12 @@ export const DEFAULT_CLAUDE_PROVIDER_SETTINGS: Readonly<ClaudeProviderSettings> 
   environmentHash: '',
 });
 
-function normalizeClaudeSafeMode(value: unknown): ClaudeSafeMode | undefined {
-  return (CLAUDE_SAFE_MODES as readonly unknown[]).includes(value)
-    ? value as ClaudeSafeMode
-    : undefined;
-}
-
-function readStoredClaudeSafeMode(
-  value: unknown,
-  fallback: ClaudeSafeMode,
-): ClaudeSafeMode {
-  if (value === undefined) {
-    return fallback;
-  }
-  return normalizeClaudeSafeMode(value) ?? 'default';
-}
-
 export function getClaudeProviderSettings(
   settings: Record<string, unknown>,
 ): ClaudeProviderSettings {
   const config = getProviderConfig(settings, 'claude');
   const cliPathsByHost = normalizeHostnameStringMap(
-    config.cliPathsByHost ?? settings.claudeCliPathsByHost,
+    config.cliPathsByHost,
   );
 
   return {
@@ -76,31 +61,23 @@ export function getClaudeProviderSettings(
       config.enabled,
       DEFAULT_CLAUDE_PROVIDER_SETTINGS.enabled,
     ),
-    responseStyle: config.responseStyle === 'Concise' ? 'Concise' : 'Default',
-    safeMode: readStoredClaudeSafeMode(
-      config.safeMode,
-      readStoredClaudeSafeMode(
-        settings.claudeSafeMode,
-        DEFAULT_CLAUDE_PROVIDER_SETTINGS.safeMode,
-      ),
-    ),
+    outputStyle: readOutputStyle(config),
+    promptSuggestions: readStoredBoolean(config.promptSuggestions, false),
+    discoveredOutputStyles: decodeOutputStyles(config.discoveredOutputStyles),
     cliPath: readStoredString(
       config.cliPath,
-      readStoredString(settings.claudeCliPath, DEFAULT_CLAUDE_PROVIDER_SETTINGS.cliPath),
+      DEFAULT_CLAUDE_PROVIDER_SETTINGS.cliPath,
     ),
     cliPathsByHost,
     loadUserSettings: readStoredBoolean(
       config.loadUserSettings,
-      readStoredBoolean(
-        settings.loadUserClaudeSettings,
-        DEFAULT_CLAUDE_PROVIDER_SETTINGS.loadUserSettings,
-      ),
+      DEFAULT_CLAUDE_PROVIDER_SETTINGS.loadUserSettings,
     ),
     enableChrome: readStoredBoolean(
       config.enableChrome,
-      readStoredBoolean(settings.enableChrome, DEFAULT_CLAUDE_PROVIDER_SETTINGS.enableChrome),
+      DEFAULT_CLAUDE_PROVIDER_SETTINGS.enableChrome,
     ),
-    modelAliases: decodeModelAliases(config.modelAliases ?? settings.customModelAliases),
+    modelAliases: decodeModelAliases(config.modelAliases),
     discoveredModels: decodeClaudeModels(config.discoveredModels ?? config.selectedModels),
     visibleModels: config.visibleModels == null ? null : Array.isArray(config.visibleModels)
       ? [...new Set(config.visibleModels.filter((id): id is string => typeof id === 'string' && Boolean(id.trim())))]
@@ -112,9 +89,24 @@ export function getClaudeProviderSettings(
     ),
     environmentHash: readStoredString(
       config.environmentHash,
-      readStoredString(settings.lastEnvHash, DEFAULT_CLAUDE_PROVIDER_SETTINGS.environmentHash),
+      DEFAULT_CLAUDE_PROVIDER_SETTINGS.environmentHash,
     ),
   };
+}
+
+/** Distinct non-empty style names in reported order. */
+export function decodeOutputStyles(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((name): name is string => typeof name === 'string')
+    .map(name => name.trim())
+    .filter(Boolean))];
+}
+
+function readOutputStyle(config: Record<string, unknown>): string | null {
+  if (config.outputStyle === null) return null;
+  if (typeof config.outputStyle === 'string' && config.outputStyle.trim()) return config.outputStyle.trim();
+  // The retired `responseStyle` always sent a style; only Concise was a deliberate choice.
+  return config.responseStyle === 'Concise' ? 'Concise' : null;
 }
 
 export function resolveClaudeSettingSources(
@@ -131,18 +123,11 @@ export function updateClaudeProviderSettings(
 ): ClaudeProviderSettings {
   const current = getClaudeProviderSettings(settings);
   const stored = getProviderConfig(settings, 'claude');
-  delete stored.enableOpus1M;
-  delete stored.enableSonnet1M;
-  delete stored.defaultModel;
-  delete stored.effortMetadataMigrated;
   const next = {
     ...stored,
     ...current,
     ...updates,
     modelAliases: decodeModelAliases(updates.modelAliases ?? current.modelAliases),
-    safeMode: 'safeMode' in updates
-      ? normalizeClaudeSafeMode(updates.safeMode) ?? current.safeMode
-      : current.safeMode,
   };
   setProviderConfig(settings, 'claude', next);
   return next;

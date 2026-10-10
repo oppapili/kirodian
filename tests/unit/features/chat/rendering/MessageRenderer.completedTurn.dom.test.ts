@@ -2,17 +2,21 @@
 
 import '@/providers';
 
+import { testDate } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
-import { MarkdownRenderer } from 'obsidian';
+import { Component, MarkdownRenderer } from 'obsidian';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ChatMessage } from '@/core/types';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
+import { createResponseTextBlock } from '@/features/chat/rendering/ResponseLayout';
+import { createThinkingBlock, finalizeThinkingBlock } from '@/features/chat/rendering/ThinkingBlockRenderer';
 
 HTMLElement.prototype.appendText = function (text) { this.append(document.createTextNode(text)); };
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
+HTMLElement.prototype.removeClass = function (...classes) { this.classList.remove(...classes); };
 
 function setup(providerId = 'claude', capabilityOverride: Record<string, unknown> = {}) {
   const messagesEl = document.body.createDiv();
@@ -20,7 +24,7 @@ function setup(providerId = 'claude', capabilityOverride: Record<string, unknown
   const settings = { mediaFolder: '', showMessageTimestamps: true };
   const renderer = new MessageRenderer(
     { app: {}, settings } as any,
-    { registerDomEvent: jest.fn(), register: jest.fn(), addChild: jest.fn() } as any,
+    new Component() as any,
     messagesEl, undefined, fork,
     () => ({ ...ProviderRegistry.getCapabilities(providerId), ...capabilityOverride }),
   );
@@ -49,20 +53,34 @@ beforeEach(() => {
   });
 });
 
-it('collapses completed history above the answer and puts copy, fork, time below it', async () => {
+it.each([false, true])('collapses completed history above the answer and puts copy, fork, time below it (compaction: %s)', async compaction => {
   const { renderer, messagesEl, fork } = setup();
-  renderer.renderMessages(messages, () => 'Hello');
+  const historyMessages: ChatMessage[] = [...messages];
+  if (compaction) historyMessages.splice(2, 0, {
+    id: 'compact', role: 'assistant', content: '', timestamp: testDate().getTime(),
+    contentBlocks: [{ type: 'context_compacted' }],
+  });
+  renderer.renderMessages(historyMessages, () => 'Hello');
   await Promise.resolve();
   const header = within(messagesEl).getByRole('button', { name: 'Worked for 01:05' });
+  expect(header.hasAttribute('aria-label')).toBe(false);
+  expect(header.hasAttribute('title')).toBe(false);
   expect(header.getAttribute('aria-expanded')).toBe('false');
   const history = document.getElementById(header.getAttribute('aria-controls')!)!;
   expect(history.hidden).toBe(true);
   expect(history.textContent).toContain('Checking the code.');
   expect(history.textContent).toContain('Check the edge case.');
+  expect(history.contains(within(messagesEl).queryByText('Conversation compacted'))).toBe(compaction);
   expect(history.textContent).not.toContain('Fixed the bug.');
   fireEvent.click(header);
   expect(history.hidden).toBe(false);
   expect(header.getAttribute('aria-expanded')).toBe('true');
+  const thinking = within(history).getByRole('button', { name: 'Thought' });
+  expect(thinking.hasAttribute('aria-label')).toBe(false);
+  expect(thinking.hasAttribute('title')).toBe(false);
+  fireEvent.keyDown(thinking, { key: 'Enter' });
+  expect(thinking.getAttribute('aria-expanded')).toBe('true');
+  expect((await axe(history)).violations).toEqual([]);
   fireEvent.click(header);
   expect(history.hidden).toBe(true);
 
@@ -85,6 +103,20 @@ it('collapses completed history above the answer and puts copy, fork, time below
   renderer.dispose();
 });
 
+it('keeps live and finalized thinking accessible without hover tooltip attributes', async () => {
+  const host = document.body.createDiv();
+  const state = createThinkingBlock(host);
+  const header = within(host).getByRole('button', { name: 'Thinking 0s...' });
+  expect(header.hasAttribute('aria-label')).toBe(false);
+  expect(header.hasAttribute('title')).toBe(false);
+  fireEvent.keyDown(header, { key: ' ' });
+  expect(header.getAttribute('aria-expanded')).toBe('true');
+  finalizeThinkingBlock(state);
+  expect(within(host).getByRole('button', { name: /^Thought for \d+s$/ })).toBe(header);
+  expect(header.getAttribute('aria-expanded')).toBe('false');
+  expect((await axe(host)).violations).toEqual([]);
+});
+
 it('keeps live output in place until completion, then preserves the same content elements', async () => {
   const { renderer, messagesEl } = setup();
   const msg: ChatMessage = { id: 'live', role: 'assistant', content: 'Done.', timestamp: 4,
@@ -92,7 +124,8 @@ it('keeps live output in place until completion, then preserves the same content
   const el = renderer.addMessage(msg);
   const content = el.querySelector<HTMLElement>('.claudian-message-content')!;
   const work = content.createDiv({ cls: 'claudian-thinking-block', text: 'Working' });
-  const answer = content.createDiv({ cls: 'claudian-text-block', text: 'Done.' });
+  const answer = createResponseTextBlock(content);
+  answer.setText('Done.');
   expect(within(messagesEl).queryByRole('button', { name: /Worked/ })).toBeNull();
   expect(work.parentElement).toBe(content);
   msg.durationSeconds = 0;
@@ -120,14 +153,16 @@ it('leaves interrupted and unsuccessful output expanded', () => {
   }
 });
 
-it('copies interrupted replay text without legacy marker markup', async () => {
+it('copies retired interruption markup as ordinary message text', async () => {
   const { renderer, messagesEl } = setup();
   const marker = '<span class="claudian-interrupted">Interrupted</span> <span class="claudian-interrupted-hint">· What should Claudian do instead?</span>';
   renderer.renderStoredMessage({ id: 'legacy', role: 'assistant', timestamp: 5,
     content: `Partial answer\n\n${marker}` });
   fireEvent.click(within(messagesEl).getByRole('button', { name: 'Copy message' }));
   await Promise.resolve();
-  expect(navigator.clipboard.writeText).toHaveBeenCalledWith('Partial answer');
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith(`Partial answer\n\n${marker}`);
+  expect(messagesEl.querySelectorAll('.claudian-interrupted')).toHaveLength(0);
+  expect(await axe(messagesEl)).toHaveNoViolations();
   renderer.dispose();
 });
 
@@ -201,7 +236,6 @@ it('offers fork on the final live response of a multi-message turn', async () =>
   renderer.dispose();
 });
 
-
 it('offers full-session fork only on the latest reply and removes it when another turn starts', async () => {
   const { renderer, messagesEl, fork } = setup('claude', { forkMode: 'full-session' });
   const latest: ChatMessage = { id: 'a3', role: 'assistant', content: 'Latest answer', timestamp: 7,
@@ -254,7 +288,7 @@ it('shows one task notification disclosure between the initial and automatic rep
   renderer.dispose();
 });
 
-it('preserves requested work before a notification arriving in the same response', async () => {
+it('folds requested commentary and its notification together before the final answer', async () => {
   const { renderer, messagesEl } = setup();
   renderer.renderStoredMessage({
     id: 'requested-with-notification', role: 'assistant', timestamp: 1,
@@ -268,15 +302,19 @@ it('preserves requested work before a notification arriving in the same response
   });
   await Promise.resolve();
   const work = within(messagesEl).getByRole('button', { name: 'Worked for 00:05' });
-  expect(within(messagesEl).getByRole('button', { name: 'Task notification' }).closest('[hidden]')).toBeNull();
-  expect(within(messagesEl).getByText('Initial reply.').closest('[hidden]')).toBeNull();
+  const notification = within(messagesEl).getByRole('button', { name: 'Task notification', hidden: true });
+  expect(notification.closest('[hidden]')).not.toBeNull();
+  expect(within(messagesEl).getByText('Initial reply.').closest('[hidden]')).not.toBeNull();
   expect(within(messagesEl).getByText('Follow-up reply.').closest('[hidden]')).toBeNull();
   fireEvent.click(work);
   expect(within(messagesEl).getByText('Initial reasoning.').closest('[hidden]')).toBeNull();
+  expect(within(messagesEl).getByText('Initial reply.').closest('[hidden]')).toBeNull();
+  expect(within(messagesEl).getByText('Initial reply.').compareDocumentPosition(notification) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(notification.closest('[hidden]')).toBeNull();
   renderer.dispose();
 });
 
-it('keeps a requested response disclosure separate when a notification precedes its first output', async () => {
+it('nests a notification before the first output inside the requested work disclosure', async () => {
   const { renderer, messagesEl } = setup();
   renderer.renderStoredMessage({
     id: 'requested-after-notification', role: 'assistant', timestamp: 1,
@@ -288,13 +326,15 @@ it('keeps a requested response disclosure separate when a notification precedes 
     ],
   });
   await Promise.resolve();
-  const notification = within(messagesEl).getByRole('button', { name: 'Task notification' });
+  const notification = within(messagesEl).getByRole('button', { name: 'Task notification', hidden: true });
   const work = within(messagesEl).getByRole('button', { name: 'Worked for 00:05' });
-  fireEvent.click(notification);
-  expect(within(messagesEl).getByText('Old task result.').closest('[hidden]')).toBeNull();
+  expect(notification.closest('[hidden]')).not.toBeNull();
   expect(within(messagesEl).getByText('Reasoning about the new request.').closest('[hidden]')).not.toBeNull();
   fireEvent.click(work);
   expect(within(messagesEl).getByText('Reasoning about the new request.').closest('[hidden]')).toBeNull();
+  expect(within(messagesEl).getByText('Old task result.').closest('[hidden]')).not.toBeNull();
+  fireEvent.click(notification);
+  expect(within(messagesEl).getByText('Old task result.').closest('[hidden]')).toBeNull();
   expect(within(messagesEl).getByText('The requested answer.').closest('[hidden]')).toBeNull();
   renderer.dispose();
 });
@@ -335,9 +375,10 @@ it('keeps requested work on both sides of a mid-response notification in its own
     ],
   });
   await Promise.resolve();
-  fireEvent.click(within(messagesEl).getByRole('button', { name: 'Task notification' }));
   expect(within(messagesEl).getByText('Work after notification.').closest('[hidden]')).not.toBeNull();
   fireEvent.click(within(messagesEl).getByRole('button', { name: 'Worked for 00:05' }));
+  fireEvent.click(within(messagesEl).getByRole('button', { name: 'Task notification' }));
+  expect(within(messagesEl).getByText('Old task result.').closest('[hidden]')).toBeNull();
   expect(within(messagesEl).getByText('Work before notification.').closest('[hidden]')).toBeNull();
   expect(within(messagesEl).getByText('Work after notification.').closest('[hidden]')).toBeNull();
   renderer.dispose();
@@ -398,5 +439,40 @@ it('keeps time after throughput when timestamps are refreshed or toggled', () =>
   renderer.refreshMessageTimestamps();
   renderer.refreshMessageTimestamps();
   expectOrder();
+  renderer.dispose();
+});
+
+it('defers Markdown for collapsed thinking and notifications until their own disclosure opens', async () => {
+  const { renderer, messagesEl } = setup();
+  jest.mocked(MarkdownRenderer.render).mockClear();
+  renderer.renderStoredMessage({ id: 'lazy', role: 'assistant', timestamp: testDate().getTime(), content: 'Answer',
+    contentBlocks: [{ type: 'thinking', content: '**Reasoning**' },
+      { type: 'task_notification', content: '**Notification**' }, { type: 'text', content: 'Answer' }],
+  });
+  expect(jest.mocked(MarkdownRenderer.render).mock.calls.map(call => call[1])).toEqual(['Answer']);
+  fireEvent.click(within(messagesEl).getByRole('button', { name: 'Worked' }));
+  const thinking = within(messagesEl).getByRole('button', { name: 'Thought' });
+  fireEvent.keyDown(thinking, { key: 'Enter' });
+  const notification = within(messagesEl).getByRole('button', { name: 'Task notification' });
+  fireEvent.click(notification);
+  fireEvent.click(notification);
+  fireEvent.click(notification);
+  await Promise.resolve();
+  expect(jest.mocked(MarkdownRenderer.render).mock.calls.map(call => call[1])).toEqual(['Answer', '**Reasoning**', '**Notification**']);
+  expect((await axe(messagesEl)).violations).toEqual([]);
+  renderer.dispose();
+});
+
+it('reuses created message elements instead of searching the growing history for each response', () => {
+  const { renderer, messagesEl } = setup();
+  const query = jest.spyOn(messagesEl, 'querySelector');
+  const history: ChatMessage[] = Array.from({ length: 100 }, (_, index) => ({
+    id: `indexed-${index}`, role: index % 2 ? 'assistant' : 'user', content: `Message ${index}`, timestamp: testDate().getTime(),
+  }));
+  const positionLookup = jest.spyOn(history, 'indexOf');
+  renderer.renderMessages(history, () => 'Hello');
+  expect(positionLookup).not.toHaveBeenCalled();
+  expect(query.mock.calls.filter(([selector]) => selector.includes('data-message-id') || selector.includes('data-work-message-id'))).toHaveLength(0);
+  expect(messagesEl.querySelectorAll('.claudian-message')).toHaveLength(100);
   renderer.dispose();
 });

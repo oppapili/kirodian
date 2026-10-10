@@ -24,17 +24,13 @@
 .claudian-inline-input-container {
   display: flex;
   flex-direction: column;
-  gap: 0;
   padding: 2px 0;
-  background: transparent;
 }
 
 /* Input wrapper - contains input and spinner */
 .claudian-inline-input-wrap {
   flex: 1;
   position: relative;
-  background: transparent;
-  overflow: visible;
 }
 
 /* Input - fully transparent */
@@ -42,9 +38,7 @@
   width: 100%;
   padding: 4px 8px;
   padding-inline-end: 30px;
-  border-width: 1px;
-  border-style: solid;
-  border-color: var(--background-modifier-border);
+  border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
   background: transparent;
   color: var(--text-normal);
@@ -85,26 +79,25 @@
 .claudian-inline-agent-reply {
   padding: 8px;
   margin-bottom: 4px;
-  background: transparent;
-  border-width: 1px;
-  border-style: solid;
-  border-color: var(--background-modifier-border);
+  border: 1px solid var(--background-modifier-border);
   border-radius: 8px;
   font-family: var(--font-interface, -apple-system, BlinkMacSystemFont, sans-serif);
   font-size: var(--font-ui-small, 13px);
   line-height: 1.4;
   color: var(--text-muted);
   overflow-x: auto;
-  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .claudian-inline-agent-reply > :first-child,
-.claudian-inline-diff-preview-body > :first-child {
+.claudian-inline-diff-preview-body > :first-child,
+.claudian-diff-block > :first-child {
   margin-top: 0;
 }
 
 .claudian-inline-agent-reply > :last-child,
-.claudian-inline-diff-preview-body > :last-child {
+.claudian-inline-diff-preview-body > :last-child,
+.claudian-diff-block > :last-child {
   margin-bottom: 0;
 }
 
@@ -123,6 +116,7 @@
   font-size: var(--font-text-size);
   line-height: var(--line-height-normal);
   overflow-x: auto;
+
   --p-spacing: 0.4rem;
   --heading-spacing: 0.5rem;
 }
@@ -197,7 +191,7 @@
 
 .claudian-inline-markdown-fallback {
   white-space: pre-wrap;
-  word-wrap: break-word;
+  overflow-wrap: break-word;
 }
 
 .claudian-diff-block {
@@ -209,31 +203,23 @@
   margin-top: 2px;
 }
 
-.claudian-diff-block > :first-child {
-  margin-top: 0;
-}
-
-.claudian-diff-block > :last-child {
-  margin-bottom: 0;
-}
-
 .claudian-diff-del:not(.claudian-diff-block) {
-  background: rgba(255, 80, 80, 0.2);
+  background: rgb(255 80 80 / 20%);
   text-decoration: line-through;
   color: var(--text-muted);
 }
 
 .claudian-diff-ins:not(.claudian-diff-block) {
-  background: rgba(80, 200, 80, 0.2);
+  background: rgb(80 200 80 / 20%);
 }
 
 .claudian-diff-block.claudian-diff-del {
-  background: rgba(255, 80, 80, 0.14);
+  background: rgb(255 80 80 / 14%);
   color: var(--text-muted);
 }
 
 .claudian-diff-block.claudian-diff-ins {
-  background: rgba(80, 200, 80, 0.14);
+  background: rgb(80 200 80 / 14%);
 }
 
 .claudian-inline-preview-actions {

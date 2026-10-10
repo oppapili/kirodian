@@ -33,8 +33,16 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+
       - name: Check Bun lockfile
         run: npm run check:lockfile
+
+      - name: Check npm lockfile
+        run: npm install --package-lock-only --ignore-scripts && git diff --exit-code package-lock.json
 
   quality:
     runs-on: ubuntu-latest
@@ -56,6 +64,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=moderate
 
   diff-hygiene:
     if: github.event_name == 'pull_request'
@@ -82,7 +93,7 @@ jobs:
       - name: Review dependency changes
         uses: actions/dependency-review-action@v4
         with:
-          fail-on-severity: high
+          fail-on-severity: moderate
 
   selected-tests:
     needs: test-scope
@@ -156,6 +167,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: npm ci
 
       - name: Select affected tests and platform checks
@@ -187,12 +199,11 @@ jobs:
   cross-platform-smoke:
     needs: test-scope
     if: needs.test-scope.outputs.cross-platform == 'true'
-    name: Cross-platform tests (${{ matrix.os }}, ${{ matrix.shard }})
+    name: Cross-platform tests (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, macos-latest]
-        shard: ${{ fromJSON(needs.test-scope.outputs.cross-platform-shards) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     steps:
@@ -207,12 +218,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The selected script suite normally includes this check; retain it for script-only changes.
       - name: Run Windows architecture boundaries
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && needs.test-scope.outputs.script-tests != 'null' && !contains(fromJSON(needs.test-scope.outputs.script-tests), 'scripts/check-architecture-boundaries.test.mjs')
         run: npm run test:architecture
 
       - name: Run affected Windows script checks
-        if: runner.os == 'Windows' && startsWith(matrix.shard, '1/')
+        if: runner.os == 'Windows'
         shell: bash
         env:
           SCRIPT_SELECTION: ${{ needs.test-scope.outputs.script-tests }}
@@ -221,15 +233,14 @@ jobs:
       - name: Build production plugin
         run: npm run build
 
-      - name: Run affected OS-sensitive tests
+      - name: Run affected real-process integration tests
         id: native-tests
         shell: bash
         env:
           TEST_SELECTION: ${{ needs.test-scope.outputs.cross-platform-tests }}
-          TEST_SHARD: ${{ matrix.shard }}
         run: |
           mkdir -p test-results
-          npm run test:cross-platform -- --selection "$TEST_SELECTION" --shard="$TEST_SHARD" --maxWorkers=3 --json --outputFile=test-results/native.json
+          npm run test:cross-platform -- --selection "$TEST_SELECTION" --maxWorkers=3 --json --outputFile=test-results/native.json
 
       - name: Summarize native test timings
         if: always() && steps.native-tests.outcome != 'skipped' && needs.test-scope.outputs.cross-platform-tests != '[]'
@@ -259,8 +270,27 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Validate release version
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node scripts/check-release-version.mjs "$RELEASE_TAG"
+
       - name: Build and inspect production artifacts
         run: npm run build && npm run check:performance
+
+      - name: Upload verified release artifacts
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-artifacts
+          path: |
+            main.js
+            manifest.json
+            styles.css
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
 
   build:
     needs: [quality, test, build-artifacts]

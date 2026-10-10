@@ -1,6 +1,6 @@
-import { getProviderSettingsSnapshotWithModel } from '../../core/providers/conversationModel';
-import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
-import type { ProviderId } from '../../core/providers/types';
+import { getProviderSettingsSnapshotWithModel } from '@/core/providers/conversationModel';
+import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
+import type { ProviderId } from '@/core/providers/types';
 
 /** The model and reasoning selection displayed by a chat and submitted with its turns. */
 export interface ChatSettings {
@@ -19,9 +19,7 @@ export function getChatSettingsSnapshot<T extends Record<string, unknown>>(
   const selectedModel = typeof snapshot.model === 'string' ? snapshot.model : '';
   const ui = ProviderRegistry.getChatUIConfig(providerId);
   const options = ui.getReasoningOptions(selectedModel, snapshot);
-  const selectedReasoning = ui.isAdaptiveReasoningModel(selectedModel, snapshot)
-    ? snapshot.effortLevel
-    : snapshot.thinkingBudget;
+  const selectedReasoning = snapshot.effortLevel;
   // Native adapters validate explicit choices; never turn an unsupported choice into a native default.
   const reasoning = options.length > 0 && typeof selectedReasoning === 'string'
     ? selectedReasoning : null;

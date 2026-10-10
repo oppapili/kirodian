@@ -1,5 +1,6 @@
-import type { ProviderId } from '../../../core/providers/types';
-import type { ChatMessage, ImageAttachment } from '../../../core/types';
+import type { ProviderId } from '@/core/providers/types';
+import type { ChatMessage } from '@/core/types';
+import type { ForkSourceCapture } from '@/features/chat/conversation/forkSourceTypes';
 
 /** Composer destination derived from side panel expansion; never separately mutable. */
 export type SideChatDestination = 'main' | 'side';
@@ -34,17 +35,12 @@ export interface SideChatSettingsProjection {
   serviceTier?: string;
 }
 
-/**
- * Destination-owned composer draft. Editor/browser/canvas selection context is
- * read live from the shared composer at submission, so only restorable state
- * lives here.
- */
-export interface SideChatComposerDraft {
-  readonly content: string;
-  readonly images: readonly ImageAttachment[];
+/** Read-only parent binding and tab-owned fork capture; no runtime internals escape. */
+export interface SideChatParent {
+  readonly conversationId: string | null;
+  readonly providerId: ProviderId | null;
+  readonly isLive: boolean;
+  readonly isStreaming: boolean;
+  readonly lastMessageId: string | undefined;
+  captureForkSource(): Promise<ForkSourceCapture>;
 }
-
-export const EMPTY_SIDE_CHAT_DRAFT: SideChatComposerDraft = Object.freeze({
-  content: '',
-  images: Object.freeze([]),
-});

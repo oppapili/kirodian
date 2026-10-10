@@ -1,22 +1,23 @@
-import type { CursorContext } from '../../utils/editor';
-import type { SharedAppStorage } from '../bootstrap/storage';
+import type { CursorContext } from '@/core/prompt/editorContext';
+
 import type {
   ProviderExecutionBackend,
   ProviderExecutionTransitionScope,
 } from '../execution';
-import type { VaultFileAdapter } from '../storage/VaultFileAdapter';
 import type {
+  AskUserAnswers,
   AuxiliaryContinuityReset,
   Conversation,
   SessionMetadata,
   SlashCommand,
   SubagentInfo,
+  SubagentProgress,
   ToolCallInfo,
+  ToolProviderPayload,
 } from '../types';
 import type { ProviderId } from '../types/provider';
 import type { ProviderCommandCatalog } from './commands/ProviderCommandCatalog';
 import type { ProviderCommandDiscoveryResult } from './commands/ProviderCommandDiscoveryResult';
-import type { ProviderVaultEntryRepository } from './commands/ProviderVaultEntryRepository';
 import type { ProviderModelCatalog } from './models/ProviderModelCatalog';
 import type { ProviderHost } from './ProviderHost';
 
@@ -25,10 +26,13 @@ export type { ProviderId } from '../types/provider';
 export interface ProviderCapabilities {
   providerId: ProviderId;
   supportsNativeHistory: boolean;
+  /** Tab presence may start a shared runtime without creating a session, thread, or turn. */
+  startsSharedRuntimeOnTabPresence?: boolean;
   /** Can execute without saving native conversation history, including clarification turns. */
   supportsEphemeralSessions: boolean;
   supportsRewind: boolean;
   supportsFork: boolean;
+  supportsConversationBranches?: boolean;
   /** Whether forked children can be non-persistent; defaults to supportsEphemeralSessions. */
   supportsEphemeralFork?: boolean;
   /** Omitted means checkpoint forking; full-session providers can fork only the latest reply. */
@@ -36,9 +40,10 @@ export interface ProviderCapabilities {
   supportsProviderCommands: boolean;
   supportsImageAttachments: boolean;
   supportsTurnSteer?: boolean;
+  supportsFastMode?: boolean;
   /** Can report authoritative main-agent output tokens and elapsed turn time. */
   supportsResponseThroughput?: boolean;
-  reasoningControl: 'effort' | 'token-budget' | 'none';
+  reasoningControl: 'effort' | 'none';
 }
 
 export const DEFAULT_CHAT_PROVIDER_ID = 'kiro' as const satisfies ProviderId;
@@ -51,6 +56,13 @@ export const DEFAULT_CHAT_PROVIDER_ID = 'kiro' as const satisfies ProviderId;
  * Provider-owned workspace services (CLI resolution, commands, agents,
  * settings tabs) live behind `src/providers/<id>/app/`.
  */
+/** Native reply content is provider-owned; chat routes it as ordinary user input. */
+export interface ProviderQuestionReply {
+  content: string;
+  /** Empty when the reply is presented only in its question renderer. */
+  displayContent: string;
+}
+
 export interface ProviderRegistration {
   displayName: string;
   blankTabOrder: number;
@@ -66,7 +78,9 @@ export interface ProviderRegistration {
   isEnabled: (settings: Record<string, unknown>) => boolean;
   setEnabled?: (settings: Record<string, unknown>, enabled: boolean) => void;
   capabilities: ProviderCapabilities;
+  getConversationCapabilities?: (providerState?: Record<string, unknown>) => ProviderCapabilities;
   environmentKeyPatterns?: RegExp[];
+  modelPolicy: ProviderModelPolicy;
   chatUIConfig: ProviderChatUIConfig;
   settingsReconciler: ProviderSettingsReconciler;
   createExecutionBackend: (plugin: ProviderHost) => ProviderExecutionBackend;
@@ -74,6 +88,7 @@ export interface ProviderRegistration {
   historyService: ProviderConversationHistoryService;
   taskResultInterpreter: ProviderTaskResultInterpreter;
   subagentAdapter?: ProviderSubagentAdapter;
+  formatQuestionReply?: (tool: ToolCallInfo, answers: AskUserAnswers) => ProviderQuestionReply | null;
 }
 
 export interface ProviderModule extends ProviderRegistration {
@@ -86,7 +101,6 @@ export interface ProviderSettingsStorageAdapter {
   /** Whether selected models need native effort metadata discovery during startup. */
   needsReasoningMetadata?(settings: Record<string, unknown>): boolean;
   hostScopedFields?: string[];
-  legacyTopLevelFields?: string[];
   runtimeOnlyFields?: string[];
   /** Provider-owned durable projection; full discovery catalogs remain runtime-only. */
   projectPersistedConfig?(settings: Record<string, unknown>): Record<string, unknown>;
@@ -111,19 +125,12 @@ export interface ProviderSettingsReconciler {
     conversations: Conversation[],
   ): { changed: boolean; invalidatedConversations: Conversation[] };
 
-  normalizeModelVariantSettings(settings: Record<string, unknown>): boolean;
+  normalizeModelVariantSettings?(settings: Record<string, unknown>): boolean;
 }
 
 // ---------------------------------------------------------------------------
 // App-level service interfaces
 // ---------------------------------------------------------------------------
-
-/** Tab manager state persisted across restarts. */
-export interface AppTabManagerState {
-  openTabs: Array<{ tabId: string; conversationId: string | null; draftModel?: string; providerId?: ProviderId | null }>;
-  activeTabId: string | null;
-  expandedTitleTabIds?: string[];
-}
 
 /** Provider-neutral session metadata storage. */
 export interface SessionMetadataListOptions {
@@ -145,8 +152,8 @@ export interface SessionMetadataScanResult {
 //
 // These remain here as standalone types so app-level settings/chat code can
 // depend on stable provider workspace contracts without importing concrete
-// provider implementations. They are NOT part of the shared bootstrap storage
-// contract (`SharedAppStorage`).
+// provider implementations. They are NOT part of the provider-facing host
+// storage contract (`ProviderHostStorage`).
 // ---------------------------------------------------------------------------
 
 export interface AppCommandStorage {
@@ -172,6 +179,8 @@ export interface ProviderUIOption {
   group?: string;
   /** Per-option icon override (e.g. when mixing providers in a single dropdown). */
   providerIcon?: ProviderIconSvg;
+  /** Owning provider when several providers share one dropdown, so the option can carry its brand. */
+  providerId?: ProviderId;
 }
 
 export interface ProviderPathIconSvg {
@@ -202,21 +211,25 @@ export interface ProviderCompositeIconSvg {
 /** SVG icon descriptor for provider branding in selectors and headers. */
 export type ProviderIconSvg = ProviderPathIconSvg | ProviderCompositeIconSvg;
 
-/** Extended option with token count for budget-based reasoning controls. */
-export interface ProviderReasoningOption extends ProviderUIOption {
-  tokens?: number;
+/** Permission-mode values a provider accepts in the shared `permissionMode` setting. */
+export interface ProviderPermissionModePolicy {
+  readonly values: readonly string[];
+  /** Fail-closed value for unknown stored values. */
+  readonly fallbackValue: string;
+  /** Initial choice when no permission has been selected for this provider. */
+  readonly defaultValue?: string;
+  /** Maps a retired stored value to a current one; unmapped values use the fallback. */
+  migrateValue?(value: string, settings: Record<string, unknown>): string | undefined;
 }
 
-/** Compact permission-mode toggle descriptor for providers that expose the current toolbar control. */
-export interface ProviderPermissionModeToggleConfig {
-  inactiveValue: string;
-  inactiveLabel: string;
-  activeValue: string;
-  activeLabel: string;
+/** One toolbar permission-mode choice, in menu order. */
+export interface ProviderPermissionModeOption extends ProviderUIOption {
+  /** Skips approval prompts; the toolbar marks it as a warning while selected. */
+  bypassesApprovals?: boolean;
 }
 
-/** Compact service-tier toggle descriptor for providers that expose a fast/standard toolbar control. */
-export interface ProviderServiceTierToggleConfig {
+/** Provider-reported service-tier choices, labels and resolved selection. */
+export interface ProviderServiceTierPolicy {
   inactiveValue: string;
   inactiveLabel: string;
   activeValue: string;
@@ -226,6 +239,8 @@ export interface ProviderServiceTierToggleConfig {
   description?: string;
 }
 
+export type ProviderServiceTierToggleConfig = ProviderServiceTierPolicy;
+
 export interface ProviderModeSelectorConfig {
   activeValue?: string;
   label: string;
@@ -233,9 +248,10 @@ export interface ProviderModeSelectorConfig {
   value: string;
 }
 
-/** Synchronous UI projection owned by the provider and backed by provider-owned metadata. */
-export interface ProviderChatUIConfig {
-  /** Model options for the selector dropdown. Provider extracts what it needs from the settings bag. */
+/** Provider model and execution preferences, independent of chat rendering. */
+export interface ProviderModelPolicy {
+  readonly permissionModes?: ProviderPermissionModePolicy;
+  /** Available models in durable selection order, independent of dropdown layout. */
   getModelOptions(settings: Record<string, unknown>): ProviderUIOption[];
 
   /** Semantic default model, independent from selector display order. */
@@ -244,17 +260,14 @@ export interface ProviderChatUIConfig {
   /** Whether this provider owns the given model id. */
   ownsModel(model: string, settings: Record<string, unknown>): boolean;
 
-  /** Whether the model uses adaptive reasoning (effort levels vs token budgets). */
-  isAdaptiveReasoningModel(model: string, settings: Record<string, unknown>): boolean;
+  /** Whether the model takes an effort level; otherwise the saved effort is kept unvalidated. */
+  supportsReasoningEffort(model: string, settings: Record<string, unknown>): boolean;
 
-  /** Reasoning options for the current model (effort levels if adaptive, budgets otherwise). */
-  getReasoningOptions(model: string, settings: Record<string, unknown>): ProviderReasoningOption[];
+  /** Effort levels for the current model. */
+  getReasoningOptions(model: string, settings: Record<string, unknown>): ProviderUIOption[];
 
   /** Default reasoning value for the model. */
   getDefaultReasoningValue(model: string, settings: Record<string, unknown>): string;
-
-  /** Normalize runtime model aliases only for legacy custom-context-limit matching. */
-  normalizeCustomContextLimitModel?(this: void, model: string): string;
 
   /** Whether this is a built-in (default) model vs custom/env model. */
   isDefaultModel(model: string): boolean;
@@ -293,25 +306,25 @@ export interface ProviderChatUIConfig {
     update(settings: Record<string, unknown>, aliases: Record<string, string>): void;
   };
 
-  /** Optional permission-mode toggle descriptor. Return null when the provider exposes no permission toggle UI. */
-  getPermissionModeToggle?(): ProviderPermissionModeToggleConfig | null;
-
   /** Optional provider-owned mapping back into the shared permission-mode contract. */
   resolvePermissionMode?(settings: Record<string, unknown>): string | null;
 
   /** Optional hook when the toolbar changes permission mode. */
   applyPermissionMode?(value: string, settings: unknown): void;
 
-  /** Optional service-tier toggle descriptor. Return null when the provider exposes no fast/standard UI. */
-  getServiceTierToggle?(settings: Record<string, unknown>): ProviderServiceTierToggleConfig | null;
-
-  /** Optional provider-owned mode selector descriptor. */
-  getModeSelector?(settings: Record<string, unknown>): ProviderModeSelectorConfig | null;
+  /** Available service-tier choices and the currently resolved tier. */
+  getServiceTierPolicy?(settings: Record<string, unknown>): ProviderServiceTierPolicy | null;
 
   /** Optional hook when the toolbar changes a provider-owned mode selection. */
   applyModeSelection?(value: string, settings: unknown): void;
 
-  /** SVG icon for the provider (shown next to model names in selectors). */
+}
+
+/** UI composition may reuse policy, but application code consumes ProviderModelPolicy. */
+export interface ProviderChatUIConfig extends Omit<ProviderModelPolicy, 'permissionModes' | 'getServiceTierPolicy'> {
+  getPermissionModeOptions?(settings?: Record<string, unknown>): readonly ProviderPermissionModeOption[] | null;
+  getServiceTierToggle?(settings: Record<string, unknown>): ProviderServiceTierToggleConfig | null;
+  getModeSelector?(settings: Record<string, unknown>): ProviderModeSelectorConfig | null;
   getProviderIcon?(): ProviderIconSvg | null;
 
   /**
@@ -375,36 +388,30 @@ export interface ProviderCommandLoader {
   ): Promise<ProviderCommandDiscoveryResult<SlashCommand>>;
 }
 
-export type ProviderTabWarmupMode = 'none' | 'commands' | 'execution';
-
-export type ProviderTabWarmupLifecycleState = 'provisional' | 'cold' | 'warm' | 'closing';
-
-export interface ProviderTabWarmupContext {
-  coordinatorState: 'absent' | 'idle' | 'active' | 'stale';
-  conversation: Conversation | null;
-  hasResumableNativeSeed: boolean;
-  plugin: ProviderHost;
-  tab: {
-    conversationId: string | null;
-    draftModel: string | null;
-    lifecycleState: ProviderTabWarmupLifecycleState;
-    providerId: ProviderId;
-  };
-}
-
-export interface ProviderTabWarmupPolicy {
-  resolveMode(context: ProviderTabWarmupContext): ProviderTabWarmupMode;
-}
-
 export interface ProviderWorkspaceServices {
+  startRuntime?(): Promise<void>;
+  onAgentSkillsChanged?(): Promise<void> | void;
   commandCatalog?: ProviderCommandCatalog | null;
-  vaultCommandRepository?: ProviderVaultEntryRepository | null;
   cliResolver?: ProviderCLIResolver | null;
   commandLoader?: ProviderCommandLoader | null;
-  tabWarmupPolicy?: ProviderTabWarmupPolicy | null;
   settingsTabRenderer?: ProviderSettingsTabRenderer | null;
   modelCatalog?: ProviderModelCatalog;
+  sessionArchive?: ProviderSessionArchive | null;
   dispose?(): Promise<void> | void;
+}
+
+export interface ProviderSessionArchiveChange {
+  conversation: ProviderHistoryInput;
+  isArchived: boolean;
+}
+
+/** Explicit native archive operation; application archive state stays authoritative. */
+export interface ProviderSessionArchive {
+  /**
+   * Applies every change in order. Sessions that are missing or already in the requested
+   * state are unchanged; other failures reject after the remaining changes were attempted.
+   */
+  setSessionsArchived(changes: readonly ProviderSessionArchiveChange[]): Promise<void>;
 }
 
 export interface ProviderModelCatalogRefreshResult {
@@ -417,14 +424,15 @@ export interface ProviderModelCatalogRefreshResult {
 
 export interface ProviderSettingsTabRendererContext {
   plugin: ProviderHost;
+  // Kiro's settings tab renders a per-provider agent-skill section through this
+  // host callback. Upstream removed it when it moved Claude's skills to a single
+  // global "Skills" tab, but Kiro's skills live under a different vault root
+  // (`.kiro/skills`) that the global tab does not cover, so Kiro keeps the
+  // per-provider rendering path. Retained here (vs. upstream deletion) only to
+  // serve the surviving Kiro provider; no behaviour change for other callers.
   renderAgentSkillSettings(
     container: HTMLElement,
     providerId: ProviderId,
-  ): void;
-  renderHiddenProviderCommandSetting(
-    container: HTMLElement,
-    providerId: ProviderId,
-    copy: { name: string; desc: string; placeholder: string },
   ): void;
   /** Publish provider model-option changes to every settings and chat consumer. */
   notifyProviderModelOptionsChanged(providerId: ProviderId): void;
@@ -442,79 +450,101 @@ export interface ProviderSettingsTabRenderer {
 
 export interface ProviderWorkspaceInitContext {
   plugin: ProviderHost;
-  storage: SharedAppStorage;
-  vaultAdapter: VaultFileAdapter;
   transitionScope: ProviderExecutionTransitionScope;
 }
 
 export interface ProviderWorkspaceRegistration<
   TServices extends ProviderWorkspaceServices = ProviderWorkspaceServices,
 > {
+  /** Shared skill changes invalidate resources even before lazy initialization. */
+  consumesAgentSkills?: boolean;
+  /** Initialized services provide `sessionArchive`; lets callers skip initializing other providers. */
+  providesSessionArchive?: boolean;
   initialize(context: ProviderWorkspaceInitContext): Promise<TServices>;
 }
 
-/**
- * Mutation callbacks receive a detached repository-owned draft. Only the repository
- * may publish its history/session fields after validating the captured binding.
- */
+/** Only repository-owned history fields may be proposed by native readers. */
+export type ProviderHistoryState = Pick<
+  Conversation, 'sessionId' | 'providerState' | 'resumeAtMessageId' | 'messages'
+>;
+
+/** Native history inspection never receives application identity or mutable repository state. */
+export type ProviderHistoryInput = Readonly<ProviderHistoryState> & {
+  readonly createdAt?: number;
+  readonly lastActivityAt?: number;
+};
+
+export type ProviderHistoryUpdate = Partial<ProviderHistoryState>;
+
+export interface ProviderHistoryResult<T> {
+  readonly outcome: T;
+  readonly changes?: ProviderHistoryUpdate;
+}
+
+/** Readers return explicit proposals; only the repository validates and publishes them. */
 export interface ProviderConversationHistoryService {
   /** Whether this conversation still references native history worth model recovery. */
-  hasConversationModelRecoverySource?(conversation: Conversation): boolean;
+  hasConversationModelRecoverySource?(conversation: ProviderHistoryInput): boolean;
   /**
    * Recovers a stable provider-owned model selection from native history.
    * Implementations must not require the model to remain in the current catalog.
    */
   recoverConversationModelSelection?(
-    conversation: Conversation,
+    conversation: ProviderHistoryInput,
     vaultPath: string | null,
     pathContext?: ProviderHistoryPathContext,
   ): Promise<string | null>;
   /** Recovers a missing provider-native session reference before history hydration. */
   recoverConversationSessionReference?(
-    conversation: Conversation,
+    conversation: ProviderHistoryInput,
     vaultPath: string | null,
     pathContext?: ProviderHistoryPathContext,
-  ): Promise<boolean>;
+  ): Promise<ProviderHistoryUpdate | null>;
   /**
    * Reports whether the provider-native session needed to resume a persisted
    * conversation is still available. Providers that cannot distinguish a
    * missing session from an inaccessible history store should return unknown.
    */
   getConversationSessionAvailability?(
-    conversation: Conversation,
+    conversation: ProviderHistoryInput,
     vaultPath: string | null,
     pathContext?: ProviderHistoryPathContext,
   ): Promise<ProviderConversationSessionAvailability>;
   /** Clears stale resume state so relocated provider history can rebuild natively. */
   prepareRelocatedConversationSession?(
-    conversation: Conversation,
+    conversation: ProviderHistoryInput,
     vaultPath: string | null,
     pathContext?: ProviderHistoryPathContext,
-  ): Promise<boolean>;
+  ): Promise<ProviderHistoryUpdate | null>;
   /** Decides whether a confirmed missing resume session makes the whole record disposable. */
   resolveMissingConversationSession?(
-    conversation: Conversation,
+    conversation: ProviderHistoryInput,
     vaultPath: string | null,
     missingProviderSessionId?: string,
     pathContext?: ProviderHistoryPathContext,
-  ): Promise<'delete' | 'reset' | 'preserve'>;
+  ): Promise<ProviderHistoryResult<'delete' | 'reset' | 'preserve'>>;
   hydrateConversationHistory(
-    conversation: Conversation,
+    conversation: ProviderHistoryInput,
     vaultPath: string | null,
     pathContext?: ProviderHistoryPathContext,
-  ): Promise<void>;
-  resolveSessionIdForConversation(conversation: Conversation | null): string | null;
-  isPendingForkConversation(conversation: Conversation): boolean;
-  /** Builds opaque provider state for a forked conversation. */
+  ): Promise<ProviderHistoryUpdate>;
+  resolveSessionIdForConversation(conversation: ProviderHistoryInput | null): string | null;
+  isPendingForkConversation(conversation: ProviderHistoryInput): boolean;
+  /** Builds opaque fork state; ephemeral creation may be deferred to its execution owner. */
   buildForkProviderState(
     sourceSessionId: string,
     resumeAt: string,
     sourceProviderState?: Record<string, unknown>,
     vaultPath?: string | null,
     pathContext?: ProviderHistoryPathContext,
+    options?: { lifecycle: 'persistent' | 'ephemeral' },
   ): Record<string, unknown> | Promise<Record<string, unknown>>;
-  /** Adds provider-owned persisted metadata to Conversation.providerState before session save. */
-  buildPersistedProviderState?(conversation: Conversation): Record<string, unknown> | undefined;
+  /** Projects provider state for storage without changing live state or native history. */
+  buildPersistedProviderState?(
+    conversation: ProviderHistoryInput,
+    /** Preserve existing history state instead of rebuilding it from unloaded messages. */
+    options?: { preserveProviderState?: boolean },
+  ): Record<string, unknown> | undefined;
 }
 
 export interface ProviderSubagentHistoryRequest {
@@ -530,6 +560,8 @@ export interface ProviderSubagentHistoryService {
 }
 
 export interface ProviderHistoryPathContext {
+  /** Initialize provider-owned resources lazily when native history needs them. */
+  ensureWorkspace?: () => Promise<void>;
   environment: NodeJS.ProcessEnv;
   hostPlatform?: NodeJS.Platform;
   settings?: Record<string, unknown>;
@@ -566,18 +598,28 @@ export interface ProviderTaskResultContext {
   agentId?: string;
 }
 
-/** Native task formats and output recovery stay behind this provider boundary. */
+/**
+ * Native task formats and output recovery stay behind this provider boundary. `providerPayload`
+ * is the payload the same provider attached to the task tool's result; only its owner reads it.
+ */
 export interface ProviderTaskResultInterpreter {
   describeTask(input: Readonly<Record<string, unknown>>): ProviderTaskDescription;
-  interpretLaunch(result: unknown, isError: boolean, toolUseResult?: unknown): ProviderTaskLaunch;
+  interpretLaunch(result: unknown, isError: boolean, providerPayload?: ToolProviderPayload): ProviderTaskLaunch;
   /** Correlate native input/output without recovering result files. */
   getOutputTaskId(input: Readonly<Record<string, unknown>> | undefined, result?: unknown): string | null;
-  interpretResult(result: unknown, isError: boolean, context: ProviderTaskResultContext, toolUseResult?: unknown): ProviderTaskResult;
+  interpretResult(
+    result: unknown,
+    isError: boolean,
+    context: ProviderTaskResultContext,
+    providerPayload?: ToolProviderPayload,
+  ): ProviderTaskResult;
 }
 
 export interface ProviderSubagentLaunchResult {
   agentId?: string;
   nickname?: string;
+  /** Other native identifiers that refer to this same agent. */
+  aliases?: string[];
 }
 
 export interface ProviderSubagentWaitStatus {
@@ -615,6 +657,11 @@ export interface ProviderSubagentLifecycleAdapter {
     spawnToolCall: ToolCallInfo,
     siblingToolCalls?: ToolCallInfo[],
   ): SubagentInfo;
+  /** Display-only activity from provider lifecycle snapshots; never stored on the task. */
+  getProgress?(
+    spawnToolCall: ToolCallInfo,
+    siblingToolCalls: ToolCallInfo[],
+  ): SubagentProgress | undefined;
   extractSpawnResult(
     raw: string | undefined,
     toolCall?: ToolCallInfo,
