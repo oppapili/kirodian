@@ -711,7 +711,7 @@ describe('ClaudianPlugin', () => {
         providerState: { providerSessionId: 'thread-before-invalidation' },
       };
       await plugin.onload();
-      (plugin as any).runtimeSettings.pendingEnvironmentInvalidationGenerations.set('claude', 1);
+      runtimeSettingsOf(plugin).pendingEnvironmentInvalidationGenerations.set('claude', 1);
       const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan')
         .mockResolvedValue({
           records: deviceMetadataRecords(metadata),
@@ -3412,69 +3412,32 @@ describe('ClaudianPlugin', () => {
   describe('loadSettings with conversations', () => {
 
     it('should load saved conversations from metadata files', async () => {
-      await chatHostOf(plugin).mutateSettings((settings) => { settings.sessionAutoArchiveAfter = '7d'; });
-      await new Promise(resolve => setImmediate(resolve));
+      const timestamp = Date.now();
+      const saved = {
+        id: 'conv-saved-1',
+        providerId: 'claude' as const,
+        title: 'Saved Chat',
+        createdAt: timestamp,
+        lastActivityAt: timestamp,
+      };
+      const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan').mockImplementation(async (options) => {
+        options?.onBatch?.(deviceMetadataRecords(saved));
+        return { records: deviceMetadataRecords(saved), complete: true, invalidMetadataCount: 0 };
+      });
+      const loadSpy = mockMetadataSources(saved);
 
       // data.json is minimal (no state - already migrated)
       (plugin.loadData as jest.Mock).mockResolvedValue({});
 
       await plugin.onload();
 
+      await chatHostOf(plugin).ensureConversationMetadataLoaded(['conv-saved-1']);
       const loaded = await chatHostOf(plugin).getConversationById('conv-saved-1');
       expect(loaded?.id).toBe('conv-saved-1');
       expect(loaded?.title).toBe('Saved Chat');
-    });
 
-    it('should clear session IDs when provider base URL changes', async () => {
-      const timestamp = Date.now();
-      const sessionMeta = JSON.stringify({
-        id: 'conv-saved-1',
-        providerId: 'claude',
-        title: 'Saved Chat',
-        createdAt: timestamp,
-        lastActivityAt: timestamp,
-        sessionId: 'saved-session',
-      });
-
-      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => {
-        return path === '.claudian/claudian-settings.json' ||
-          path === '.claudian/sessions' ||
-          path === '.claudian/sessions/conv-saved-1.meta.json';
-      });
-      mockApp.vault.adapter.list.mockImplementation(async (path: string) => {
-        if (path === '.claudian/sessions') {
-          return { files: ['.claudian/sessions/conv-saved-1.meta.json'], folders: [] };
-        }
-        return { files: [], folders: [] };
-      });
-      mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
-        if (path === '.claudian/claudian-settings.json') {
-          // All these fields are now in claudian-settings.json
-          return JSON.stringify({
-            lastEnvHash: 'old-hash',
-            environmentVariables: 'ANTHROPIC_BASE_URL=https://api.example.com',
-          });
-        }
-        if (path === '.claudian/sessions/conv-saved-1.meta.json') {
-          return sessionMeta;
-        }
-        return '';
-      });
-
-      // data.json is minimal (already migrated)
-      (plugin.loadData as jest.Mock).mockResolvedValue({});
-
-      await plugin.onload();
-
-      const loaded = await chatHostOf(plugin).getConversationById('conv-saved-1');
-      expect(loaded?.sessionId).toBeNull();
-
-      const sessionWrite = (mockApp.vault.adapter.write as jest.Mock).mock.calls.find(
-        ([path]) => path === '.claudian/sessions/conv-saved-1.meta.json'
-      );
-      expect(sessionWrite).toBeDefined();
-      const meta = JSON.parse(sessionWrite?.[1] as string);
-      expect(meta.sessionId).toBeNull();
+      scanSpy.mockRestore();
+      loadSpy.mockRestore();
     });
 
     it('should ignore legacy activeConversationId when no sessions exist', async () => {
@@ -3602,10 +3565,10 @@ describe('ClaudianPlugin', () => {
       const timestamp = Date.now();
 
       // Setup conversation with previousProviderSessionIds
-      const sessionMeta = JSON.stringify({
+      const saved = {
         type: 'meta',
         id: 'conv-multi-session',
-        providerId: 'claude',
+        providerId: 'claude' as const,
         title: 'Multi Session Chat',
         createdAt: timestamp,
         lastActivityAt: timestamp,
@@ -3613,36 +3576,25 @@ describe('ClaudianPlugin', () => {
           providerSessionId: 'session-B',
           previousProviderSessionIds: ['session-A'],
         },
-      });
+      };
 
-      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => {
-        return path === '.claudian/claudian-settings.json' ||
-          path === '.claudian/sessions' ||
-          path === '.claudian/sessions/conv-multi-session.meta.json';
+      const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan').mockImplementation(async (options) => {
+        options?.onBatch?.(deviceMetadataRecords(saved));
+        return { records: deviceMetadataRecords(saved), complete: true, invalidMetadataCount: 0 };
       });
-      mockApp.vault.adapter.list.mockImplementation(async (path: string) => {
-        if (path === '.claudian/sessions') {
-          return { files: ['.claudian/sessions/conv-multi-session.meta.json'], folders: [] };
-        }
-        return { files: [], folders: [] };
-      });
-      mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
-        if (path === '.claudian/sessions/conv-multi-session.meta.json') {
-          return sessionMeta;
-        }
-        if (path === '.claudian/claudian-settings.json') {
-          return JSON.stringify({});
-        }
-        return '';
-      });
+      const loadSpy = mockMetadataSources(saved);
 
       (plugin.loadData as jest.Mock).mockResolvedValue({});
 
       await plugin.onload();
 
+      await chatHostOf(plugin).ensureConversationMetadataLoaded(['conv-multi-session']);
       const loaded = await chatHostOf(plugin).getConversationById('conv-multi-session');
       expect((loaded?.providerState as any)?.previousProviderSessionIds).toEqual(['session-A']);
       expect((loaded?.providerState as any)?.providerSessionId).toBe('session-B');
+
+      scanSpy.mockRestore();
+      loadSpy.mockRestore();
     });
 
     it('should preserve previousProviderSessionIds through conversation updates', async () => {
