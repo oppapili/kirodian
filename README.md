@@ -42,9 +42,9 @@ Open the chat sidebar from the ribbon icon or command palette. Select text and u
 
 ## Requirements
 
-- [Kiro CLI](https://kiro.dev/) v2.6.0 or later, installed and authenticated
+- [Kiro CLI](https://kiro.dev/) v2.6.0+, installed and authenticated
 - An active Kiro subscription
-- Obsidian v1.13.0 or later
+- Obsidian v1.13.0+
 - Obsidian desktop app (macOS, Linux, or Windows)
 
 ## Installation
