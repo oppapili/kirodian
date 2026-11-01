@@ -30,10 +30,14 @@ Kiro CLI 対応は「Claudian を作り直す」のではなく、
 
 - Kiro プロバイダは `src/providers/kiro/` に隔離する。
 - Kiro CLI は ACP (`kiro-cli acp`, JSON-RPC over stdio) で接続する。共有 ACP 層
-  (`src/providers/acp/`) を再利用し、Grok プロバイダを雛形とする。
-- 既存プロバイダ (claude / codex / grok / opencode / pi) の挙動は変更しない。
+  (`src/providers/acp/`) を再利用する。Kiro プロバイダの実装は当初 Grok プロバイダを
+  雛形として作られたが、fork 由来プロバイダのソースを保持しない方針（§4）のため、
+  Grok を含む他プロバイダのソースは削除済み／削除対象である。
+- Kirodian が保持するプロバイダは `src/providers/kiro/` のみとする（§4）。
 - プロバイダ登録は `src/providers/index.ts` と `src/providers/defaultProviderConfigs.ts`
-  への追加で行い、Claudian 中立層 (`src/core/`) には Kiro 固有の分岐を持ち込まない。
+  で行い、Claudian 中立層 (`src/core/`) には Kiro 固有の分岐を持ち込まない。中立層は
+  プロバイダに依存しない汎用レジストリとして保ち、upstream の中立層変更をそのまま
+  追従できる状態を維持する。
 
 ## 3. バージョニング
 
@@ -61,17 +65,32 @@ git merge upstream/main
 
 Claudian の更新を取り込むことを前提とした開発構造を維持する。
 
-### プロバイダ別の追従方針
+### 追従の基本姿勢: commit ではなく「変更の意図」を追う
 
-upstream には複数のプロバイダが存在するが、Kirodian はそのうち claude のソースのみを
-保持する。追従の扱いはプロバイダごとに次のように分ける。
+upstream のマージは **commit をそのまま取り込む作業ではない**。各変更の**意図**を読み、
+Kirodian 側の実装（Kiro プロバイダ中心の構成）にぶつけて、意図を満たす形で反映する。
 
-- **claude**: fork 元のメインサポートプロバイダ。UI 上は hidden にしているがソースは
-  保持する。upstream には都度追従し、コンフリクトが出たら検討・解消する。
-- **他プロバイダ (codex / grok / opencode / pi)**: fork 元のサブサポートプロバイダ。
-  Kirodian としてソースは保持しない。ただし、Grok の ACP 利用など Kiro プロバイダ実装に
-  流用可能な設計思想のある diff、またはセキュリティ fix の diff があれば、その差分を参考に
-  取り込みを検討する（当該プロバイダのソースそのものを取り込むわけではない）。
+- **Provider でない部分**（中立層 `src/core/`、`src/features/`、`src/style/`、UI、i18n、
+  ビルド設定、共有 ACP 層 `src/providers/acp/`）は、Kirodian でもそのまま流用可能なため
+  **追従する**。upstream の改善・バグ修正・設計変更はここで取り込む。
+- **Provider 固有の変更**は、そのプロバイダのソースを Kirodian が保持しないため
+  **そのまま取り込まない**。ただし変更の**意図**（例: ACP の利用方法、ライフサイクル整理、
+  セキュリティ fix）に Kiro プロバイダへ流用できる設計思想があれば、その差分を参考に
+  Kiro 側へ反映する。当該プロバイダのソースそのものを取り込むわけではない。
+
+### プロバイダ保持方針: Kiro のみ
+
+Kirodian が保持するプロバイダは **`src/providers/kiro/` のみ**とする。claude を含む
+fork 由来のプロバイダのソースは保持しない。
+
+- **claude**: fork 元のメインサポートプロバイダだったが、Kiro 専用プラグインという
+  プロダクト方針上、**ソースは削除する**（Claude だけのために実装を維持しない）。
+  upstream の claude 変更も、上記「変更の意図を追う」に従い、Provider でない部分の
+  改善のみ取り込み、claude プロバイダ固有部分は取り込まない。
+- **他プロバイダ (codex / grok / opencode / pi)**: 同様にソースを保持しない。
+
+この削除作業自体は issue #83 で扱う。削除完了後は `src/providers/` に acp と kiro の
+みが残る構成になる。
 
 ## 5. Kiro 固有変更の分離
 
