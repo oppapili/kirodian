@@ -60,7 +60,11 @@ export const DEFAULT_KIRO_PROVIDER_SETTINGS: Readonly<PersistedKiroProviderSetti
   catalogsByHost: {},
   cliPath: '',
   cliPathsByHost: {},
-  enabled: false,
+  // Kiro is Kirodian's primary and only user-visible provider. On a fresh
+  // install with no persisted settings it must default to enabled, otherwise
+  // the provider menu renders empty (claude is hidden, kiro would be disabled)
+  // and a new user is stuck with no selectable provider (#88).
+  enabled: true,
   environmentHash: '',
   environmentVariables: '',
   modelAliases: {},
