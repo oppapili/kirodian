@@ -3,20 +3,121 @@ on:
   issues:
     types: [opened, edited]
 
+permissions:
+  issues: write
+
 jobs:
   check-duplicates:
     runs-on: ubuntu-latest
     steps:
-      - uses: wow-actions/potential-duplicates@v1
+      # Replaces the unmaintained `wow-actions/potential-duplicates@v1` action
+      # (pinned to node16, last updated 2022, fails under the Node20/24 runner
+      # migration). Reimplemented inline with the official, Node24-capable
+      # actions/github-script to drop the third-party dependency while keeping
+      # the same behaviour: compare the issue title against existing issues with
+      # a normalized Damerau-Levenshtein similarity and, above the threshold,
+      # add a label and post a comment listing the matches.
+      - uses: actions/github-script@v7
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          threshold: 0.6
-          state: all
-          label: possible-duplicate
-          comment: >
-            Possible duplicates found:
-            {{#issues}}
-            - #{{number}} ({{similarity}}% similar): {{title}}
-            {{/issues}}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const THRESHOLD = 0.6;
+            const LABEL = 'possible-duplicate';
+            const STATE = 'all';
 
-            If one of these matches your issue, please add your details there instead.
+            const current = context.payload.issue;
+            if (!current) {
+              core.info('No issue in payload; skipping.');
+              return;
+            }
+
+            // Damerau-Levenshtein edit distance (optimal string alignment).
+            function editDistance(a, b) {
+              const al = a.length;
+              const bl = b.length;
+              if (al === 0) return bl;
+              if (bl === 0) return al;
+              const d = Array.from({ length: al + 1 }, () => new Array(bl + 1).fill(0));
+              for (let i = 0; i <= al; i++) d[i][0] = i;
+              for (let j = 0; j <= bl; j++) d[0][j] = j;
+              for (let i = 1; i <= al; i++) {
+                for (let j = 1; j <= bl; j++) {
+                  const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+                  d[i][j] = Math.min(
+                    d[i - 1][j] + 1,
+                    d[i][j - 1] + 1,
+                    d[i - 1][j - 1] + cost,
+                  );
+                  if (
+                    i > 1 &&
+                    j > 1 &&
+                    a[i - 1] === b[j - 2] &&
+                    a[i - 2] === b[j - 1]
+                  ) {
+                    d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+                  }
+                }
+              }
+              return d[al][bl];
+            }
+
+            function similarity(a, b) {
+              const x = (a || '').toLowerCase().trim();
+              const y = (b || '').toLowerCase().trim();
+              const maxLen = Math.max(x.length, y.length);
+              if (maxLen === 0) return 1;
+              return 1 - editDistance(x, y) / maxLen;
+            }
+
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: STATE,
+              per_page: 100,
+            });
+
+            const matches = [];
+            for (const issue of issues) {
+              if (issue.number === current.number) continue;
+              if (issue.pull_request) continue; // skip PRs
+              const accuracy = similarity(current.title, issue.title);
+              if (accuracy >= THRESHOLD) {
+                matches.push({
+                  number: issue.number,
+                  title: issue.title,
+                  accuracy: Math.round(accuracy * 100),
+                });
+              }
+            }
+
+            if (matches.length === 0) {
+              core.info('No potential duplicates found.');
+              return;
+            }
+
+            matches.sort((a, b) => b.accuracy - a.accuracy);
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: current.number,
+              labels: [LABEL],
+            });
+
+            const lines = matches
+              .map((m) => `- #${m.number} (${m.accuracy}% similar): ${m.title}`)
+              .join('\n');
+            const body = [
+              'Possible duplicates found:',
+              '',
+              lines,
+              '',
+              'If one of these matches your issue, please add your details there instead.',
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: current.number,
+              body,
+            });
