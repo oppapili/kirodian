@@ -173,12 +173,27 @@ describe('ClaudianPlugin', () => {
 
   // Post-load defaults when the store is empty. loadSettings returns the stored
   // baseline (DEFAULT_SETTINGS) verbatim when no saved data exists: it does not
-  // re-project top-level reasoning/permission fields against the active provider
-  // or seed per-provider maps. The persisted `settingsProvider` stays claude
-  // (the default-settings constant); the Kiro-default migration only coerces a
-  // *stored* hidden-provider selection, which an empty store does not carry.
+  // The committed defaults after load/startup, which projects the active
+  // provider's state. kiro is the sole visible provider and defaults to enabled
+  // (#88), so an empty store resolves `settingsProvider` to kiro, projects its
+  // normal permission mode and default model into the per-provider maps, and
+  // computes its environment hash. The hash is environment-derived, so it is
+  // matched loosely to stay stable across CI hosts.
   function expectedDefaultSettings(): Record<string, unknown> {
-    return JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as Record<string, unknown>;
+    const defaults = JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as Record<string, unknown>;
+    const providerConfigs = defaults.providerConfigs as Record<string, Record<string, unknown>>;
+    delete defaults.effortLevel;
+    return {
+      ...defaults,
+      settingsProvider: 'kiro',
+      permissionMode: 'normal',
+      savedProviderModel: { kiro: 'haiku' },
+      savedProviderPermissionMode: { kiro: 'normal' },
+      providerConfigs: {
+        ...providerConfigs,
+        kiro: { ...providerConfigs.kiro, environmentHash: expect.any(String) },
+      },
+    };
   }
 
   beforeEach(() => {
@@ -455,8 +470,9 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
 
       expect(plugin.settings).toBeDefined();
-      // A fresh install starts Claude on Auto, which carries to an unsaved provider as Safe.
-      expect(plugin.settings.permissionMode).toBe('auto');
+      // A fresh install resolves to kiro (the sole visible provider, #88), whose
+      // default permission mode is Normal.
+      expect(plugin.settings.permissionMode).toBe('normal');
       expect(plugin.settings.hiddenCommands).toEqual(DEFAULT_SETTINGS.hiddenCommands);
     });
 

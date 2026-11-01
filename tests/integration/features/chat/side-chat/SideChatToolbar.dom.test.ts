@@ -38,6 +38,11 @@ it('refreshes destination settings when the side panel collapses, expands, and i
     app,
     getCommittedSettings: () => plugin.settings,
     settings: {
+      // Pin the settings provider to claude: this conversation is a claude
+      // conversation, and kiro now defaults to enabled (#88), so an unset
+      // provider would resolve to kiro and project its (non-Manual) permission
+      // labels onto the main destination.
+      settingsProvider: 'claude',
       model: 'claude-opus-4-6', effortLevel: 'medium', permissionMode: 'manual',
       savedProviderModel: { claude: 'claude-opus-4-6' }, savedProviderEffort: { claude: 'medium' },
       providerConfigs: { claude: { enabled: true, visibleModels: ['claude-sonnet-4-5', 'claude-opus-4-6'],

@@ -22,6 +22,30 @@ jest.mock('@/providers/kiro/history/KiroHistoryPathResolver', () => ({
 
 import '@/providers';
 
+/**
+ * The committed defaults after startup, which projects the active provider's
+ * state. kiro is the sole visible provider and defaults to enabled (#88), so
+ * startup resolves `settingsProvider` to kiro, projects its normal permission
+ * mode and default model, and computes its environment hash. The hash is
+ * environment-derived, so it is matched loosely to stay stable across CI hosts.
+ */
+function expectedDefaultStartupSettings(): Record<string, unknown> {
+  const defaults = JSON.parse(JSON.stringify(DEFAULT_CLAUDIAN_SETTINGS)) as Record<string, unknown>;
+  const providerConfigs = defaults.providerConfigs as Record<string, Record<string, unknown>>;
+  delete defaults.effortLevel;
+  return {
+    ...defaults,
+    settingsProvider: 'kiro',
+    permissionMode: 'normal',
+    savedProviderModel: { kiro: 'haiku' },
+    savedProviderPermissionMode: { kiro: 'normal' },
+    providerConfigs: {
+      ...providerConfigs,
+      kiro: { ...providerConfigs.kiro, environmentHash: expect.any(String) },
+    },
+  };
+}
+
 describe('startApplication', () => {
   let mockApp: any;
   let plugin: { app: any; loadData: jest.Mock; saveData: jest.Mock };
@@ -125,7 +149,8 @@ describe('startApplication', () => {
       const domains = await loadApplication();
 
       // Compare persisted values; provider discovery may attach transient symbol metadata.
-      expect(JSON.parse(JSON.stringify(domains.settings.getCommittedSettings()))).toEqual(DEFAULT_CLAUDIAN_SETTINGS);
+      expect(JSON.parse(JSON.stringify(domains.settings.getCommittedSettings())))
+        .toEqual(expectedDefaultStartupSettings());
     });
 
     it('should use defaults when loadData returns empty object', async () => {
@@ -136,7 +161,8 @@ describe('startApplication', () => {
       const domains = await loadApplication();
 
       // Compare persisted values; provider discovery may attach transient symbol metadata.
-      expect(JSON.parse(JSON.stringify(domains.settings.getCommittedSettings()))).toEqual(DEFAULT_CLAUDIAN_SETTINGS);
+      expect(JSON.parse(JSON.stringify(domains.settings.getCommittedSettings())))
+        .toEqual(expectedDefaultStartupSettings());
     });
 
     it('preserves the saved model while applying environment configuration', async () => {

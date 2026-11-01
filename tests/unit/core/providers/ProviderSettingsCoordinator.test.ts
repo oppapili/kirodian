@@ -170,9 +170,12 @@ describe('ProviderSettingsCoordinator', () => {
         settings, [claudeConv, otherConv], ProviderRegistry.getRegisteredProviderIds(),
       );
 
-      // Claude reconciler should only receive claude conversations
+      // Claude reconciler should only receive claude conversations. kiro is the
+      // settings provider (#88), so claude is reconciled against a cloned+
+      // projected settings object rather than the live one; assert the
+      // conversation filtering (the contract under test), not the settings arg.
       expect(reconcileSpy).toHaveBeenCalledWith(
-        settings,
+        expect.anything(),
         [claudeConv],
       );
 
@@ -449,27 +452,31 @@ describe('ProviderSettingsCoordinator', () => {
       expect(snapshot.savedProviderPermissionMode).toEqual({});
     });
 
-    it('defaults to claude when settingsProvider is not set', () => {
+    it('defaults to the sole visible provider (kiro) when settingsProvider is not set', () => {
+      // claude is hidden, so an unset settingsProvider resolves to kiro (#88).
+      // The active projection reads kiro's saved values, not claude's.
       const settings: Record<string, unknown> = {
         model: 'old-model',
         effortLevel: 'low',
         serviceTier: 'default',
-        savedProviderModel: { claude: 'sonnet' },
-        savedProviderEffort: { claude: 'high' },
-        savedProviderServiceTier: { claude: 'default' },
+        savedProviderModel: { kiro: 'kiro/haiku' },
+        savedProviderEffort: { kiro: 'high' },
+        savedProviderServiceTier: { kiro: 'default' },
       };
 
       ProviderSettingsCoordinator.projectActiveProviderState(settings);
 
-      expect(settings.model).toBe('sonnet');
-      expect(settings.effortLevel).toBe('high');
+      expect(settings.model).toBe('kiro/haiku');
       expect(settings.serviceTier).toBe('default');
     });
 
     it('does not overwrite when no saved values exist', () => {
+      // No saved values for the active provider: the current model/effort are
+      // reused rather than reset. kiro is the visible provider (#88), so use a
+      // kiro-qualified model whose reasoning effort the projection preserves.
       const settings: Record<string, unknown> = {
-        settingsProvider: 'claude',
-        model: 'haiku',
+        settingsProvider: 'kiro',
+        model: 'kiro/haiku',
         effortLevel: 'high',
         serviceTier: 'default',
         savedProviderModel: {},
@@ -479,7 +486,7 @@ describe('ProviderSettingsCoordinator', () => {
 
       ProviderSettingsCoordinator.projectActiveProviderState(settings);
 
-      expect(settings.model).toBe('haiku');
+      expect(settings.model).toBe('kiro/haiku');
       expect(settings.effortLevel).toBe('high');
     });
 
@@ -498,6 +505,9 @@ describe('ProviderSettingsCoordinator', () => {
     });
 
     it('normalizes saved effort values that the projected Claude model no longer supports', () => {
+      // claude is hidden, so projectActiveProviderState would resolve to kiro.
+      // Project claude explicitly via a snapshot to exercise claude's own
+      // model/effort normalization contract (#88).
       const settings: Record<string, unknown> = {
         settingsProvider: 'claude',
         providerConfigs: { claude: claudeCatalogFixture(['claude-sonnet-4-5'], ['low', 'medium', 'high']) },
@@ -509,10 +519,10 @@ describe('ProviderSettingsCoordinator', () => {
         savedProviderServiceTier: { claude: 'default' },
       };
 
-      ProviderSettingsCoordinator.projectActiveProviderState(settings);
+      const snapshot = ProviderSettingsCoordinator.getProviderSettingsSnapshot(settings, 'claude');
 
-      expect(settings.model).toBe('claude-code/claude-sonnet-4-5');
-      expect(settings.effortLevel).toBe('high');
+      expect(snapshot.model).toBe('claude-code/claude-sonnet-4-5');
+      expect(snapshot.effortLevel).toBe('high');
     });
   });
 });

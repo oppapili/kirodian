@@ -21,10 +21,11 @@ function createTestHost(enabled: boolean): {
   settings: Record<string, unknown>;
   notified: string[];
 } {
+  // Set the enablement explicitly in both directions: kiro now defaults to
+  // enabled (#88), so the disabled case must persist enabled:false rather than
+  // relying on an empty settings bag.
   const settings: Record<string, unknown> = {};
-  if (enabled) {
-    updateKiroProviderSettings(settings, { enabled: true });
-  }
+  updateKiroProviderSettings(settings, { enabled });
   const notified: string[] = [];
 
   const host = {
