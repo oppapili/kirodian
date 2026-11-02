@@ -1,14 +1,10 @@
 import { ProviderRegistry } from '../core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '../core/providers/ProviderWorkspaceRegistry';
-import { claudeProviderRegistration } from './claude/registration';
 import { kiroProviderRegistration } from './kiro/registration';
 
 let builtInProvidersRegistered = false;
 
-export const BUILT_IN_PROVIDER_MODULES = [
-  claudeProviderRegistration,
-  kiroProviderRegistration,
-] as const;
+export const BUILT_IN_PROVIDER_MODULES = [kiroProviderRegistration] as const;
 
 export function registerBuiltInProviders(): void {
   if (builtInProvidersRegistered) {

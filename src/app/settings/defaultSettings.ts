@@ -1,3 +1,4 @@
+import { DEFAULT_CHAT_PROVIDER_ID } from '../../core/providers/types';
 import { DEFAULT_REASONING_VALUE } from '../../core/providers/reasoning';
 import type { ClaudianSettings, ProviderConfigMap } from '../../core/types/settings';
 
@@ -41,7 +42,7 @@ export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
 
   providerConfigs: {},
 
-  settingsProvider: 'claude',
+  settingsProvider: DEFAULT_CHAT_PROVIDER_ID,
   lastSelectedChatModel: null,
   savedProviderModel: {},
   savedProviderEffort: {},
