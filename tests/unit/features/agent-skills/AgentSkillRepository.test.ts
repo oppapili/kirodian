@@ -11,7 +11,7 @@ import {
   AgentSkillCollisionError,
   AgentSkillRepository,
   AgentSkillRevisionConflictError,
-  CLAUDE_SKILLS_ROOT,
+  KIRO_WORKSPACE_SKILLS_ROOT,
 } from '@/features/agent-skills/AgentSkillRepository';
 import { AgentSkillValidationError } from '@/features/agent-skills/validateAgentSkill';
 
@@ -261,37 +261,37 @@ describe('AgentSkillRepository', () => {
     expect(rejected.reason).toBeInstanceOf(AgentSkillCollisionError);
   });
   describe('root and frontmatter policies', () => {
-    function claudeRepository(frontmatterPolicy: 'preserve' | 'portable' = 'preserve') {
+    function configuredRootRepository(frontmatterPolicy: 'preserve' | 'portable' = 'preserve') {
       return new AgentSkillRepository(vaultFiles, {
-        root: CLAUDE_SKILLS_ROOT,
+        root: KIRO_WORKSPACE_SKILLS_ROOT,
         frontmatterPolicy,
         readPolicy: 'lenient',
       });
     }
 
     it('returns an empty list when an ancestor of the root is missing', async () => {
-      await expect(claudeRepository().list()).resolves.toEqual({ skills: [], diagnostics: [] });
+      await expect(configuredRootRepository().list()).resolves.toEqual({ skills: [], diagnostics: [] });
     });
 
     it('creates, updates and trashes packages under a configured root', async () => {
-      const repo = claudeRepository();
+      const repo = configuredRootRepository();
       const created = await repo.create({
-        name: 'claude-skill',
-        description: 'Claude description',
-        instructions: 'Claude instructions',
+        name: 'scoped-skill',
+        description: 'Scoped description',
+        instructions: 'Scoped instructions',
       });
-      expect(created.filePath).toBe(`${CLAUDE_SKILLS_ROOT}/claude-skill/SKILL.md`);
-      expect(dataAdapter.nodes.has(`${AGENT_SKILLS_ROOT}/claude-skill`)).toBe(false);
+      expect(created.filePath).toBe(`${KIRO_WORKSPACE_SKILLS_ROOT}/scoped-skill/SKILL.md`);
+      expect(dataAdapter.nodes.has(`${AGENT_SKILLS_ROOT}/scoped-skill`)).toBe(false);
 
-      const updated = await repo.update('claude-skill', created.revision, {
-        name: 'claude-skill',
+      const updated = await repo.update('scoped-skill', created.revision, {
+        name: 'scoped-skill',
         description: 'Updated',
         instructions: 'Updated instructions',
       });
       expect((await repo.list()).skills.map(skill => skill.description)).toEqual(['Updated']);
 
-      await repo.trash('claude-skill', updated.revision);
-      expect(dataAdapter.trashed).toEqual([`${CLAUDE_SKILLS_ROOT}/claude-skill`]);
+      await repo.trash('scoped-skill', updated.revision);
+      expect(dataAdapter.trashed).toEqual([`${KIRO_WORKSPACE_SKILLS_ROOT}/scoped-skill`]);
     });
 
     it('removes unknown frontmatter on update under the portable policy', async () => {
@@ -314,21 +314,21 @@ describe('AgentSkillRepository', () => {
     });
 
     it('lists lenient packages without a matching name or description, but not files without frontmatter', async () => {
-      dataAdapter.addFolder('.claude');
-      dataAdapter.addFolder(CLAUDE_SKILLS_ROOT);
-      dataAdapter.addFolder(`${CLAUDE_SKILLS_ROOT}/Legacy_Skill`);
+      dataAdapter.addFolder('.kiro');
+      dataAdapter.addFolder(KIRO_WORKSPACE_SKILLS_ROOT);
+      dataAdapter.addFolder(`${KIRO_WORKSPACE_SKILLS_ROOT}/Legacy_Skill`);
       dataAdapter.addFile(
-        `${CLAUDE_SKILLS_ROOT}/Legacy_Skill/SKILL.md`,
+        `${KIRO_WORKSPACE_SKILLS_ROOT}/Legacy_Skill/SKILL.md`,
         '---\nallowed-tools: [Read]\n---\nLegacy instructions\n',
       );
-      dataAdapter.addFolder(`${CLAUDE_SKILLS_ROOT}/no-frontmatter`);
-      dataAdapter.addFile(`${CLAUDE_SKILLS_ROOT}/no-frontmatter/SKILL.md`, 'Plain instructions\n');
+      dataAdapter.addFolder(`${KIRO_WORKSPACE_SKILLS_ROOT}/no-frontmatter`);
+      dataAdapter.addFile(`${KIRO_WORKSPACE_SKILLS_ROOT}/no-frontmatter/SKILL.md`, 'Plain instructions\n');
 
-      const repo = claudeRepository();
+      const repo = configuredRootRepository();
       const result = await repo.list();
 
       expect(result.diagnostics.map(item => [item.directoryPath, item.repairName])).toEqual([
-        [`${CLAUDE_SKILLS_ROOT}/no-frontmatter`, undefined],
+        [`${KIRO_WORKSPACE_SKILLS_ROOT}/no-frontmatter`, undefined],
       ]);
       expect(result.skills.map(skill => [skill.name, skill.description, skill.instructions])).toEqual([
         ['Legacy_Skill', '', 'Legacy instructions'],
@@ -353,7 +353,7 @@ describe('AgentSkillRepository', () => {
         instructions: 'Legacy instructions',
       });
       expect(renamed.frontmatter).toMatchObject({ 'allowed-tools': ['Read'] });
-      expect(renamed.directoryPath).toBe(`${CLAUDE_SKILLS_ROOT}/legacy-skill`);
+      expect(renamed.directoryPath).toBe(`${KIRO_WORKSPACE_SKILLS_ROOT}/legacy-skill`);
     });
 
     it('keeps strict reads for the default shared root', async () => {

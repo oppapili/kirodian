@@ -19,7 +19,6 @@ import {
   KIRO_WORKSPACE_SKILLS_ROOT,
 } from '@/features/agent-skills/AgentSkillRepository';
 import { AgentSkillSettings } from '@/features/agent-skills/AgentSkillSettings';
-import { SkillsSettingsTab } from '@/features/agent-skills/SkillsSettingsTab';
 import type { FeatureHost } from '@/features/FeatureHost';
 import { buildNavMappingText, parseNavMappings } from '@/features/settings/keyboardNavigation';
 import { BRAND_NAME } from '@/i18n/constants';
@@ -30,7 +29,7 @@ import { DebouncedSettingsWriter } from '@/shared/settings/DebouncedSettingsWrit
 import { renderEnvironmentSettingsSection } from '@/shared/settings/EnvironmentSettingsSection';
 import { frameSettingsGroups } from '@/shared/settings/SettingsGroups';
 
-type SettingsTabId = 'general' | 'providers' | 'skills';
+type SettingsTabId = 'general' | 'providers';
 
 export class ClaudianSettingTab extends PluginSettingTab {
   private readonly host: FeatureHost;
@@ -40,17 +39,14 @@ export class ClaudianSettingTab extends PluginSettingTab {
   private syncProviderEnablement: ((providerId: ProviderId) => void) | null = null;
   private renderGeneration = 0;
   private readonly providerSettingsRenders = new Map<ProviderId, ProviderSettingsTabRenderHandle>();
-  private skillsTab: SkillsSettingsTab | null = null;
   private readonly textEdits: DebouncedSettingsWriter<ClaudianSettings>;
-  // One coordinator per skills root. Providers that read Claudian's shared
-  // `.agents/skills` share the default-root coordinator; Kiro reads
-  // `.kiro/skills` instead (kiro-cli does not read `.agents/skills`), so it
-  // gets its own coordinator keyed by that root. Keyed by root string so each
-  // root is instantiated at most once and reused across renders.
+  // One coordinator per skills root. Kiro reads `.kiro/skills`; the shared
+  // `.agents/skills` root remains available for any future provider that reads
+  // it. Keyed by root string so each root is instantiated at most once and
+  // reused across renders.
   private readonly agentSkillCoordinators = new Map<string, AgentSkillManagementCoordinator>();
   // Per-provider agent-skill panels this tab created (e.g. Kiro's `.kiro/skills`
-  // section). Tracked so a re-render disposes them, mirroring how SkillsSettingsTab
-  // disposes its own panels — the coordinator no longer owns subscription cleanup.
+  // section). Tracked so a re-render disposes them.
   private readonly agentSkillPanels: AgentSkillSettings[] = [];
 
   constructor(app: App, plugin: Plugin, host: FeatureHost) {
@@ -87,7 +83,6 @@ export class ClaudianSettingTab extends PluginSettingTab {
   private renderSettings(containerEl: HTMLElement): () => void {
     void this.textEdits.flush();
     this.disposeProviderSettingsRenders();
-    this.disposeSkillsTab();
     const renderGeneration = ++this.renderGeneration;
     this.disposeAgentSkillPanels();
     containerEl.empty();
@@ -102,7 +97,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
     setLocale(this.host.settings.locale as Locale);
 
     const providerTabs = ProviderRegistry.getVisibleProviderIds(this.host.settings);
-    const tabIds: SettingsTabId[] = ['general', 'providers', 'skills'];
+    const tabIds: SettingsTabId[] = ['general', 'providers'];
     const preferredProvider = providerTabs.includes(this.host.settings.settingsProvider)
       ? this.host.settings.settingsProvider
       : providerTabs[0] ?? null;
@@ -206,7 +201,6 @@ export class ClaudianSettingTab extends PluginSettingTab {
       });
       button.addEventListener('click', () => {
         void this.textEdits.flush();
-        this.skillsTab?.flush();
         this.activeTab = id;
         for (const tabId of tabIds) {
           tabButtons.get(tabId)?.toggleClass('claudian-settings-tab--active', tabId === id);
@@ -215,7 +209,6 @@ export class ClaudianSettingTab extends PluginSettingTab {
         if (id === 'providers' && this.activeProviderTab) {
           void renderProviderTab(this.activeProviderTab);
         }
-        if (id === 'skills') renderSkillsTab();
       });
       tabButtons.set(id, button);
     }
@@ -229,18 +222,6 @@ export class ClaudianSettingTab extends PluginSettingTab {
 
     this.renderGeneralTab(tabContents.get('general')!);
     frameSettingsGroups(tabContents.get('general')!);
-
-    // Rendered on first activation so opening settings never touches skill folders.
-    const renderSkillsTab = (): void => {
-      if (this.skillsTab) return;
-      this.skillsTab = new SkillsSettingsTab(
-        tabContents.get('skills')!,
-        this.app,
-        this.host.storage.getAdapter(),
-        this.host,
-      );
-    };
-    if (this.activeTab === 'skills') renderSkillsTab();
 
     for (const providerId of providerTabs) {
       const content = providerContentHost.createDiv({
@@ -279,7 +260,6 @@ export class ClaudianSettingTab extends PluginSettingTab {
       settingItems?.classList.remove('claudian-settings-items');
       this.renderGeneration += 1;
       this.disposeProviderSettingsRenders();
-      this.disposeSkillsTab();
       this.disposeAgentSkillPanels();
       this.refreshTitleModelOptions = null;
       this.syncProviderEnablement = null;
@@ -709,11 +689,6 @@ export class ClaudianSettingTab extends PluginSettingTab {
   private disposeProviderSettingsRenders(): void {
     for (const handle of this.providerSettingsRenders.values()) handle.dispose();
     this.providerSettingsRenders.clear();
-  }
-
-  private disposeSkillsTab(): void {
-    this.skillsTab?.dispose();
-    this.skillsTab = null;
   }
 
   private disposeAgentSkillPanels(): void {

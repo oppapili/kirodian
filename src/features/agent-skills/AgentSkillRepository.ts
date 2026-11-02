@@ -22,8 +22,6 @@ import { AgentSkillValidationError, validateAgentSkillInput, validateAgentSkillN
 import { mapWithConcurrency } from '@/utils/concurrency';
 
 export const AGENT_SKILLS_ROOT = '.agents/skills';
-export const CLAUDE_SKILLS_ROOT = '.claude/skills';
-export const CLAUDE_COMMANDS_ROOT = '.claude/commands';
 
 /**
  * Vault-relative directory kiro-cli reads workspace skills from.

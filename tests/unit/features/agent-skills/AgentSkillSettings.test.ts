@@ -7,9 +7,8 @@ import { Notice } from 'obsidian';
 
 import { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
 import { AgentSkillManagementCoordinator } from '@/features/agent-skills/AgentSkillManagementCoordinator';
-import { AgentSkillRepository, CLAUDE_COMMANDS_ROOT, CLAUDE_SKILLS_ROOT, type SkillFrontmatterPolicy } from '@/features/agent-skills/AgentSkillRepository';
+import { AgentSkillRepository, KIRO_WORKSPACE_SKILLS_ROOT, type SkillFrontmatterPolicy } from '@/features/agent-skills/AgentSkillRepository';
 import { AgentSkillSettings } from '@/features/agent-skills/AgentSkillSettings';
-import { ClaudeCommandRepository } from '@/features/agent-skills/ClaudeCommandRepository';
 import { t } from '@/i18n/i18n';
 
 jest.mock('obsidian', () => ({
@@ -196,38 +195,34 @@ describe('AgentSkillSettings repair of flagged packages', () => {
   });
 });
 
-describe('AgentSkillSettings with Claude commands and frontmatter policies', () => {
-  function setupClaude(frontmatterPolicy: SkillFrontmatterPolicy) {
+describe('AgentSkillSettings with a configured root and frontmatter policies', () => {
+  function setupScopedRoot(frontmatterPolicy: SkillFrontmatterPolicy) {
     const adapter = new MemoryDataAdapter();
     const app = { vault: { adapter } } as unknown as App;
     const files = new VaultFileAdapter(app);
     const repository = new AgentSkillRepository(files, {
-      root: CLAUDE_SKILLS_ROOT,
+      root: KIRO_WORKSPACE_SKILLS_ROOT,
       frontmatterPolicy,
       readPolicy: 'lenient',
     });
-    const commands = new ClaudeCommandRepository(files, { frontmatterPolicy });
-    const coordinator = new AgentSkillManagementCoordinator(repository, async () => undefined, commands);
-    adapter.addFolder('.claude');
-    adapter.addFolder(CLAUDE_SKILLS_ROOT);
-    adapter.addFolder(CLAUDE_COMMANDS_ROOT);
+    const coordinator = new AgentSkillManagementCoordinator(repository, async () => undefined);
+    adapter.addFolder('.kiro');
+    adapter.addFolder(KIRO_WORKSPACE_SKILLS_ROOT);
     const container = document.body.appendChild(document.createElement('main'));
     const settings = new AgentSkillSettings(container, coordinator, app);
-    return { adapter, repository, commands, settings };
+    return { adapter, repository, settings };
   }
 
   function addSkillWithTools(adapter: MemoryDataAdapter) {
-    adapter.addFolder(`${CLAUDE_SKILLS_ROOT}/reviewer`);
+    adapter.addFolder(`${KIRO_WORKSPACE_SKILLS_ROOT}/reviewer`);
     adapter.addFile(
-      `${CLAUDE_SKILLS_ROOT}/reviewer/SKILL.md`,
+      `${KIRO_WORKSPACE_SKILLS_ROOT}/reviewer/SKILL.md`,
       '---\nname: reviewer\ndescription: Reviews\nallowed-tools: [Read]\n---\nReview it\n',
     );
   }
 
-  const commandSource = '---\ndescription: Deploy app\nargument-hint: "[env]"\n---\nDeploy $ARGUMENTS\n';
-
-  it('keeps unedited frontmatter when saving before sync', async () => {
-    const { adapter, repository, settings } = setupClaude('preserve');
+  it('keeps unedited frontmatter under the preserve policy', async () => {
+    const { adapter, repository, settings } = setupScopedRoot('preserve');
     addSkillWithTools(adapter);
     await settings.refresh();
 
@@ -240,8 +235,8 @@ describe('AgentSkillSettings with Claude commands and frontmatter policies', () 
     expect((await repository.list()).skills[0].frontmatter).toMatchObject({ 'allowed-tools': ['Read'] });
   });
 
-  it('warns and removes other frontmatter when saving after sync', async () => {
-    const { adapter, repository, settings } = setupClaude('portable');
+  it('warns and removes other frontmatter under the portable policy', async () => {
+    const { adapter, repository, settings } = setupScopedRoot('portable');
     addSkillWithTools(adapter);
     await settings.refresh();
 
@@ -253,76 +248,5 @@ describe('AgentSkillSettings with Claude commands and frontmatter policies', () 
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect((await repository.list()).skills[0].frontmatter).toEqual({ name: 'reviewer', description: 'Reviews' });
-  });
-
-  it('lists commands and converts one into a skill that keeps its frontmatter before sync', async () => {
-    const { adapter, repository, commands, settings } = setupClaude('preserve');
-    adapter.addFolder(`${CLAUDE_COMMANDS_ROOT}/ops`);
-    adapter.addFile(`${CLAUDE_COMMANDS_ROOT}/ops/Deploy.md`, commandSource);
-    await settings.refresh();
-
-    expect(screen.getByText('/ops/Deploy')).toBeTruthy();
-    expect((await axe(document.querySelector('main')!)).violations).toEqual([]);
-    fireEvent.click(screen.getByRole('button', { name: t('settings.skills.commands.convert') }));
-    const dialog = screen.getByRole('dialog');
-    const name = within(dialog).getByRole('textbox', { name: t('settings.agentSkills.modal.name') }) as HTMLInputElement;
-    expect(name.value).toBe('ops-deploy');
-    save(dialog);
-
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    const [skill] = (await repository.list()).skills;
-    expect(skill).toMatchObject({ name: 'ops-deploy', description: 'Deploy app', instructions: 'Deploy $ARGUMENTS' });
-    expect(skill.frontmatter).toMatchObject({ 'argument-hint': '[env]' });
-    expect((await commands.list()).commands).toEqual([]);
-    expect(adapter.trashed).toEqual([`${CLAUDE_COMMANDS_ROOT}/ops/Deploy.md`]);
-    await waitFor(() => expect(screen.queryByText('/ops/Deploy')).toBeNull());
-    expect(screen.getByText('ops-deploy')).toBeTruthy();
-  });
-
-  it('strips command frontmatter when converting after sync', async () => {
-    const { adapter, repository, settings } = setupClaude('portable');
-    adapter.addFile(`${CLAUDE_COMMANDS_ROOT}/deploy.md`, commandSource);
-    await settings.refresh();
-
-    fireEvent.click(screen.getByRole('button', { name: t('settings.skills.commands.convert') }));
-    const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getByText(/argument-hint/)).toBeTruthy();
-    save(dialog);
-
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect((await repository.list()).skills[0].frontmatter).toEqual({ name: 'deploy', description: 'Deploy app' });
-  });
-
-  it('keeps the command when conversion collides with an existing skill', async () => {
-    const { adapter, commands, settings } = setupClaude('preserve');
-    addSkillWithTools(adapter);
-    adapter.addFile(`${CLAUDE_COMMANDS_ROOT}/reviewer.md`, commandSource);
-    await settings.refresh();
-
-    fireEvent.click(screen.getByRole('button', { name: t('settings.skills.commands.convert') }));
-    const dialog = screen.getByRole('dialog');
-    save(dialog);
-
-    await waitFor(() => expect(Notice).toHaveBeenCalledWith('A skill named "reviewer" already exists.'));
-    expect(screen.getByRole('dialog')).toBe(dialog);
-    expect((await commands.list()).commands.map(command => command.name)).toEqual(['reviewer']);
-  });
-
-  it('edits a command description without touching its other frontmatter before sync', async () => {
-    const { adapter, commands, settings } = setupClaude('preserve');
-    adapter.addFile(`${CLAUDE_COMMANDS_ROOT}/deploy.md`, commandSource);
-    await settings.refresh();
-
-    fireEvent.click(screen.getAllByRole('button', { name: t('common.edit') })[0]);
-    const dialog = screen.getByRole('dialog');
-    fireEvent.input(
-      within(dialog).getByRole('textbox', { name: t('settings.agentSkills.modal.description') }),
-      { target: { value: 'Ship it' } },
-    );
-    save(dialog);
-
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    const [command] = (await commands.list()).commands;
-    expect(command.frontmatter).toEqual({ description: 'Ship it', 'argument-hint': '[env]' });
   });
 });
