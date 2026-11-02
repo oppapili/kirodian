@@ -5,7 +5,7 @@ import { Notice, TFile, TFolder } from 'obsidian';
 import type { ConversationRepository } from '@/app/conversations/ConversationRepository';
 import { SessionSnapshotStore } from '@/app/conversations/SessionSnapshotStore';
 import { PinnedLinkedContentPathCoordinator } from '@/app/settings/PinnedLinkedContentPathCoordinator';
-import { ConversationPersistenceStore } from '@/app/storage/ConversationPersistenceStore';
+import type { ConversationPersistenceStore } from '@/app/storage/ConversationPersistenceStore';
 import type { SessionMetadataReadResult } from '@/app/storage/SessionStorage';
 import { SessionStorage } from '@/app/storage/SessionStorage';
 import { SharedStorageService } from '@/app/storage/SharedStorageService';
@@ -16,9 +16,7 @@ import { getInstallationKey as getHostnameKey } from '@/core/device/Installation
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
-import { isVersionedRuntimeInputFingerprint } from '@/core/providers/settings/RuntimeInputFingerprint';
-import { TOOL_SUBAGENT } from '@/core/tools/toolNames';
-import { type ClaudianSettings, type Conversation, type SessionMetadata, VIEW_TYPE_CLAUDIAN } from '@/core/types';
+import { type ClaudianSettings, type SessionMetadata, VIEW_TYPE_CLAUDIAN } from '@/core/types';
 import { ZenModeController } from '@/features/chat/zen/ZenModeController';
 import { computeKiroEnvironmentHash } from '@/providers/kiro/env/KiroSettingsReconciler';
 import {
@@ -117,11 +115,6 @@ describe('ClaudianPlugin', () => {
 
   function repositoryOf(target: ClaudianPlugin = plugin): ConversationRepository {
     return chatHostOf(target).executionPersistence;
-  }
-
-  /** The runtime settings coordinator wired into the plugin's session metadata loader. */
-  function runtimeSettingsOf(target: ClaudianPlugin = plugin): any {
-    return (target as any).sessionMetadata.options.runtimeSettings;
   }
 
   function getConversationPersistence(

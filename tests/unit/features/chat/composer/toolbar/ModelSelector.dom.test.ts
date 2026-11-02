@@ -6,8 +6,8 @@ import { fireEvent, within } from '@testing-library/dom';
 
 import { ModelSelector } from '@/features/chat/composer/toolbar/ModelSelector';
 import type { ToolbarCallbacks } from '@/features/chat/composer/toolbar/types';
-import { kiroChatUIConfig } from '@/providers/kiro/ui/KiroChatUIConfig';
 import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
+import { kiroChatUIConfig } from '@/providers/kiro/ui/KiroChatUIConfig';
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };

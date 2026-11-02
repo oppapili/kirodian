@@ -18,13 +18,13 @@ import { formatReasoningValueLabel } from '@/core/providers/reasoning';
 import type { ProviderId } from '@/core/providers/types';
 import type { ClaudianSettings, Conversation } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
-import { updateCurrentKiroCatalog } from '@/providers/kiro/settings';
 import { getChatSettingsSnapshot } from '@/features/chat/ChatSettings';
 import { destroyTab } from '@/features/chat/tabs/TabLifecycle';
 import { updateTabProviderSettings } from '@/features/chat/tabs/tabProviderSettings';
 import { refreshTabProviderUI } from '@/features/chat/tabs/tabProviderUI';
 import { createTabRuntime } from '@/features/chat/tabs/TabRuntimeFactory';
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
+import { updateCurrentKiroCatalog } from '@/providers/kiro/settings';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
 const originalResizeObserver = globalThis.ResizeObserver;

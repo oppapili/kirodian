@@ -1,10 +1,10 @@
 /** @jest-environment jsdom */
 
+import type { ProviderIconSvg } from '@/core/providers/types';
 import {
   createProviderIconSvg,
   KIRO_PROVIDER_ICON,
 } from '@/shared/icons';
-import type { ProviderIconSvg } from '@/core/providers/types';
 
 // A path-based icon fixture. Kiro's icon is composite, so a local fixture keeps
 // coverage of the single-path rendering branch independent of any provider.
