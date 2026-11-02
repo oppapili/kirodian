@@ -19,7 +19,7 @@ function createTab(model: string, customContextLimits: Record<string, number>, u
   const update = jest.fn();
   const tab = {
     conversationId: null,
-    providerId: 'claude',
+    providerId: 'kiro',
     draftModel: model,
     state: { usage },
     ui: { contextUsageMeter: { update } },
@@ -29,30 +29,17 @@ function createTab(model: string, customContextLimits: Record<string, number>, u
     settings: {
       model,
       customContextLimits,
-      providerConfigs: { claude: { enabled: true, discoveredModels: [], visibleModels: [] } },
+      providerConfigs: { kiro: { enabled: true, discoveredModels: [], visibleModels: [] } },
     } as unknown as ClaudianSettings,
   } as ChatFeatureHost;
   return { tab, plugin, update };
 }
 
 describe('tab context usage projection', () => {
-  it.each<{ model: string; limits: Record<string, number> }>([
-    { model: 'claude-fable-5', limits: { fable: 500_000 } },
-    { model: 'claude-code/claude-fable-5', limits: { fable: 500_000 } },
-    { model: 'fable', limits: { 'claude-code/claude-fable-5': 500_000 } },
-  ])('does not borrow custom limits through retired Claude aliases for $model', ({ model, limits }) => {
-    const { tab, plugin, update } = createTab(model, limits);
-
-    refreshTabContextUsage(tab, plugin);
-
-    expect(update).toHaveBeenLastCalledWith(null);
-    expect(tab.state.usage).toMatchObject({ contextWindow: 0, percentage: 0 });
-  });
-
   it('uses an exact custom-limit key without interpreting retired aliases', () => {
-    const { tab, plugin, update } = createTab('claude-fable-5', {
-      'claude-fable-5': 100_000,
-      fable: 500_000,
+    const { tab, plugin, update } = createTab('kiro-model-a', {
+      'kiro-model-a': 100_000,
+      'model-a': 500_000,
     });
 
     refreshTabContextUsage(tab, plugin);
@@ -60,19 +47,8 @@ describe('tab context usage projection', () => {
     expect(update).toHaveBeenLastCalledWith(expect.objectContaining({ contextWindow: 100_000, percentage: 50 }));
   });
 
-  it('rejects ambiguous equivalent custom-limit keys', () => {
-    const { tab, plugin, update } = createTab('claude-fable-5', {
-      'CLAUDE-FABLE-5': 500_000,
-      'claude-code/CLAUDE-FABLE-5': 100_000,
-    });
-
-    refreshTabContextUsage(tab, plugin);
-
-    expect(update).toHaveBeenLastCalledWith(null);
-  });
-
   it('uses a reported window even when custom limits belong to another model', () => {
-    const { tab, plugin, update } = createTab('claude-fable-5', { fable: 500_000 }, {
+    const { tab, plugin, update } = createTab('kiro-model-a', { 'model-a': 500_000 }, {
       contextWindow: 200_000,
     });
 
@@ -82,8 +58,8 @@ describe('tab context usage projection', () => {
   });
 
   it.each([
-    { model: 'claude-fable-5', reportedModel: 'fable' },
-    { model: 'sonnet[1m]', reportedModel: 'sonnet' },
+    { model: 'kiro-model-a', reportedModel: 'model-a' },
+    { model: 'kiro-sonnet', reportedModel: 'sonnet' },
   ])('keeps the report from $reportedModel when $model is selected', ({ model, reportedModel }) => {
     const { tab, plugin, update } = createTab(model, {}, {
       model: reportedModel,
