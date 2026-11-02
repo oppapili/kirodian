@@ -26,7 +26,7 @@ function createTab(model: string, customContextLimits: Record<string, number>, u
     state: { usage },
     ui: { contextUsageMeter: { update } },
   } as unknown as AssembledTabRuntime;
-  Object.assign(tab, { session: createTabSession({ id: 'test', lifecycleState: 'open', conversationId: null, providerId: 'claude', draftModel: model }, {} as never) });
+  Object.assign(tab, { session: createTabSession({ id: 'test', lifecycleState: 'open', conversationId: null, providerId: 'kiro', draftModel: model }, {} as never) });
   const plugin = {
     getCommittedSettings: () => plugin.settings,
     settings: {

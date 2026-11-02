@@ -315,9 +315,16 @@ test('context controls read detached metadata without copying the transcript', a
   const fullRead = jest.spyOn(repository, 'getSync');
   const summaryRead = jest.spyOn(repository, 'getSummary');
   const update = jest.fn();
+  // The merged refresh reads the tab's settings through its session runtime identity,
+  // so give the fake session a runtime carrying the same conversation/provider identity.
+  const runtime = {
+    conversationId: conversation.id, providerId: 'kiro', draftModel: null,
+    reasoningSelections: new Map(), providerSelections: new Map(),
+    identityRevision: 0, admitsConversationOperations: true,
+  };
   const tab = {
     conversationId: conversation.id, providerId: 'kiro', draftModel: null,
-    session: { reasoningSelections: new Map() },
+    session: { runtime, reasoningSelections: new Map() },
     state: { usage: { model: 'sonnet', contextTokens: 50_000, inputTokens: 50_000 } },
     ui: { contextUsageMeter: { update } },
   } as unknown as AssembledTabRuntime;

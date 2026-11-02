@@ -534,12 +534,12 @@ describe('ViewerSlot', () => {
       const { manager } = createManager(conversationPlugin(), {}, {}, { showsPreviews: () => true });
 
       await manager.restoreState({
-        openTabs: [{ tabId: 'draft', conversationId: null, draftModel: 'codex:gpt-5', providerId: 'codex' }],
+        openTabs: [{ tabId: 'draft', conversationId: null, draftModel: 'kiro:sonnet', providerId: 'kiro' }],
         activeTabId: 'draft',
       });
 
       const preview = manager.getActiveTab()!;
-      expect([preview.lifecycleState, preview.draftModel, preview.providerId]).toEqual(['provisional', 'codex:gpt-5', 'codex']);
+      expect([preview.lifecycleState, preview.draftModel, preview.providerId]).toEqual(['provisional', 'kiro:sonnet', 'kiro']);
     });
 
     it('keeps unsent text with a draft session that creates its conversation while unloaded', async () => {

@@ -108,13 +108,13 @@ it.each([false, true])('collapses completed history above the answer and puts co
 
 it('keeps live and finalized thinking accessible without hover tooltip attributes', async () => {
   const host = document.body.createDiv();
-  const state = createThinkingBlock(host);
+  const state = createThinkingBlock(host, { startTime: testDate().getTime() });
   const header = within(host).getByRole('button', { name: 'Thinking 0s...' });
   expect(header.hasAttribute('aria-label')).toBe(false);
   expect(header.hasAttribute('title')).toBe(false);
   fireEvent.keyDown(header, { key: ' ' });
   expect(header.getAttribute('aria-expanded')).toBe('true');
-  finalizeThinkingBlock(state);
+  finalizeThinkingBlock(state, 3);
   expect(within(host).getByRole('button', { name: /^Thought for \d+s$/ })).toBe(header);
   expect(header.getAttribute('aria-expanded')).toBe('false');
   expect((await axe(host)).violations).toEqual([]);

@@ -73,7 +73,7 @@ it.each([false, true])('collapses work across compaction on completion and reloa
     await stream.handleStreamChunk({ type: 'tool_use', id: 'before', name: 'Read', input: { file_path: 'before.md' } }, response);
     await stream.handleStreamChunk({ type: 'tool_result', id: 'before', content: 'Before compaction' }, response);
     await stream.handleStreamChunk({ type: 'context_compacted' }, response);
-    if (notification) renderSessionTaskNotification({ state, renderer, isConnected: () => true,
+    if (notification) renderSessionTaskNotification({ state, renderer,
       createMessageId: () => 'notification' }, 'Task finished.');
     const tool = { type: 'tool_use' as const, id: 'after', name: 'Read', input: { file_path: 'after.md' } };
     response = await continueResponseAfterNotification({ state, renderer, stream, createMessageId: () => 'continuation' }, response, tool);
@@ -107,7 +107,7 @@ it('does not recreate a response after its conversation is cleared during finali
     state.addMessage(original);
     state.currentContentEl = renderer.addMessage(original).querySelector('.claudian-message-content');
     await stream.handleStreamChunk({ type: 'text', content: 'Earlier text.' }, original);
-    renderSessionTaskNotification({ state, renderer, isConnected: () => true, createMessageId: () => 'notification' }, 'Task finished.');
+    renderSessionTaskNotification({ state, renderer, createMessageId: () => 'notification' }, 'Task finished.');
     const pending = continueResponseAfterNotification({ state, renderer, stream, createMessageId: () => 'continuation' }, original, { type: 'text', content: 'Later text.' });
     state.clearMessages();
     messagesEl.replaceChildren();

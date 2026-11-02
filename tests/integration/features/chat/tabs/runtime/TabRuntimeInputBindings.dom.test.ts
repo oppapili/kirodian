@@ -85,7 +85,7 @@ async function streamText(): Promise<void> {
 
 it('routes Escape through the selected main session for published jobs-only work', async () => {
   await releaseResponse();
-  await tab.executionCoordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+  await tab.executionCoordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'kiro' });
   await tab.executionCoordinator.prepare();
   const native = harness.backend.latest;
   let working = true;
@@ -117,7 +117,7 @@ it('routes Escape through the selected main session for published jobs-only work
 
 it('stops main background work with Escape without aborting a settling foreground turn', async () => {
   await releaseResponse();
-  await tab.executionCoordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+  await tab.executionCoordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'kiro' });
   await tab.executionCoordinator.prepare();
   const native = harness.backend.latest;
   Object.assign(native, { hasBackgroundWork: () => true });
@@ -154,7 +154,7 @@ it.each([false, true])('routes Escape to a working side chat when main backgroun
     { id: 'u1', role: 'user', content: 'Remember A', timestamp: 1 },
     { id: 'a1', role: 'assistant', content: 'Noted A', timestamp: 2, assistantMessageId: 'checkpoint-1' },
   ];
-  await tab.executionCoordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+  await tab.executionCoordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'kiro' });
   await tab.executionCoordinator.prepare();
   const mainNative = harness.backend.latest;
   Object.assign(mainNative, { hasBackgroundWork: () => mainBackground });
@@ -273,7 +273,7 @@ it.each([
   await releaseResponse();
   jest.useRealTimers();
   expect(tab.session.turns.isActive).toBe(false);
-  await tab.executionCoordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+  await tab.executionCoordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'kiro' });
   await tab.executionCoordinator.prepare();
   const native = harness.backend.latest;
   Object.assign(native, { hasBackgroundWork: () => true });

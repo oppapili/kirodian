@@ -1,14 +1,14 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
-import { createTestTabSession } from '@test/helpers/ConversationPorts';
+import { createTestSession } from '@test/helpers/ConversationPorts';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
 import { Component } from 'obsidian';
 
 import type { ChatMessage } from '@/core/types';
 import { InputController, type InputControllerDeps } from '@/features/chat/input/InputController';
-import { InlineInteractionPrompts } from '@/features/chat/interactions/InlineInteractionPrompts';
+import { SessionInteractions } from '@/features/chat/interactions/SessionInteractions';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 import { ChatState } from '@/features/chat/state/ChatState';
 import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
@@ -35,7 +35,7 @@ function createSurface() {
   const composer = composerHost.createDiv();
   const draft = composer.createEl('textarea');
   draft.value = 'Unsent draft';
-  const session = createTestTabSession();
+  const session = createTestSession();
   const state = new ChatState({}, undefined, session.turns);
   state.currentConversationId = 'conversation';
   const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
@@ -45,7 +45,7 @@ function createSurface() {
     updateQueueIndicator: () => undefined, onQuestionToolChanged: tool => input.updateAsyncQuestion(tool),
   });
   const input = new InputController({ state, renderer, streamController: stream, session,
-    inlinePrompts: new InlineInteractionPrompts({
+    inlinePrompts: new SessionInteractions({
       getPromptParentEl: () => composerHost,
       getSuppressedEl: () => composer,
     }),

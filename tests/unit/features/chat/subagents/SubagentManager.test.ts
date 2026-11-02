@@ -43,9 +43,9 @@ describe('SubagentManager', () => {
       expect(result).toBeNull();
     });
 
-    it('returns null for unknown tool id in renderPendingTask', () => {
+    it('returns null for unknown tool id in resolvePendingTask', () => {
       const manager = new SubagentManager(() => {});
-      const result = manager.renderPendingTask('unknown-id', createMockEl());
+      const result = manager.resolvePendingTask('unknown-id', createMockEl());
       expect(result).toBeNull();
     });
 
