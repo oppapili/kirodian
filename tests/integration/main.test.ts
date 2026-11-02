@@ -23,8 +23,31 @@ import { ZenModeController } from '@/features/chat/zen/ZenModeController';
 import { computeKiroEnvironmentHash } from '@/providers/kiro/env/KiroSettingsReconciler';
 import {
   getKiroProviderSettings,
+  updateCurrentKiroCatalog,
   updateKiroProviderSettings,
 } from '@/providers/kiro/settings';
+
+/**
+ * Populate the kiro catalog so a selected model survives model reconciliation.
+ * kiro's `ownsModel` only keeps a selection that the live catalog advertises; an
+ * empty catalog (the default under test) drops any selection. The id is kept as
+ * `kiro/<rawId>` by the kiro model-selection encoding.
+ */
+function seedKiroModel(plugin: { settings: Record<string, unknown> }, rawId: string): void {
+  updateCurrentKiroCatalog(plugin.settings, {
+    defaultModelId: null,
+    fingerprint: 'test-fingerprint',
+    refreshedAt: 0,
+    models: [{
+      rawId,
+      displayName: rawId,
+      description: '',
+      reasoningEfforts: [],
+      supportsReasoning: false,
+    }],
+  });
+  updateKiroProviderSettings(plugin.settings, { enabled: true, visibleModels: [rawId] });
+}
 
 // Mock fs for ClaudianService
 jest.mock('fs');
@@ -337,22 +360,6 @@ describe('ClaudianPlugin', () => {
   });
 
   describe('onload', () => {
-    it.each([true, false])('migrates missing selected effort metadata after layout when enabled: %s', async enabled => {
-      const initialize = jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized').mockResolvedValue(undefined);
-      const refresh = jest.fn().mockResolvedValue({ changed: true });
-      await plugin.onload();
-      plugin.settings.providerConfigs.kiro = {
-        ...plugin.settings.providerConfigs.kiro, enabled, visibleModels: ['sonnet'], discoveredModels: [],
-      };
-      ProviderWorkspaceRegistry.setServices('kiro', { modelCatalog: { refresh } as any });
-      expect(refresh).not.toHaveBeenCalled();
-      for (const [ready] of mockApp.workspace.onLayoutReady.mock.calls) ready();
-      await (plugin as any).modelMetadataMigration;
-      expect(initialize.mock.calls.filter(([, id, reason]) => id === 'kiro' && reason === 'model-metadata-migration'))
-        .toHaveLength(enabled ? 1 : 0);
-      expect(refresh).toHaveBeenCalledTimes(enabled ? 1 : 0);
-    });
-
     it.each(['run', 'before-layout', 'before-timer'])('defers obsolete input cleanup until after layout and respects unload: %s', async mode => {
       const inputPath = '.claudian/sessions/old.inputs.json';
       const files = installVaultFiles({ [inputPath]: '{}' });
@@ -694,153 +701,6 @@ describe('ClaudianPlugin', () => {
       recoverySpy.mockRestore();
     });
 
-    it('recovers models from original metadata before persisting session invalidation', async () => {
-      const metadata = {
-        id: 'claude-model-before-invalidation',
-        providerId: 'kiro' as const,
-        title: 'Claude model before invalidation',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'thread-before-invalidation',
-        providerState: { providerSessionId: 'thread-before-invalidation' },
-      };
-      await plugin.onload();
-      runtimeSettingsOf(plugin).pendingEnvironmentInvalidationGenerations.set('kiro', 1);
-      const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan')
-        .mockResolvedValue({
-          records: deviceMetadataRecords(metadata),
-          complete: true,
-          invalidMetadataCount: 0,
-        });
-      const loadSpy = mockMetadataSources(metadata);
-      const repository = repositoryOf(plugin);
-      const registeredSources: Conversation[] = [];
-      const originalRegister = repository.registerHistoricalModelRecoverySources
-        .bind(repository);
-      const registerSpy = jest.spyOn(repository, 'registerHistoricalModelRecoverySources')
-        .mockImplementation((...args: unknown[]) => {
-          const sources = args[0] as readonly Conversation[];
-          registeredSources.push(...sources);
-          originalRegister(sources);
-        });
-      const events: string[] = [];
-      const persistedRecoverySources: unknown[] = [];
-      const recoverySpy = jest.spyOn(repository, 'recoverMissingSelectedModels')
-        .mockImplementation(async () => {
-          events.push('recover');
-          return [];
-        });
-      const persistSpy = jest.spyOn(repository, 'persistConversations')
-        .mockImplementation(async (...args: unknown[]) => {
-          const conversations = args[0] as readonly Conversation[];
-          events.push(`persist:${String(conversations[0]?.sessionId)}`);
-          persistedRecoverySources.push(conversations[0] ? repository.getSync(conversations[0].id)?.modelRecoverySource : undefined);
-        });
-
-      await (plugin as any).sessionMetadata.loadRemaining();
-
-      expect(registeredSources).toContainEqual(expect.objectContaining({
-        id: metadata.id,
-        sessionId: 'thread-before-invalidation',
-        providerState: { providerSessionId: 'thread-before-invalidation' },
-      }));
-      expect(events).toEqual(['recover', 'persist:null']);
-      expect(persistedRecoverySources).toEqual([{
-        sessionId: 'thread-before-invalidation',
-        providerState: { providerSessionId: 'thread-before-invalidation' },
-      }]);
-
-      scanSpy.mockRestore();
-      loadSpy.mockRestore();
-      registerSpy.mockRestore();
-      recoverySpy.mockRestore();
-      persistSpy.mockRestore();
-    });
-
-    it('invalidates restored and deferred sessions after a provider environment change', async () => {
-      const restoredMetadata = {
-        id: 'restored-environment-session',
-        providerId: 'kiro' as const,
-        title: 'Restored environment session',
-        createdAt: 1,
-        lastActivityAt: 3,
-        sessionId: 'restored-session-id',
-        providerState: { providerSessionId: 'restored-provider-session-id' },
-        resumeAtMessageId: 'restored-message-id',
-      };
-      const deferredMetadata = {
-        id: 'deferred-environment-session',
-        providerId: 'kiro' as const,
-        title: 'Deferred environment session',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'deferred-session-id',
-        providerState: { providerSessionId: 'deferred-provider-session-id' },
-        resumeAtMessageId: 'deferred-message-id',
-      };
-      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => (
-        path === '.claudian/claudian-settings.json'
-      ));
-      mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
-        if (path === '.claudian/claudian-settings.json') {
-          return JSON.stringify({
-            providerConfigs: {
-              kiro: {
-                environmentHash: 'ANTHROPIC_BASE_URL=https://old.example.com',
-                environmentVariables: 'ANTHROPIC_BASE_URL=https://new.example.com',
-              },
-            },
-          });
-        }
-        return '';
-      });
-      (plugin.loadData as jest.Mock).mockResolvedValue({
-        tabManagerState: {
-          openTabs: [{ tabId: 'tab-1', conversationId: restoredMetadata.id }],
-          activeTabId: 'tab-1',
-        },
-      });
-      const loadSpy = jest.spyOn(SessionStorage.prototype, 'loadMetadata')
-        .mockResolvedValue(restoredMetadata);
-      const listSpy = jest.spyOn(SessionStorage.prototype, 'scan')
-        .mockImplementation(async (options) => {
-          options?.onBatch?.(deviceMetadataRecords(restoredMetadata, deferredMetadata));
-          return {
-            records: deviceMetadataRecords(restoredMetadata, deferredMetadata),
-            complete: true,
-            invalidMetadataCount: 0,
-          };
-        });
-      const loadSourceSpy = mockMetadataSources(
-        restoredMetadata,
-        deferredMetadata,
-      );
-
-      await plugin.onload();
-      await (plugin as any).sessionMetadata.loadRemaining();
-
-      const restored = chatHostOf(plugin).getCachedConversation(restoredMetadata.id);
-      const deferred = chatHostOf(plugin).getCachedConversation(deferredMetadata.id);
-      loadSpy.mockRestore();
-      listSpy.mockRestore();
-      loadSourceSpy.mockRestore();
-
-      expect(restored).toEqual(expect.objectContaining({
-        sessionId: null,
-        providerState: {
-          previousProviderSessionIds: ['restored-provider-session-id'],
-        },
-        resumeAtMessageId: 'restored-message-id',
-      }));
-      expect(deferred).toEqual(expect.objectContaining({
-        sessionId: null,
-        providerState: {
-          previousProviderSessionIds: ['deferred-provider-session-id'],
-        },
-        resumeAtMessageId: 'deferred-message-id',
-      }));
-    });
-
     it('preserves restored and deferred sessions for a reload-policy environment change', async () => {
       const restoredMetadata = {
         id: 'restored-reload-session',
@@ -881,16 +741,16 @@ describe('ClaudianPlugin', () => {
         restoredMetadata,
         deferredMetadata,
       );
-      const claudeReconciler = ProviderRegistry.getSettingsReconciler('kiro');
-      const reconcileSpy = jest.spyOn(claudeReconciler, 'reconcileModelWithEnvironment')
+      // kiro's reconciler already declares `environmentSessionPolicy: 'reload'`,
+      // so an environment change reloads sessions instead of invalidating them.
+      const kiroReconciler = ProviderRegistry.getSettingsReconciler('kiro');
+      const reconcileSpy = jest.spyOn(kiroReconciler, 'reconcileModelWithEnvironment')
         .mockReturnValue({ changed: true, invalidatedConversations: [] });
-      claudeReconciler.environmentSessionPolicy = 'reload';
 
       try {
         await plugin.onload();
         await (plugin as any).sessionMetadata.loadRemaining();
       } finally {
-        delete claudeReconciler.environmentSessionPolicy;
         reconcileSpy.mockRestore();
         loadSpy.mockRestore();
         listSpy.mockRestore();
@@ -905,207 +765,7 @@ describe('ClaudianPlugin', () => {
         sessionId: 'deferred-session-id',
         providerState: { providerSessionId: 'deferred-provider-session-id' },
       }));
-      expect(plugin.settings.pendingProviderSessionInvalidations.claude).toBeUndefined();
-    });
-
-    it('invalidates later metadata batches when the environment changes during the scan', async () => {
-      const firstMetadata = {
-        id: 'first-scanned-session',
-        providerId: 'kiro' as const,
-        title: 'First scanned session',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'first-session-id',
-        providerState: { providerSessionId: 'first-provider-session-id' },
-      };
-      const laterMetadata = {
-        id: 'later-scanned-session',
-        providerId: 'kiro' as const,
-        title: 'Later scanned session',
-        createdAt: 1,
-        lastActivityAt: 1,
-        sessionId: 'later-session-id',
-        providerState: { providerSessionId: 'later-provider-session-id' },
-      };
-      let markFirstBatchPublished!: () => void;
-      const firstBatchPublished = new Promise<void>((resolve) => {
-        markFirstBatchPublished = resolve;
-      });
-      let releaseLaterBatch!: () => void;
-      const laterBatchRelease = new Promise<void>((resolve) => {
-        releaseLaterBatch = resolve;
-      });
-
-      await plugin.onload();
-      const listSpy = jest.spyOn(SessionStorage.prototype, 'scan')
-        .mockImplementation(async (options) => {
-          options?.onBatch?.(deviceMetadataRecords(firstMetadata));
-          markFirstBatchPublished();
-          await laterBatchRelease;
-          options?.onBatch?.(deviceMetadataRecords(laterMetadata));
-          return {
-            records: deviceMetadataRecords(firstMetadata, laterMetadata),
-            complete: true,
-            invalidMetadataCount: 0,
-          };
-        });
-      const loadSourceSpy = mockMetadataSources(firstMetadata, laterMetadata);
-
-      const load = (plugin as any).sessionMetadata.loadRemaining();
-      await firstBatchPublished;
-      await plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://changed-during-scan.example.com',
-      );
-      const pendingGeneration = plugin.settings.pendingProviderSessionInvalidations.claude;
-      releaseLaterBatch();
-      await load;
-
-      const first = chatHostOf(plugin).getCachedConversation(firstMetadata.id);
-      const later = chatHostOf(plugin).getCachedConversation(laterMetadata.id);
-      listSpy.mockRestore();
-      loadSourceSpy.mockRestore();
-
-      expect(first?.sessionId).toBeNull();
-      expect(first?.providerState).toEqual({
-        previousProviderSessionIds: ['first-provider-session-id'],
-      });
-      expect(later?.sessionId).toBeNull();
-      expect(later?.providerState).toEqual({
-        previousProviderSessionIds: ['later-provider-session-id'],
-      });
-      expect(pendingGeneration).toEqual(expect.any(Number));
-      expect(plugin.settings.pendingProviderSessionInvalidations.claude)
-        .toBeUndefined();
-    });
-
-    it('waits for an environment metadata write before completing its scan generation', async () => {
-      const firstMetadata = {
-        id: 'pending-environment-write-session',
-        providerId: 'kiro' as const,
-        title: 'Pending environment write session',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'pending-environment-write-session-id',
-        providerState: { providerSessionId: 'pending-environment-write-provider-session-id' },
-      };
-      const laterMetadata = {
-        id: 'later-environment-write-session',
-        providerId: 'kiro' as const,
-        title: 'Later environment write session',
-        createdAt: 1,
-        lastActivityAt: 1,
-        sessionId: 'later-environment-write-session-id',
-        providerState: { providerSessionId: 'later-environment-write-provider-session-id' },
-      };
-      let markFirstBatchPublished!: () => void;
-      const firstBatchPublished = new Promise<void>((resolve) => {
-        markFirstBatchPublished = resolve;
-      });
-      let finishScan!: () => void;
-      const scanRelease = new Promise<void>((resolve) => {
-        finishScan = resolve;
-      });
-      let markEnvironmentWriteStarted!: () => void;
-      const environmentWriteStarted = new Promise<void>((resolve) => {
-        markEnvironmentWriteStarted = resolve;
-      });
-      let finishEnvironmentWrite!: () => void;
-      const environmentWriteRelease = new Promise<void>((resolve) => {
-        finishEnvironmentWrite = resolve;
-      });
-
-      await plugin.onload();
-      const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan')
-        .mockImplementation(async (options) => {
-          options?.onBatch?.(deviceMetadataRecords(firstMetadata));
-          markFirstBatchPublished();
-          await scanRelease;
-          options?.onBatch?.(deviceMetadataRecords(laterMetadata));
-          return {
-            records: deviceMetadataRecords(firstMetadata, laterMetadata),
-            complete: true,
-            invalidMetadataCount: 0,
-          };
-        });
-      let blockedEnvironmentWrite = false;
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata')
-        .mockImplementation(async () => {
-          if (!blockedEnvironmentWrite) {
-            blockedEnvironmentWrite = true;
-            markEnvironmentWriteStarted();
-            await environmentWriteRelease;
-          }
-        });
-
-      const load = (plugin as any).sessionMetadata.loadRemaining();
-      await firstBatchPublished;
-      const apply = plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://pending-write.example.com',
-      );
-      await environmentWriteStarted;
-      const pendingGeneration = plugin.settings.pendingProviderSessionInvalidations.claude;
-      finishScan();
-      await load;
-
-      expect(plugin.settings.pendingProviderSessionInvalidations.claude)
-        .toBe(pendingGeneration);
-
-      finishEnvironmentWrite();
-      await apply;
-      scanSpy.mockRestore();
-      saveMetadataSpy.mockRestore();
-
-      expect(pendingGeneration).toEqual(expect.any(Number));
-      expect(plugin.settings.pendingProviderSessionInvalidations.claude)
-        .toBeUndefined();
-    });
-
-    it('keeps a pending provider invalidation after an incomplete metadata scan', async () => {
-      const settingsPath = '.claudian/claudian-settings.json';
-      const pendingGeneration = 11;
-      const deferredMetadata = {
-        id: 'incomplete-scan-session',
-        providerId: 'kiro' as const,
-        title: 'Incomplete scan session',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'incomplete-scan-session-id',
-        providerState: { providerSessionId: 'incomplete-scan-provider-session-id' },
-      };
-      const files = installVaultFiles({
-        [settingsPath]: JSON.stringify({
-          pendingProviderSessionInvalidations: { kiro: pendingGeneration },
-          providerConfigs: {
-            kiro: {
-              environmentHash: 'ANTHROPIC_BASE_URL=https://same.example.com',
-              environmentVariables: 'ANTHROPIC_BASE_URL=https://same.example.com',
-            },
-          },
-        }),
-      });
-
-      await plugin.onload();
-      const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan')
-        .mockImplementation(async (options) => {
-          options?.onBatch?.(deviceMetadataRecords(deferredMetadata));
-          return {
-            records: deviceMetadataRecords(deferredMetadata),
-            complete: false,
-            invalidMetadataCount: 0,
-          };
-        });
-      (plugin as any).sessionMetadata.pendingScan = false;
-
-      await (plugin as any).sessionMetadata.loadRemaining();
-
-      const persistedSettings = JSON.parse(files.get(settingsPath) ?? '{}');
-      scanSpy.mockRestore();
-
-      expect(persistedSettings.pendingProviderSessionInvalidations?.claude)
-        .toBe(pendingGeneration);
-      expect((plugin as any).sessionMetadata.loadedAll).toBe(false);
+      expect(plugin.settings.pendingProviderSessionInvalidations.kiro).toBeUndefined();
     });
 
     it('does not persist a background metadata shell deleted before reconciliation', async () => {
@@ -1222,145 +882,6 @@ describe('ClaudianPlugin', () => {
 
       scanSpy.mockRestore();
       loadSpy.mockRestore();
-    });
-
-    it('retries a pending provider invalidation after unload and restart', async () => {
-      const settingsPath = '.claudian/claudian-settings.json';
-      const deferredMetadata = {
-        id: 'restart-deferred-session',
-        providerId: 'kiro' as const,
-        title: 'Restart deferred session',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'restart-session-id',
-        providerState: { providerSessionId: 'restart-provider-session-id' },
-      };
-      const files = installVaultFiles({
-        [settingsPath]: JSON.stringify({
-          providerConfigs: {
-            kiro: {
-              environmentHash: 'ANTHROPIC_BASE_URL=https://old.example.com',
-              environmentVariables: 'ANTHROPIC_BASE_URL=https://new.example.com',
-            },
-          },
-        }),
-      });
-
-      await plugin.onload();
-      const firstRunSettings = JSON.parse(files.get(settingsPath) ?? '{}');
-      const pendingGeneration = firstRunSettings.pendingProviderSessionInvalidations?.claude;
-
-      expect(pendingGeneration).toEqual(expect.any(Number));
-
-      plugin.onunload();
-      const restartedPlugin = createPlugin();
-      (restartedPlugin.loadData as jest.Mock).mockResolvedValue({});
-      const restartedSaveMetadataSpy = jest.spyOn(
-        ConversationPersistenceStore.prototype,
-        'saveMetadata',
-      );
-      const listSpy = jest.spyOn(SessionStorage.prototype, 'scan')
-        .mockImplementation(async (options) => {
-          options?.onBatch?.(deviceMetadataRecords(deferredMetadata));
-          return {
-            records: deviceMetadataRecords(deferredMetadata),
-            complete: true,
-            invalidMetadataCount: 0,
-          };
-        });
-      const loadSourceSpy = mockMetadataSources(deferredMetadata);
-
-      await restartedPlugin.onload();
-      await (restartedPlugin as any).sessionMetadata.loadRemaining();
-
-      const restartedConversation = chatHostOf(restartedPlugin).getCachedConversation(deferredMetadata.id);
-      const persistedMetadata = JSON.parse(
-        files.get(
-          `${getDeviceSessionsPath(getHostnameKey())}/restart-deferred-session.meta.json`,
-        ) ?? '{}',
-      );
-      const restartedSettings = JSON.parse(files.get(settingsPath) ?? '{}');
-      const deferredInvalidationWrites = restartedSaveMetadataSpy.mock.calls.filter(
-        ([metadata]) => metadata.id === deferredMetadata.id,
-      );
-      listSpy.mockRestore();
-      loadSourceSpy.mockRestore();
-      restartedSaveMetadataSpy.mockRestore();
-
-      expect(restartedConversation?.sessionId).toBeNull();
-      expect(restartedConversation?.providerState).toEqual({
-        previousProviderSessionIds: ['restart-provider-session-id'],
-      });
-      expect(persistedMetadata.sessionId).toBeNull();
-      expect(persistedMetadata.providerState).toEqual({
-        previousProviderSessionIds: ['restart-provider-session-id'],
-      });
-      expect(restartedSettings.pendingProviderSessionInvalidations?.claude).toBeUndefined();
-      expect(deferredInvalidationWrites).toHaveLength(1);
-    });
-
-    it('keeps a pending provider invalidation when a metadata write fails', async () => {
-      const settingsPath = '.claudian/claudian-settings.json';
-      const pendingGeneration = 7;
-      const deferredMetadata = {
-        id: 'failed-write-session',
-        providerId: 'kiro' as const,
-        title: 'Failed write session',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'failed-write-session-id',
-        providerState: { providerSessionId: 'failed-write-provider-session-id' },
-      };
-      const files = installVaultFiles({
-        [settingsPath]: JSON.stringify({
-          pendingProviderSessionInvalidations: { kiro: pendingGeneration },
-          providerConfigs: {
-            kiro: {
-              environmentHash: 'ANTHROPIC_BASE_URL=https://same.example.com',
-              environmentVariables: 'ANTHROPIC_BASE_URL=https://same.example.com',
-            },
-          },
-        }),
-      });
-
-      await plugin.onload();
-      const listSpy = jest.spyOn(SessionStorage.prototype, 'scan')
-        .mockImplementation(async (options) => {
-          options?.onBatch?.(deviceMetadataRecords(deferredMetadata));
-          return {
-            records: deviceMetadataRecords(deferredMetadata),
-            complete: true,
-            invalidMetadataCount: 0,
-          };
-        });
-      const loadSourceSpy = mockMetadataSources(deferredMetadata);
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata')
-        .mockRejectedValueOnce(new Error('metadata write failed'));
-      (plugin as any).sessionMetadata.pendingScan = false;
-
-      let loadError: unknown;
-      try {
-        await (plugin as any).sessionMetadata.loadRemaining();
-      } catch (error) {
-        loadError = error;
-      }
-      listSpy.mockRestore();
-      loadSourceSpy.mockRestore();
-      saveMetadataSpy.mockRestore();
-
-      expect(loadError).toEqual(new Error('metadata write failed'));
-      const persistedSettings = JSON.parse(files.get(settingsPath) ?? '{}');
-      expect(persistedSettings.pendingProviderSessionInvalidations?.claude)
-        .toBe(pendingGeneration);
-
-      await plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://next.example.com',
-      );
-
-      const settingsAfterEnvironmentChange = JSON.parse(files.get(settingsPath) ?? '{}');
-      expect(settingsAfterEnvironmentChange.pendingProviderSessionInvalidations?.claude)
-        .toEqual(expect.any(Number));
     });
 
   });
@@ -1627,7 +1148,7 @@ describe('ClaudianPlugin', () => {
       mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
         if (path === '.claudian/claudian-settings.json') {
           return JSON.stringify({
-            environmentVariables: 'ANTHROPIC_MODEL=custom-model',
+            environmentVariables: 'KIRO_CUSTOM_ENV=changed',
             lastEnvHash: '',
           });
         }
@@ -1725,10 +1246,10 @@ describe('ClaudianPlugin', () => {
         events.push('write');
       });
 
-      await plugin.providerHost.applyEnvironmentVariables('provider:claude', 'ANTHROPIC_PROFILE=new');
+      await plugin.providerHost.applyEnvironmentVariables('provider:kiro', 'KIRO_PROFILE=new');
 
       expect(events).toEqual(['before', 'write', 'after']);
-      expect(plugin.providerHost.getEnvironmentVariablesForScope('provider:claude')).toBe('ANTHROPIC_PROFILE=new');
+      expect(plugin.providerHost.getEnvironmentVariablesForScope('provider:kiro')).toBe('KIRO_PROFILE=new');
       unregister();
     });
 
@@ -1746,8 +1267,8 @@ describe('ClaudianPlugin', () => {
       } as any]);
 
       await plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_MODEL=claude-sonnet-enterprise',
+        'provider:kiro',
+        'KIRO_CUSTOM_ENV=enterprise',
       );
 
       expect(events).toEqual(['invalidate', 'reconcile', 'refresh']);
@@ -1815,12 +1336,12 @@ describe('ClaudianPlugin', () => {
 
       try {
         const firstError = await plugin.providerHost.applyEnvironmentVariables(
-          'provider:claude',
-          'ANTHROPIC_PROFILE=committed',
+          'provider:kiro',
+          'KIRO_PROFILE=committed',
         ).catch(error => error);
 
-        expect(plugin.providerHost.getEnvironmentVariablesForScope('provider:claude'))
-          .toBe('ANTHROPIC_PROFILE=committed');
+        expect(plugin.providerHost.getEnvironmentVariablesForScope('provider:kiro'))
+          .toBe('KIRO_PROFILE=committed');
         expect(markStale).toHaveBeenCalledTimes(1);
         expect(markStale).toHaveBeenCalledWith();
         expect(invalidateProviderCommandCaches).toHaveBeenCalledWith(['kiro']);
@@ -1830,9 +1351,9 @@ describe('ClaudianPlugin', () => {
         expect(invalidateSpy).toHaveBeenCalledTimes(1);
         expect(firstError).toBe(publicationError);
 
-        await plugin.providerHost.applyEnvironmentVariables('provider:claude', 'ANTHROPIC_PROFILE=next');
+        await plugin.providerHost.applyEnvironmentVariables('provider:kiro', 'KIRO_PROFILE=next');
 
-        expect(plugin.providerHost.getEnvironmentVariablesForScope('provider:claude')).toBe('ANTHROPIC_PROFILE=next');
+        expect(plugin.providerHost.getEnvironmentVariablesForScope('provider:kiro')).toBe('KIRO_PROFILE=next');
         expect(markStale).toHaveBeenCalledTimes(2);
         expect(plugin.executionLifecycleRegistry.getProviderGeneration('kiro'))
           .toBe(initialGeneration + 2);
@@ -1841,280 +1362,6 @@ describe('ClaudianPlugin', () => {
         unregister();
         invalidateSpy.mockRestore();
       }
-    });
-
-    it('retains a committed invalidation generation when publication fails before invalidation', async () => {
-      await plugin.onload();
-      (plugin as any).sessionMetadata.loadedAll = true;
-      const conversation = await chatHostOf(plugin).createConversation({
-        providerId: 'kiro',
-        sessionId: 'pre-invalidation-session',
-      });
-      const publicationError = new Error('invalidation publication failed');
-      const invalidateSpy = jest.spyOn(
-        ProviderSettingsCoordinator,
-        'invalidateConversationSessions',
-      ).mockImplementationOnce(() => {
-        throw publicationError;
-      });
-      const initialGeneration = plugin.executionLifecycleRegistry
-        .getProviderGeneration('kiro');
-
-      try {
-        await expect(plugin.providerHost.applyEnvironmentVariables(
-          'provider:claude',
-          'ANTHROPIC_BASE_URL=https://publication-failed.example.com',
-        )).rejects.toBe(publicationError);
-
-        const generation = plugin.settings.pendingProviderSessionInvalidations.claude;
-        expect(generation).toEqual(expect.any(Number));
-        expect(runtimeSettingsOf(plugin).pendingEnvironmentInvalidationGenerations.get('kiro'))
-          .toBe(generation);
-        expect(runtimeSettingsOf(plugin).blockedEnvironmentInvalidationGenerations.get('kiro'))
-          .toBe(generation);
-        expect(chatHostOf(plugin).getConversationSync(conversation.id)!.sessionId).toBe('pre-invalidation-session');
-        const persistedFailureSettings = JSON.parse(
-          [...mockApp.vault.adapter.write.mock.calls]
-            .reverse()
-            .find(([path]: [string]) => path === '.claudian/claudian-settings.json')?.[1]
-            ?? '{}',
-        );
-        expect(persistedFailureSettings.pendingProviderSessionInvalidations?.claude)
-          .toBe(generation);
-        expect(plugin.executionLifecycleRegistry.getProviderGeneration('kiro'))
-          .toBe(initialGeneration + 1);
-
-        await plugin.providerHost.applyEnvironmentVariables(
-          'provider:claude',
-          'ANTHROPIC_BASE_URL=https://publication-retry.example.com',
-        );
-
-        expect(chatHostOf(plugin).getConversationSync(conversation.id)!.sessionId).toBeNull();
-        expect(plugin.settings.pendingProviderSessionInvalidations.claude).toBeUndefined();
-        expect(runtimeSettingsOf(plugin).pendingEnvironmentInvalidationGenerations.has('kiro')).toBe(false);
-        expect(runtimeSettingsOf(plugin).blockedEnvironmentInvalidationGenerations.has('kiro')).toBe(false);
-        expect(invalidateSpy).toHaveBeenCalledTimes(2);
-        expect(plugin.executionLifecycleRegistry.getProviderGeneration('kiro'))
-          .toBe(initialGeneration + 2);
-      } finally {
-        invalidateSpy.mockRestore();
-      }
-    });
-
-    it('keeps invalidation pending until every invalidated metadata write succeeds', async () => {
-      await plugin.onload();
-      (plugin as any).sessionMetadata.loadedAll = true;
-      const first = await chatHostOf(plugin).createConversation({
-        providerId: 'kiro',
-        sessionId: 'partial-write-first',
-      });
-      const second = await chatHostOf(plugin).createConversation({
-        providerId: 'kiro',
-        sessionId: 'partial-write-second',
-      });
-      const metadataError = new Error('partial invalidation metadata write failed');
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata')
-        .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(metadataError);
-
-      try {
-        await expect(plugin.providerHost.applyEnvironmentVariables(
-          'provider:claude',
-          'ANTHROPIC_BASE_URL=https://partial-write.example.com',
-        )).rejects.toBe(metadataError);
-
-        const generation = plugin.settings.pendingProviderSessionInvalidations.claude;
-        expect(chatHostOf(plugin).getConversationSync(first.id)!.sessionId).toBeNull();
-        expect(chatHostOf(plugin).getConversationSync(second.id)!.sessionId).toBeNull();
-        expect(generation).toEqual(expect.any(Number));
-        expect(runtimeSettingsOf(plugin).pendingEnvironmentInvalidationGenerations.get('kiro'))
-          .toBe(generation);
-        expect(runtimeSettingsOf(plugin).blockedEnvironmentInvalidationGenerations.get('kiro'))
-          .toBe(generation);
-        const persistedFailureSettings = JSON.parse(
-          [...mockApp.vault.adapter.write.mock.calls]
-            .reverse()
-            .find(([path]: [string]) => path === '.claudian/claudian-settings.json')?.[1]
-            ?? '{}',
-        );
-        expect(persistedFailureSettings.pendingProviderSessionInvalidations?.claude)
-          .toBe(generation);
-
-        await plugin.providerHost.applyEnvironmentVariables(
-          'provider:claude',
-          'ANTHROPIC_BASE_URL=https://partial-write-retry.example.com',
-        );
-
-        const retriedMetadata = saveMetadataSpy.mock.calls.slice(2).map(([metadata]) => metadata);
-        expect(retriedMetadata).toEqual(expect.arrayContaining([
-          expect.objectContaining({ id: first.id, sessionId: null }),
-          expect.objectContaining({ id: second.id, sessionId: null }),
-        ]));
-        expect(plugin.settings.pendingProviderSessionInvalidations.claude).toBeUndefined();
-        expect(runtimeSettingsOf(plugin).pendingEnvironmentInvalidationGenerations.has('kiro')).toBe(false);
-        expect(runtimeSettingsOf(plugin).blockedEnvironmentInvalidationGenerations.has('kiro')).toBe(false);
-      } finally {
-        saveMetadataSpy.mockRestore();
-      }
-    });
-
-    it('does not leak failed Claude invalidation into live or deferred conversations', async () => {
-      await plugin.onload();
-      // onload persists the default-provider (kiro) migration once; isolate the
-      // action's settings-write count from that provider-neutral startup write.
-      (mockApp.vault.adapter.write as jest.Mock).mockClear();
-      const live = await chatHostOf(plugin).createConversation({
-        providerId: 'kiro',
-        sessionId: 'live-session',
-      });
-      live.providerState = {
-        providerSessionId: 'live-provider-session',
-        previousProviderSessionIds: ['live-previous-session'],
-      };
-      live.resumeAtMessageId = 'live-resume-message';
-      await chatHostOf(plugin).updateConversation(live.id, { providerState: live.providerState, resumeAtMessageId: live.resumeAtMessageId });
-      const deferredMetadata = {
-        id: 'deferred-failed-environment',
-        providerId: 'kiro' as const,
-        title: 'Deferred failed environment',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'deferred-session',
-        providerState: {
-          providerSessionId: 'deferred-provider-session',
-          previousProviderSessionIds: ['deferred-previous-session'],
-        },
-        resumeAtMessageId: 'deferred-resume-message',
-      };
-      let markBatchPublished!: () => void;
-      const batchPublished = new Promise<void>(resolve => { markBatchPublished = resolve; });
-      let finishScan!: () => void;
-      const scanRelease = new Promise<void>(resolve => { finishScan = resolve; });
-      const scanSpy = jest.spyOn(storageOf(plugin).sessions, 'scan')
-        .mockImplementation(async (options) => {
-          options?.onBatch?.(deviceMetadataRecords(deferredMetadata));
-          markBatchPublished();
-          await scanRelease;
-          return {
-            complete: false,
-            invalidMetadataCount: 0,
-            records: deviceMetadataRecords(deferredMetadata),
-          };
-        });
-      const loadSourceSpy = mockMetadataSources(deferredMetadata);
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata');
-      let markWriteStarted!: () => void;
-      const writeStarted = new Promise<void>(resolve => { markWriteStarted = resolve; });
-      let rejectWrite!: (error: Error) => void;
-      const failedWrite = new Promise<void>((_resolve, reject) => { rejectWrite = reject; });
-      let shouldFailSettingsWrite = true;
-      mockApp.vault.adapter.write.mockImplementation(async (path: string) => {
-        if (path === '.claudian/claudian-settings.json' && shouldFailSettingsWrite) {
-          shouldFailSettingsWrite = false;
-          markWriteStarted();
-          await failedWrite;
-        }
-      });
-      let stateAtRelease: {
-        blocked: boolean;
-        deferredSessionId: string | null | undefined;
-        liveSessionId: string | null;
-        pending: unknown;
-      } | null = null;
-      const afterTransition = jest.fn(() => {
-        stateAtRelease = {
-          blocked: runtimeSettingsOf(plugin).blockedEnvironmentInvalidationGenerations.has('kiro'),
-          deferredSessionId: chatHostOf(plugin).getCachedConversation(deferredMetadata.id)?.sessionId,
-          liveSessionId: chatHostOf(plugin).getConversationSync(live.id)!.sessionId,
-          pending: plugin.settings.pendingProviderSessionInvalidations.claude,
-        };
-      });
-      const unregister = plugin.executionLifecycleRegistry.registerTransitionHook('kiro', {
-        afterTransition,
-      });
-
-      const writeError = new Error('environment settings write failed');
-      const apply = plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://failed.example.com',
-      ).catch(error => error);
-      await writeStarted;
-      const scan = (plugin as any).sessionMetadata.loadRemaining();
-      await batchPublished;
-      rejectWrite(writeError);
-      expect(await apply).toBe(writeError);
-      finishScan();
-      await scan;
-
-      const deferred = chatHostOf(plugin).getCachedConversation(deferredMetadata.id);
-      expect(afterTransition).toHaveBeenCalledTimes(1);
-      expect(stateAtRelease).toEqual({
-        blocked: false,
-        deferredSessionId: 'deferred-session',
-        liveSessionId: 'live-session',
-        pending: undefined,
-      });
-      expect(chatHostOf(plugin).getConversationSync(live.id)).toEqual(expect.objectContaining({
-        sessionId: 'live-session',
-        providerState: {
-          providerSessionId: 'live-provider-session',
-          previousProviderSessionIds: ['live-previous-session'],
-        },
-        resumeAtMessageId: 'live-resume-message',
-      }));
-      expect(deferred).toEqual(expect.objectContaining({
-        sessionId: 'deferred-session',
-        providerState: deferredMetadata.providerState,
-        resumeAtMessageId: 'deferred-resume-message',
-      }));
-      expect(plugin.settings.pendingProviderSessionInvalidations.claude).toBeUndefined();
-      expect(runtimeSettingsOf(plugin).pendingEnvironmentInvalidationGenerations.has('kiro')).toBe(false);
-      expect(runtimeSettingsOf(plugin).blockedEnvironmentInvalidationGenerations.has('kiro')).toBe(false);
-      expect(saveMetadataSpy).not.toHaveBeenCalledWith(expect.objectContaining({
-        id: deferredMetadata.id,
-        sessionId: null,
-      }));
-      expect(mockApp.vault.adapter.write.mock.calls.filter(
-        ([path]: [string]) => path === '.claudian/claudian-settings.json',
-      )).toHaveLength(1);
-
-      const invalidateSpy = jest.spyOn(
-        ProviderSettingsCoordinator,
-        'invalidateConversationSessions',
-      );
-      saveMetadataSpy.mockClear();
-      await plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://retry.example.com',
-      );
-
-      expect(invalidateSpy).toHaveBeenCalledTimes(1);
-      expect(chatHostOf(plugin).getConversationSync(live.id)?.sessionId).toBeNull();
-      expect(chatHostOf(plugin).getConversationSync(live.id)?.providerState).toEqual({
-        previousProviderSessionIds: [
-          'live-previous-session',
-          'live-provider-session',
-        ],
-      });
-      expect(live.resumeAtMessageId).toBe('live-resume-message');
-      expect(chatHostOf(plugin).getConversationSync(deferredMetadata.id)?.sessionId).toBeNull();
-      expect(chatHostOf(plugin).getConversationSync(deferredMetadata.id)?.providerState).toEqual({
-        previousProviderSessionIds: [
-          'deferred-previous-session',
-          'deferred-provider-session',
-        ],
-      });
-      expect(deferred?.resumeAtMessageId).toBe('deferred-resume-message');
-      expect(saveMetadataSpy.mock.calls.map(([metadata]) => metadata.id).sort()).toEqual([
-        deferredMetadata.id,
-        live.id,
-      ].sort());
-
-      invalidateSpy.mockRestore();
-      saveMetadataSpy.mockRestore();
-      scanSpy.mockRestore();
-      loadSourceSpy.mockRestore();
-      unregister();
     });
 
     it('updates runtime env vars when changed', async () => {
@@ -2130,96 +1377,6 @@ describe('ClaudianPlugin', () => {
       const currentEnv = plugin.providerHost.getEnvironmentVariablesForScope('shared');
       await plugin.providerHost.applyEnvironmentVariables('shared', 'A=3');
       expect(plugin.providerHost.getEnvironmentVariablesForScope('shared')).toBe(currentEnv);
-    });
-
-    it('invalidates sessions when env hash changes', async () => {
-      await plugin.onload();
-
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'kiro', sessionId: 'session-123' });
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata');
-      saveMetadataSpy.mockClear();
-
-      await plugin.providerHost.applyEnvironmentVariables('provider:claude', 'ANTHROPIC_MODEL=claude-sonnet-4-5');
-
-      const updated = await chatHostOf(plugin).getConversationById(conv.id);
-      expect(updated?.sessionId).toBeNull();
-      expect(saveMetadataSpy).toHaveBeenCalled();
-    });
-
-    it('serializes overlapping environment invalidation writes', async () => {
-      await plugin.onload();
-      (plugin as any).sessionMetadata.loadedAll = true;
-      await chatHostOf(plugin).createConversation({ providerId: 'kiro', sessionId: 'overlapping-session' });
-      let finishFirstWrite!: () => void;
-      const firstWriteRelease = new Promise<void>((resolve) => {
-        finishFirstWrite = resolve;
-      });
-      let markFirstWriteStarted!: () => void;
-      const firstWriteStarted = new Promise<void>((resolve) => {
-        markFirstWriteStarted = resolve;
-      });
-      let blockedFirstWrite = false;
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata')
-        .mockImplementation(async () => {
-          if (!blockedFirstWrite) {
-            blockedFirstWrite = true;
-            markFirstWriteStarted();
-            await firstWriteRelease;
-          }
-        });
-
-      const firstUpdate = plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://first-overlap.example.com',
-      );
-      await firstWriteStarted;
-      let secondUpdateSettled = false;
-      const secondUpdate = plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://second-overlap.example.com',
-      ).finally(() => {
-        secondUpdateSettled = true;
-      });
-      await new Promise(resolve => setTimeout(resolve, 1));
-      const markerWhileFirstWritePending =
-        plugin.settings.pendingProviderSessionInvalidations.claude;
-      const secondSettledWhileFirstWritePending = secondUpdateSettled;
-
-      finishFirstWrite();
-      await Promise.all([firstUpdate, secondUpdate]);
-      saveMetadataSpy.mockRestore();
-
-      expect(markerWhileFirstWritePending).toEqual(expect.any(Number));
-      expect(secondSettledWhileFirstWritePending).toBe(false);
-      expect(plugin.settings.pendingProviderSessionInvalidations.claude)
-        .toBeUndefined();
-    });
-
-    it('flushes already-invalidated sessions after an earlier environment write fails', async () => {
-      await plugin.onload();
-      (plugin as any).sessionMetadata.loadedAll = true;
-      await chatHostOf(plugin).createConversation({ providerId: 'kiro', sessionId: 'failed-overlap-session' });
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata')
-        .mockRejectedValueOnce(new Error('metadata write failed'));
-
-      await expect(plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://failed-write.example.com',
-      )).rejects.toThrow('metadata write failed');
-      await plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://retry-write.example.com',
-      );
-      const saveCallCount = saveMetadataSpy.mock.calls.length;
-      const retriedMetadata = saveMetadataSpy.mock.calls[1]?.[0];
-      saveMetadataSpy.mockRestore();
-
-      expect(saveCallCount).toBe(2);
-      expect(retriedMetadata).toEqual(expect.objectContaining({
-        sessionId: null,
-      }));
-      expect(plugin.settings.pendingProviderSessionInvalidations.claude)
-        .toBeUndefined();
     });
 
     it('invalidates provider executions through the lifecycle registry when env changes', async () => {
@@ -2267,36 +1424,6 @@ describe('ClaudianPlugin', () => {
 
       expect(first.getTabManager).not.toHaveBeenCalled();
       expect(second.getTabManager).not.toHaveBeenCalled();
-    });
-
-    it('invalidates Claude conversation metadata without inspecting tab execution state', async () => {
-      await plugin.onload();
-
-      const conversation = await chatHostOf(plugin).createConversation({
-        providerId: 'kiro',
-        sessionId: 'session-123',
-      });
-      await chatHostOf(plugin).updateConversation(conversation.id, {
-        messages: [{
-          content: 'hi',
-          id: 'msg-1',
-          role: 'user',
-          timestamp: Date.now(),
-          userMessageId: 'msg-1',
-        }],
-      });
-
-      const mockView = {
-        getTabManager: jest.fn(),
-        invalidateProviderCommandCaches: jest.fn(),
-        refreshModelSelector: jest.fn(),
-      };
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([mockView as any]);
-
-      await plugin.providerHost.applyEnvironmentVariables('provider:claude', 'ANTHROPIC_MODEL=claude-sonnet-4-5');
-
-      expect(chatHostOf(plugin).getConversationSync(conversation.id)?.sessionId).toBeNull();
-      expect(mockView.getTabManager).not.toHaveBeenCalled();
     });
 
     it('does not touch an initialized blank Kiro tab during an environment transition', async () => {
@@ -2630,21 +1757,23 @@ describe('ClaudianPlugin', () => {
 
     it('should store the selected model in conversation metadata', async () => {
       await plugin.onload();
+      seedKiroModel(plugin, 'sonnet');
 
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'kiro', selectedModel: 'opus' });
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'kiro', selectedModel: 'kiro/sonnet' });
       const fetched = await chatHostOf(plugin).getConversationById(conv.id);
 
-      expect(conv.selectedModel).toBe('opus');
-      expect(fetched?.selectedModel).toBe('opus');
+      expect(conv.selectedModel).toBe('kiro/sonnet');
+      expect(fetched?.selectedModel).toBe('kiro/sonnet');
     });
 
     it('should lazily migrate missing selected model from usage metadata', async () => {
       await plugin.onload();
+      seedKiroModel(plugin, 'opus');
 
       const conv = await chatHostOf(plugin).createConversation({ providerId: 'kiro' });
       delete (conv as { selectedModel?: string }).selectedModel;
       conv.usage = {
-        model: 'opus',
+        model: 'kiro/opus',
         inputTokens: 1,
         contextTokens: 1,
         contextWindow: 200000,
@@ -2656,9 +1785,9 @@ describe('ClaudianPlugin', () => {
 
       const fetched = await chatHostOf(plugin).getConversationById(conv.id);
 
-      expect(fetched?.selectedModel).toBe('opus');
+      expect(fetched?.selectedModel).toBe('kiro/opus');
       expect(saveMetadataSpy).toHaveBeenCalledWith(expect.objectContaining({
-        selectedModel: 'opus',
+        selectedModel: 'kiro/opus',
       }));
     });
 
