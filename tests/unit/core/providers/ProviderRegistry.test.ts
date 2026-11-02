@@ -120,6 +120,16 @@ describe('ProviderRegistry', () => {
     expect(ProviderRegistry.getVisibleProviderIds(settings)).toContain('kiro');
   });
 
+  it('shows kiro in the visible set on a fresh install with no stored provider config', () => {
+    // Regression for the initial-install blank provider menu (#88): with no
+    // persisted settings, kiro must default to enabled so the provider menu
+    // renders. Claude stays hidden regardless, so an empty settings object must
+    // still yield exactly the kiro entry.
+    const settings = {};
+    expect(ProviderRegistry.getVisibleProviderIds(settings)).toEqual(['kiro']);
+    expect(ProviderRegistry.isVisible('kiro', settings)).toBe(true);
+  });
+
   it('resolves the settings provider to kiro when the stored selection is hidden', () => {
     expect(ProviderRegistry.resolveSettingsProviderId({
       settingsProvider: 'claude',

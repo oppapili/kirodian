@@ -42,7 +42,9 @@ describe('built-in ProviderModule catalog', () => {
 
     const defaultEnabled: Record<string, boolean> = {
       claude: true,
-      kiro: false,
+      // kiro is the only user-visible provider and defaults to enabled (#88);
+      // a malformed scalar falls back to that default.
+      kiro: true,
     };
 
     for (const module of BUILT_IN_PROVIDER_MODULES) {
