@@ -401,7 +401,7 @@
         "shared": "기타 제공자"
       },
       "claudeHelp": ".claude/skills/의 Claude Code 스킬과 .claude/commands/의 명령.",
-      "sharedHelp": "Codex CLI, OpenCode, Pi, Grok Build용 .agents/skills/의 공유 스킬.",
+      "sharedHelp": ".agents/skills/의 공유 스킬.",
       "status": {
         "error": "스킬 폴더를 읽을 수 없습니다: {message}"
       },
@@ -430,7 +430,7 @@
       "droppedFrontmatterWarning": "저장하면 이름과 설명만 남습니다. 다음 키가 제거되며 제공자 동작이 바뀔 수 있습니다: {keys}",
       "hidden": {
         "name": "숨긴 명령과 스킬",
-        "desc": "모든 제공자의 명령 메뉴에서 명령과 스킬을 숨깁니다. 앞의 슬래시 없이 정확한 이름을 한 줄에 하나씩 입력하세요(Pi 스킬은 skill:이름).",
+        "desc": "모든 제공자의 명령 메뉴에서 명령과 스킬을 숨깁니다. 앞의 슬래시 없이 정확한 이름을 한 줄에 하나씩 입력하세요(스킬은 skill:이름).",
         "placeholder": "commit\ncompact\nskill:review"
       },
       "sync": {

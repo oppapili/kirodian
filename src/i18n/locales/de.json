@@ -401,7 +401,7 @@
         "shared": "Andere Anbieter"
       },
       "claudeHelp": "Claude-Code-Skills in .claude/skills/ und Befehle in .claude/commands/.",
-      "sharedHelp": "Gemeinsame Skills in .agents/skills/ für Codex CLI, OpenCode, Pi und Grok Build.",
+      "sharedHelp": "Gemeinsame Skills in .agents/skills/.",
       "status": {
         "error": "Die Skill-Ordner konnten nicht gelesen werden: {message}"
       },
@@ -430,7 +430,7 @@
       "droppedFrontmatterWarning": "Beim Speichern bleiben nur Name und Beschreibung erhalten. Diese Schlüssel werden entfernt und das Verhalten der Anbieter kann sich ändern: {keys}",
       "hidden": {
         "name": "Ausgeblendete Befehle und Skills",
-        "desc": "Blendet Befehle und Skills im Befehlsmenü aller Anbieter aus. Exakte Namen ohne führenden Schrägstrich eingeben, einen pro Zeile (Pi-Skills verwenden skill:name).",
+        "desc": "Blendet Befehle und Skills im Befehlsmenü aller Anbieter aus. Exakte Namen ohne führenden Schrägstrich eingeben, einen pro Zeile (Skills verwenden skill:name).",
         "placeholder": "commit\ncompact\nskill:review"
       },
       "sync": {
