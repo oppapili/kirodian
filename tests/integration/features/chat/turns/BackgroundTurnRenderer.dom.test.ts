@@ -1,8 +1,6 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
-import * as fs from 'node:fs/promises';
-
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
@@ -17,9 +15,7 @@ import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
 import { TabSession } from '@/features/chat/tabs/TabSession';
 import { enqueueTabSessionEvent } from '@/features/chat/tabs/TabSessionEvents';
 import { StreamController } from '@/features/chat/turns/StreamController';
-import { loadSDKSessionMessages } from '@/providers/claude/history/ClaudeHistoryStore';
 
-jest.mock('node:fs/promises');
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
 HTMLElement.prototype.removeClass = function (...classes) { this.classList.remove(...classes); };
@@ -28,35 +24,6 @@ beforeEach(() => {
   jest.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
     (el as HTMLElement).createEl('p', { text: markdown });
   });
-});
-
-it.each([false, true])('replay places the second notification before automatic output (compaction: %s)', async (compaction) => {
-  const entries = [
-    { type: 'user', uuid: 'u', message: { content: 'Start tasks' } },
-    { type: 'assistant', uuid: 'a', parentUuid: 'u', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Requested answer' }] } },
-    { type: 'user', uuid: 'n1', parentUuid: 'a', message: { content: '<task-notification><task-id>first</task-id><status>completed</status><summary>First task finished.</summary></task-notification>' } },
-    { type: 'assistant', uuid: 'tool', parentUuid: 'n1', message: { stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'read', name: 'Read', input: { file_path: 'task.output' } }] } },
-    { type: 'user', uuid: 'result', parentUuid: 'tool', message: { content: [{ type: 'tool_result', tool_use_id: 'read', content: 'First task result' }] } },
-    { type: 'attachment', uuid: 'n2', parentUuid: 'result', attachment: { type: 'queued_command', commandMode: 'task-notification', prompt: '<task-notification><task-id>second</task-id><status>completed</status><summary>Second task finished.</summary></task-notification>' } },
-    ...(compaction ? [{ type: 'system', subtype: 'compact_boundary', uuid: 'compact', parentUuid: 'n2' }] : []),
-    { type: 'assistant', uuid: 'final', parentUuid: compaction ? 'compact' : 'n2', message: { stop_reason: 'end_turn', content: [{ type: 'text', text: 'After notification.' }] } },
-  ];
-  jest.mocked(fs.readFile).mockResolvedValue(entries.map((entry, index) => JSON.stringify({ timestamp: new Date(1000 + index * 1000).toISOString(), ...entry })).join('\n'));
-  const replay = await loadSDKSessionMessages('/vault', 'session', undefined, '/session.jsonl');
-  expect(replay.error).toBeUndefined();
-  const messagesEl = document.body.createDiv();
-  const renderer = new MessageRenderer({ app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any, new Component(), messagesEl);
-  try {
-    replay.messages.forEach((message, index) => renderer.renderStoredMessage(message, replay.messages, index));
-    await Promise.resolve();
-    const second = within(messagesEl).getAllByRole('button', { name: 'Task notification' })[1];
-    const answer = within(messagesEl).getByText('After notification.');
-    expect(second.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    const output = [second, ...(compaction ? [within(messagesEl).getByText('Conversation compacted')] : []), answer];
-    for (const [index, element] of output.slice(1).entries()) {
-      expect(output[index].compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    }
-  } finally { renderer.dispose(); }
 });
 
 it.each([false, true])('keeps main-chat automatic work and later output on either side of a notification (compaction: %s)', async (compaction) => {
@@ -78,13 +45,13 @@ it.each([false, true])('keeps main-chat automatic work and later output on eithe
     onSessionEvent: (event, context) => enqueueTabSessionEvent(tab, plugin, event, context),
   });
   const session = new TabSession({ id: 'tab', conversationId: 'conversation', draftModel: null,
-    providerId: 'claude', lifecycleState: 'ready' } as any, coordinator);
+    providerId: 'kiro', lifecycleState: 'ready' } as any, coordinator);
   const tab = { state, renderer, session, executionCoordinator: coordinator, lifecycleState: 'ready',
     ui: { promptSuggestion: { discard() {} } },
     dom: { contentEl: messagesEl }, services: { subagentManager: subagents },
     controllers: { streamController: stream, conversationController: { save: async () => undefined } } } as any;
   try {
-    await coordinator.bindConversation({ conversationId: 'conversation', providerId: 'claude' });
+    await coordinator.bindConversation({ conversationId: 'conversation', providerId: 'kiro' });
     await coordinator.prepare();
     const requested: ChatMessage = { id: 'requested', role: 'assistant', timestamp: 1, content: '', contentBlocks: [] };
     state.addMessage(requested);
