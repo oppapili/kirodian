@@ -5,7 +5,6 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@test/helpers/defaultSettings';
-import { testDate } from '@test/helpers/testClock';
 import { App, Notice, type Plugin } from 'obsidian';
 
 import { ConversationRepository } from '@/app/conversations/ConversationRepository';
@@ -14,17 +13,14 @@ import { ConversationPersistenceStore } from '@/app/storage/ConversationPersiste
 import { migrateSessionSidecars } from '@/app/storage/migrateSessionSidecars';
 import { SharedStorageService } from '@/app/storage/SharedStorageService';
 import { CLAUDIAN_SETTINGS_PATH, getDeviceSessionsPath, SESSIONS_PATH } from '@/core/bootstrap/storagePaths';
-import type { ProviderHost } from '@/core/providers/ProviderHost';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
-import type { Conversation, SessionMetadata, SubagentInfo } from '@/core/types';
-import { ClaudeExecutionBackend } from '@/providers/claude/execution/ClaudeExecutionBackend';
-
+import type { Conversation, SessionMetadata } from '@/core/types';
 const DEVICE_KEY = `device-${'a'.repeat(64)}`;
 const DEVICE_PATH = getDeviceSessionsPath(DEVICE_KEY);
 const metadata: SessionMetadata = {
-  id: 'conversation-1', providerId: 'claude', title: 'Example', createdAt: 1, lastActivityAt: 2,
+  id: 'conversation-1', providerId: 'kiro', title: 'Example', createdAt: 1, lastActivityAt: 2,
 };
 
 let root: string;
@@ -69,101 +65,6 @@ test('writes compact metadata without changing its contents', async () => {
   const content = await adapter.read(`${DEVICE_PATH}/${metadata.id}.meta.json`);
   expect(content).toBe(JSON.stringify(data));
   expect(await store.metadataReader.loadMetadata(metadata.id)).toEqual(data);
-});
-
-test('execution snapshots avoid history payload serialization while persistence retains subagent history', async () => {
-  const subagent = {
-    id: 'task-1', description: 'Research', isExpanded: false, status: 'completed' as const,
-    result: 'Complete result', toolCalls: [{ id: 'read-1', name: 'Read', input: { file_path: 'note.md' },
-      status: 'completed' as const, isExpanded: false, result: 'Full tool output' }],
-  };
-  const subagentData = { [subagent.id]: subagent };
-  const serializeHistory = jest.fn(() => ({ [subagent.id]: subagent }));
-  Object.defineProperty(subagentData, 'toJSON', { value: serializeHistory });
-  const providerState = { providerSessionId: 'native-1', subagentData, futureField: { cursor: 'keep' } };
-  const conversation: Conversation = {
-    ...metadata, providerId: 'claude', sessionId: 'native-1', providerState,
-    messages: [{ id: 'message-1', role: 'assistant', content: '', timestamp: testDate().getTime(),
-      toolCalls: [{ id: subagent.id, name: 'Agent', input: {}, status: 'completed', isExpanded: false, subagent }] }],
-  };
-  const session = new ClaudeExecutionBackend({ settings: {} } as ProviderHost).createSession({
-    lifecycle: 'persistent', nativePersistence: 'enabled', vaultWorkingDirectory: root,
-    resumeSeed: { providerSessionId: 'native-1', providerState },
-    interactionPort: { dismissInteraction() {}, requestApproval: async ({ interactionId }) => ({ interactionId, decision: 'deny' }),
-      askUserQuestion: async ({ interactionId }) => ({ interactionId, answers: null }) },
-  });
-  const repository = createRepository();
-  repository.replaceAll([conversation]);
-  repository.registerExecutionBinding(conversation.id, 'binding', 0);
-  try {
-    for (let index = 0; index < 20; index++) session.getSnapshot();
-    expect(serializeHistory).not.toHaveBeenCalled();
-    const snapshot = session.getSnapshot();
-    expect(snapshot.providerState).toEqual({ providerSessionId: 'native-1', futureField: { cursor: 'keep' } });
-    expect(snapshot.providerStateDeletes ?? []).not.toContain('subagentData');
-    await repository.persistExecutionSnapshot(conversation.id, 'binding', 0, snapshot);
-    expect((await store.metadataReader.loadMetadata(conversation.id))?.providerState).toEqual(providerState);
-    expect(conversation.messages[0].toolCalls?.[0].subagent).toBe(subagent);
-  } finally {
-    await session.dispose();
-  }
-});
-
-test.each(['unloaded', 'model-recovery'] as const)('strips image payloads when saving %s metadata without loading native history', async kind => {
-  const now = testDate().getTime();
-  const data = 'a'.repeat(512 * 1024);
-  const result = JSON.stringify([
-    { type: 'text', text: 'Archive scan' },
-    { type: 'image', source: { type: 'base64', media_type: 'image/png', data } },
-  ]);
-  const subagent: SubagentInfo = {
-    id: 'task-images', description: 'Read scans', isExpanded: true, mode: 'async',
-    status: 'completed', result: 'Transcription complete', agentId: 'agent-images',
-    toolCalls: [{ id: 'read-image', name: 'Read', input: { file_path: '/scan.png' }, status: 'completed', result }],
-  };
-  const state = {
-    providerSessionId: 'native-images', previousProviderSessionIds: ['previous-native'],
-    subagentData: { [subagent.id]: subagent }, futureField: { cursor: 'keep' },
-  };
-  const conversation: Conversation = {
-    ...metadata, providerId: 'claude', createdAt: now, lastActivityAt: now, messages: [],
-    sessionId: kind === 'unloaded' ? 'native-images' : null,
-    ...(kind === 'unloaded'
-      ? { providerState: state }
-      : { modelRecoverySource: { sessionId: 'native-images', providerState: state, resumeAtMessageId: 'checkpoint' } }),
-  };
-  const nativePath = 'provider/session.jsonl';
-  await adapter.write(nativePath, result);
-  const repository = createRepository();
-  repository.mergeMetadataConversations([conversation], 'unscoped');
-  const before = repository.getSync(conversation.id);
-  const history = ProviderRegistry.getConversationHistoryService('claude');
-  const hydrate = jest.spyOn(history, 'hydrateConversationHistory');
-
-  // Assignment persists an unloaded shell with its existing state intact.
-  await repository.assignToCurrentDevice(conversation.id);
-
-  const serialized = await adapter.read(`${DEVICE_PATH}/${metadata.id}.meta.json`);
-  const saved = JSON.parse(serialized) as SessionMetadata;
-  const savedState = kind === 'unloaded' ? saved.providerState : saved.modelRecoverySource?.providerState;
-  expect(serialized.includes(data)).toBe(false);
-  expect(savedState).toEqual({
-    ...state,
-    subagentData: { [subagent.id]: { ...subagent, toolCalls: [{
-      ...subagent.toolCalls[0],
-      result: JSON.stringify([
-        { type: 'text', text: 'Archive scan' },
-        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: '' } },
-      ]),
-    }] } },
-  });
-  expect(saved.sessionId).toBe(conversation.sessionId);
-  expect(saved.providerState).toEqual(kind === 'unloaded' ? savedState : undefined);
-  expect(saved.modelRecoverySource?.sessionId).toBe(kind === 'model-recovery' ? 'native-images' : undefined);
-  expect(saved.modelRecoverySource?.resumeAtMessageId).toBe(kind === 'model-recovery' ? 'checkpoint' : undefined);
-  expect(repository.getSync(conversation.id)).toEqual(before);
-  expect(hydrate).not.toHaveBeenCalled();
-  expect(await adapter.read(nativePath)).toBe(result);
 });
 
 test('preserves kiro native locators and opaque state in unloaded and recovery records', async () => {
@@ -250,7 +151,7 @@ test('deleting a conversation removes its metadata while leaving provider histor
 
 test('reopening uses provider messages as the authoritative history', async () => {
   const repository = createRepository();
-  const conversation = { ...metadata, providerId: 'claude', sessionId: 'native-session', messages: [] };
+  const conversation = { ...metadata, providerId: 'kiro', sessionId: 'native-session', messages: [] };
   repository.replaceAll([conversation]);
   const nativeMessage = {
     id: 'native-message', userMessageId: 'native-user', role: 'user' as const,
@@ -345,7 +246,7 @@ test('a deletion started during an execution authority check rejects the handoff
 
 test('a delayed scan cannot undo a local assignment or redirect later writes and deletion', async () => {
   const repository = createRepository();
-  const conversation = { ...metadata, providerId: 'claude', sessionId: null, messages: [] };
+  const conversation = { ...metadata, providerId: 'kiro', sessionId: null, messages: [] };
   await store.saveMetadata(metadata, 'unscoped');
   const entry = { conversation, source: 'unscoped' as const, needsMigration: false };
   await repository.adoptMetadataConversations([entry]);

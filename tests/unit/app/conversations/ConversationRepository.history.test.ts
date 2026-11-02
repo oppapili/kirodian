@@ -5,13 +5,11 @@ import type { ConversationPersistence } from '@/app/storage/ConversationPersiste
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import type { Conversation } from '@/core/types';
-import { ClaudeConversationHistoryService } from '@/providers/claude/history/ClaudeConversationHistoryService';
-import * as claudeHistory from '@/providers/claude/history/ClaudeHistoryStore';
 
 function createConversation(id = 'conversation-1'): Conversation {
   return {
     id,
-    providerId: 'claude',
+    providerId: 'kiro',
     title: 'Conversation',
     createdAt: 1,
     lastActivityAt: 1,
@@ -74,18 +72,22 @@ test('does not publish recovered identity after concurrent deletion', async () =
   expect(persistence.saveMetadata).not.toHaveBeenCalled();
 });
 
-test('keeps relocated Claude history readable after its metadata save fails', async () => {
+test('keeps relocated native history readable after its metadata save fails', async () => {
   const conversation = createConversation();
   conversation.selectedModel = 'sonnet';
   const messages: Conversation['messages'] = [
     { id: 'native-response', role: 'assistant', content: 'Native history', timestamp: 2 },
   ];
-  const location = { availability: 'relocated' as const, sessionPath: '/old-vault/session-1.jsonl' };
-  jest.spyOn(claudeHistory, 'locateSDKSession').mockResolvedValue(location);
-  jest.spyOn(claudeHistory, 'locateSDKSessions').mockResolvedValue(new Map([['session-1', location]]));
-  jest.spyOn(claudeHistory, 'loadSDKSessionMessages').mockResolvedValue({ messages, skippedLines: 0 });
-  jest.spyOn(ProviderRegistry, 'getConversationHistoryService')
-    .mockReturnValue(new ClaudeConversationHistoryService());
+  // The repository must keep hydrated native history readable even when the
+  // metadata write that follows hydration fails. Drive this through a minimal
+  // history-service port (the provider-neutral contract) rather than a specific
+  // provider's SDK relocation internals.
+  jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    hydrateConversationHistory: async conv => ({ ...conv, messages }),
+    resolveSessionIdForConversation: value => value?.sessionId ?? null,
+    isPendingForkConversation: () => false,
+    buildForkProviderState: () => ({}),
+  });
   const { repository, persistence } = createRepository(conversation);
   persistence.saveMetadata.mockRejectedValue(new Error('Metadata unavailable'));
 
@@ -97,11 +99,13 @@ test('keeps relocated Claude history readable after its metadata save fails', as
 test('restores the conversation when missing-session metadata removal fails', async () => {
   const conversation = createConversation();
   const { repository, persistence } = createRepository(conversation);
-  jest.spyOn(claudeHistory, 'locateSDKSessions').mockResolvedValue(new Map([
-    ['session-1', { availability: 'missing' as const }],
-  ]));
-  jest.spyOn(ProviderRegistry, 'getConversationHistoryService')
-    .mockReturnValue(new ClaudeConversationHistoryService());
+  jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    hydrateConversationHistory: async conv => conv,
+    resolveSessionIdForConversation: value => value?.sessionId ?? null,
+    isPendingForkConversation: () => false,
+    buildForkProviderState: () => ({}),
+    resolveMissingConversationSession: async () => ({ outcome: 'delete' }),
+  });
   persistence.deleteCurrentMetadata.mockRejectedValue(new Error('Metadata cleanup failed'));
 
   await expect(repository.handleMissingProviderSession(conversation.id, 'session-1'))
