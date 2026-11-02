@@ -24,6 +24,9 @@ afterEach(() => {
 function kiroSettingsWithModels(selectedOrder: string[]): Record<string, unknown> {
   const settings: Record<string, unknown> = {};
   updateCurrentKiroCatalog(settings, {
+    defaultModelId: null,
+    fingerprint: 'test-fingerprint',
+    refreshedAt: 0,
     models: ['opus', 'haiku', 'sonnet'].map(rawId => ({
       rawId,
       displayName: rawId,

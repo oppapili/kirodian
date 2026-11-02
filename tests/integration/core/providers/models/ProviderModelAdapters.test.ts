@@ -15,7 +15,12 @@ it.each(modelCatalogCases)('$id keeps native selection, aliases and metadata beh
   const persist = jest.fn(async () => undefined);
   const coordinator = new SettingsCoordinator(settings, persist);
   const host = { settings, mutateSettings: coordinator.mutate.bind(coordinator), mutateSettingsConditionally: coordinator.mutateConditionally.bind(coordinator), notifyProviderChatOptionsChanged: jest.fn() } as unknown as ProviderHost;
-  const discovery = jest.fn(async () => ({ changed: false, diagnostics: [] }));
+  const discovery = jest.fn(async () => ({
+    catalog: null,
+    changed: false,
+    kind: 'completed' as const,
+    persistedSettingsChanged: false,
+  }));
   const factories: Record<string, () => ProviderModelCatalog> = {
     kiro: () => createKiroModels(host, { refresh: discovery }),
   };

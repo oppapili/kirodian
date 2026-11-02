@@ -48,6 +48,9 @@ function createSettings({ id, populate }: typeof modelCatalogCases[number], adve
   if (id === 'kiro') {
     // Advertise the selected model's reasoning efforts through the kiro catalog.
     updateCurrentKiroCatalog(settings, {
+      defaultModelId: null,
+      fingerprint: 'test-fingerprint',
+      refreshedAt: 0,
       models: [
         {
           rawId: 'sonnet',
