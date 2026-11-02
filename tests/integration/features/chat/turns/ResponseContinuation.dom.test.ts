@@ -169,4 +169,3 @@ it.each(['background', 'user'] as const)('groups only the requested response acr
     stream.dispose(); subagents.clear(); renderer.dispose();
   }
 });
-
