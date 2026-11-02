@@ -7,6 +7,9 @@ export const modelCatalogCases = [
     id: 'kiro' as const, selected: 'kiro/sonnet',
     populate(settings: Record<string, unknown>) {
       updateCurrentKiroCatalog(settings, {
+        defaultModelId: null,
+        fingerprint: 'test-fingerprint',
+        refreshedAt: 0,
         models: [
           {
             rawId: 'sonnet',
