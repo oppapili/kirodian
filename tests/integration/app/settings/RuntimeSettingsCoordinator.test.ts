@@ -11,7 +11,7 @@ it.each(['persistence', 'publication'] as const)(
   async failurePhase => {
     const generation = testDate().getTime();
     const settings = structuredClone(DEFAULT_CLAUDIAN_SETTINGS);
-    settings.pendingProviderSessionInvalidations = { claude: generation };
+    settings.pendingProviderSessionInvalidations = { kiro: generation };
     let durablePending = { ...settings.pendingProviderSessionInvalidations };
     const coordinator = new SettingsCoordinator(settings, async draft => {
       if (failurePhase === 'persistence') throw new Error('storage unavailable');
@@ -28,10 +28,10 @@ it.each(['persistence', 'publication'] as const)(
     });
     runtime.syncPendingSessionInvalidations();
 
-    await expect(runtime.completePendingSessionInvalidations(new Map([['claude', generation]])))
+    await expect(runtime.completePendingSessionInvalidations(new Map([['kiro', generation]])))
       .rejects.toThrow(failurePhase === 'persistence' ? 'storage unavailable' : 'post-commit');
 
-    const expected = failurePhase === 'persistence' ? { claude: generation } : {};
+    const expected = failurePhase === 'persistence' ? { kiro: generation } : {};
     expect(durablePending).toEqual(expected);
     expect(settings.pendingProviderSessionInvalidations).toEqual(expected);
     expect(Object.fromEntries(runtime.getPendingGenerations())).toEqual(expected);

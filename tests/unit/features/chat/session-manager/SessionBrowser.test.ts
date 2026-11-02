@@ -1,6 +1,5 @@
 import '@/providers';
 
-import { claudeCatalogFixture } from '@test/helpers/claudeModels';
 import { createConversationPorts, createTestTabSession, holdResponse } from '@test/helpers/ConversationPorts';
 import { createMockEl } from '@test/helpers/MockElement';
 import { testDate } from '@test/helpers/testClock';
@@ -11,6 +10,7 @@ import type { ClaudianSettings } from '@/core/types';
 import { ConversationController, type ConversationControllerDeps } from '@/features/chat/conversation/ConversationController';
 import { SessionBrowser } from '@/features/chat/session-manager/SessionBrowser';
 import { formatSessionDate } from '@/features/chat/session-manager/SessionStatusPresentation';
+import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 import { ChatState } from '@/features/chat/state/ChatState';
 import type { TabSession } from '@/features/chat/tabs/TabSession';
 
@@ -63,8 +63,8 @@ function createMockDeps(overrides: Record<string, unknown> = {}): ConversationCo
       settings: {
         userName: '',
         enableAutoTitleGeneration: true,
-        titleGenerationModel: 'haiku',
-        providerConfigs: { claude: claudeCatalogFixture(['haiku']) },
+        titleGenerationModel: 'kiro/haiku',
+        providerConfigs: {},
         permissionMode: 'yolo',
       },
     } as any,
@@ -90,6 +90,20 @@ function createMockDeps(overrides: Record<string, unknown> = {}): ConversationCo
     getExecutionCoordinator: () => null,
     ...overrides,
   } as unknown as ReturnType<typeof createMockDeps>;
+  const mockSettings = (deps as any).plugin.settings as Record<string, unknown>;
+  updateCurrentKiroCatalog(mockSettings, {
+    defaultModelId: null,
+    fingerprint: 'test-fingerprint',
+    refreshedAt: 0,
+    models: [{
+      rawId: 'haiku',
+      displayName: 'Haiku',
+      description: 'Title model',
+      reasoningEfforts: [],
+      supportsReasoning: false,
+    }],
+  });
+  updateKiroProviderSettings(mockSettings, { enabled: true, visibleModels: ['haiku'] });
   return Object.assign(deps, createConversationPorts({ ...(deps as any), session }));
 }
 
@@ -297,7 +311,7 @@ describe('SessionBrowser', () => {
         const onSelectConversation = jest.fn().mockResolvedValue(undefined);
         (deps.plugin.getConversationList as jest.Mock).mockReturnValue([{
           id: 'session-1',
-          providerId: 'claude',
+          providerId: 'kiro',
           title: 'Keyboard session',
           createdAt: 1_000,
           lastActivityAt: 2_000,
