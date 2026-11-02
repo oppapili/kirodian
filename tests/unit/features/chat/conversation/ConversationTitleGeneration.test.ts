@@ -1,6 +1,5 @@
 import '@/providers';
 
-import { claudeCatalogFixture } from '@test/helpers/claudeModels';
 import { Notice } from 'obsidian';
 
 import type { TitleGenerationService } from '@/core/providers/types';
@@ -8,6 +7,32 @@ import {
   ConversationTitleGeneration,
   fallbackConversationTitle,
 } from '@/features/chat/conversation/ConversationTitleGeneration';
+import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
+
+// Kiro resolves the title model through its own catalog: the selection carries
+// the `kiro/` prefix and availability comes from the host catalog plus the
+// provider's visibleModels. A bare id or providerConfigs entry does not satisfy
+// resolveTitleGenerationSelection.
+function kiroTitleSettings(): Record<string, unknown> {
+  const settings: Record<string, unknown> = {
+    enableAutoTitleGeneration: true,
+    titleGenerationModel: 'kiro/haiku',
+  };
+  updateCurrentKiroCatalog(settings, {
+    defaultModelId: null,
+    fingerprint: 'test-fingerprint',
+    refreshedAt: 0,
+    models: [{
+      rawId: 'haiku',
+      displayName: 'Haiku',
+      description: 'Title model',
+      reasoningEfforts: [],
+      supportsReasoning: false,
+    }],
+  });
+  updateKiroProviderSettings(settings, { enabled: true, visibleModels: ['haiku'] });
+  return settings;
+}
 
 describe('fallbackConversationTitle', () => {
   it('uses the first sentence', () => {
@@ -43,11 +68,7 @@ describe('ConversationTitleGeneration.regenerate', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     host = {
-      settings: {
-        enableAutoTitleGeneration: true,
-        titleGenerationModel: 'haiku',
-        providerConfigs: { kiro: claudeCatalogFixture(['haiku']) },
-      },
+      settings: kiroTitleSettings(),
       getConversationById: jest.fn().mockResolvedValue(null),
       renameConversation: jest.fn().mockResolvedValue(undefined),
       updateConversation: jest.fn().mockResolvedValue(undefined),
@@ -125,7 +146,7 @@ describe('ConversationTitleGeneration.regenerate', () => {
     expect(service.generateTitle).not.toHaveBeenCalled();
   });
 
-  it.skip('should call titleService.generateTitle with correct params', async () => {
+  it('should call titleService.generateTitle with correct params', async () => {
     host.getConversationById.mockResolvedValue({
       id: 'conv-1',
       title: 'Old Title',
@@ -150,7 +171,7 @@ describe('ConversationTitleGeneration.regenerate', () => {
     );
   });
 
-  it.skip('should regenerate title with only user message (no assistant yet)', async () => {
+  it('should regenerate title with only user message (no assistant yet)', async () => {
     host.getConversationById.mockResolvedValue({
       id: 'conv-1',
       title: 'Old Title',
@@ -166,7 +187,7 @@ describe('ConversationTitleGeneration.regenerate', () => {
     );
   });
 
-  it.skip('should rename conversation with generated title', async () => {
+  it('should rename conversation with generated title', async () => {
     host.getConversationById.mockResolvedValue({
       id: 'conv-1',
       title: 'Old Title',
@@ -198,7 +219,7 @@ describe('ConversationTitleGeneration.regenerate', () => {
       });
     });
 
-    it.skip('should mark as failed when generation fails and user has not renamed', async () => {
+    it('should mark as failed when generation fails and user has not renamed', async () => {
       service.generateTitle.mockImplementation(
         async (_convId: string, _user: string, callback: any) => {
           // On callback, the stored title is unchanged (user didn't rename).
@@ -215,7 +236,7 @@ describe('ConversationTitleGeneration.regenerate', () => {
       });
     });
 
-    it.skip('should clear status when user manually renamed during generation', async () => {
+    it('should clear status when user manually renamed during generation', async () => {
       service.generateTitle.mockImplementation(
         async (_convId: string, _user: string, callback: any) => {
           // On callback, the stored title differs (user renamed).

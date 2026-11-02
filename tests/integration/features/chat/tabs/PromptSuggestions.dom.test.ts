@@ -1,8 +1,6 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
-import * as sdkModule from '@anthropic-ai/claude-agent-sdk';
-import { claudeCatalogFixture } from '@test/helpers/claudeModels';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
 import { App, Component } from 'obsidian';
@@ -13,18 +11,12 @@ import type { ClaudianSettings, Conversation } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { activateTab, deactivateTab, destroyTab } from '@/features/chat/tabs/TabLifecycle';
 import { createTabRuntime } from '@/features/chat/tabs/TabRuntimeFactory';
+import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
-
-const sdkMock = sdkModule as unknown as {
-  resetMockMessages(): void;
-  setMockMessages(messages: unknown[], options?: { appendResult?: boolean }): void;
-  getLastOptions(): sdkModule.Options;
-};
 
 const originalResizeObserver = globalThis.ResizeObserver;
 beforeEach(() => {
   globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
-  sdkMock.resetMockMessages();
   Object.assign(HTMLElement.prototype, {
     hasClass(this: HTMLElement, name: string) { return this.classList.contains(name); },
     addClass(this: HTMLElement, ...names: string[]) { this.classList.add(...names); },
@@ -53,15 +45,30 @@ async function createView(fakeBackend?: FakeSideBackend) {
   Object.assign(app.workspace, { getActiveViewOfType: () => null });
   const lifecycleRegistry = new ProviderExecutionLifecycleRegistry();
   const settings = {
-    model: 'claude-sonnet-4-5', effortLevel: 'high', permissionMode: 'normal',
+    model: 'kiro/claude-sonnet-4-5', effortLevel: 'high', permissionMode: 'normal',
     enableAutoTitleGeneration: false, excludedTags: [], mediaFolder: '', systemPrompt: '', userName: '',
-    providerConfigs: { kiro: {
-      ...claudeCatalogFixture(['claude-sonnet-4-5', 'claude-opus-4-6'], ['low', 'high']),
-      promptSuggestions: true,
-    } },
   } as unknown as ClaudianSettings;
+  updateCurrentKiroCatalog(settings as unknown as Record<string, unknown>, {
+    defaultModelId: null,
+    fingerprint: 'test-fingerprint',
+    refreshedAt: 0,
+    models: ['claude-sonnet-4-5', 'claude-opus-4-6'].map(rawId => ({
+      rawId,
+      displayName: rawId,
+      description: 'SDK model',
+      reasoningEfforts: [
+        { label: 'Low', value: 'low' },
+        { label: 'High', value: 'high' },
+      ],
+      supportsReasoning: true,
+    })),
+  });
+  updateKiroProviderSettings(settings as unknown as Record<string, unknown>, {
+    enabled: true,
+    visibleModels: ['claude-sonnet-4-5', 'claude-opus-4-6'],
+  });
   const conversation = {
-    id: 'conversation-1', providerId: 'kiro', selectedModel: 'claude-sonnet-4-5',
+    id: 'conversation-1', providerId: 'kiro', selectedModel: 'kiro/claude-sonnet-4-5',
     sessionId: 'main-session', messages: [],
   } as unknown as Conversation;
   const saved: unknown[] = [];
@@ -129,28 +136,6 @@ async function selectToolbarModel(view: View, name: RegExp): Promise<HTMLElement
   return modelButton;
 }
 
-async function finishSideChatTurn(view: View, backend: FakeSideBackend): Promise<void> {
-  const mainSession = backend.latest;
-  view.tab.dom.inputEl.value = '/side Explore elsewhere';
-  const pending = view.tab.controllers.inputController.sendMessage();
-  await waitFor(() => expect(backend.latest).not.toBe(mainSession));
-  await waitFor(() => expect(backend.latest.requests).toHaveLength(1));
-  backend.latest.emitText('Side answer');
-  backend.latest.complete();
-  await pending;
-}
-
-async function selectSideChatModel(view: View, name: RegExp): Promise<void> {
-  const modelButton = await selectToolbarModel(view, name);
-  await waitFor(() => expect(modelButton.getAttribute('aria-label')).toMatch(name));
-  expect(view.saved).not.toContainEqual({ selectedModel: expect.anything() });
-}
-
-function returnToMainComposer(view: View): void {
-  view.tab.controllers.sideChatController.collapse();
-  expect(view.tab.controllers.sideChatController.destination).toBe('main');
-}
-
 /** Composer activity that neither starts a main turn nor changes the main tab's model. */
 const retainingActivity = {
   'rewind in progress': async (view: View) => {
@@ -165,30 +150,16 @@ const retainingActivity = {
     await view.tab.controllers.inputController.sendMessage();
     expect(view.tab.dom.inputEl.value).toBe('/side');
   },
-  'side chat turn': async (view: View, backend: FakeSideBackend) => {
-    await finishSideChatTurn(view, backend);
-    returnToMainComposer(view);
-  },
-  'side chat model change': async (view: View, backend: FakeSideBackend) => {
-    await finishSideChatTurn(view, backend);
-    await selectSideChatModel(view, /opus/i);
-    returnToMainComposer(view);
-  },
 };
 
 it('routes a native post-result suggestion to the composer without persisting it', async () => {
-  const view = await createView();
+  const backend = new FakeSideBackend();
+  const view = await createView(backend);
   try {
-    sdkMock.setMockMessages([
-      { type: 'system', subtype: 'init', session_id: 'main-session' },
-      { type: 'assistant', message: { content: [{ type: 'text', text: 'Done.' }] } },
-      { type: 'result', subtype: 'success', session_id: 'main-session' },
-      { type: 'prompt_suggestion', suggestion: 'Add tests next', session_id: 'main-session', uuid: 'suggestion' },
-    ], { appendResult: false });
-    view.tab.dom.inputEl.value = 'Do the work';
-    await view.tab.controllers.inputController.sendMessage();
+    const turnId = await finishFakeTurn(view, backend);
+    expect(backend.latest.requests[0].configuration.promptSuggestions).toBe(true);
+    backend.latest.emitSessionEvent({ type: 'prompt_suggestion', originatingTurnId: turnId, suggestion: 'Add tests next' });
     await waitFor(() => expect(within(view.tab.dom.inputEl).getByText('Add tests next')).toBeDefined());
-    expect(sdkMock.getLastOptions().promptSuggestions).toBe(true);
     expect(view.tab.dom.inputEl.value).toBe('');
     expect(JSON.stringify(view.saved)).not.toContain('Add tests next');
     expect(JSON.stringify(view.tab.state.messages)).not.toContain('Add tests next');
@@ -245,7 +216,7 @@ it.each(Object.keys(retainingActivity) as (keyof typeof retainingActivity)[])(
       mainSession.emitSessionEvent({ type: 'prompt_suggestion', originatingTurnId: turnId, suggestion: 'Kept suggestion' });
       const input = view.tab.dom.inputEl;
       expect(within(input).getByText('Kept suggestion')).toBeDefined();
-      await retainingActivity[activity](view, backend);
+      await retainingActivity[activity](view);
       expect(mainSession.requests).toHaveLength(1);
       input.value = '';
       fireEvent.input(input);

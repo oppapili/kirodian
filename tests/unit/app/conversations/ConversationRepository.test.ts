@@ -53,18 +53,21 @@ function createRepository(conversation = createConversation()) {
 }
 
 describe('ConversationRepository hydration', () => {
-  it.each([false, true])('does not copy unrelated history when invalidating providers (Claude: %s)', (shouldInvalidateKiro) => {
+  it.each([false, true])('does not copy unrelated history when invalidating providers (invalidate kiro: %s)', (invalidateKiro) => {
     const affected = createConversation();
-    const unrelated = { ...createConversation('other'), providerId: 'codex' as const };
+    const unrelated = { ...createConversation('other'), providerId: 'other' as const };
     const serializeUnrelated = jest.fn(() => []);
     Object.defineProperty(unrelated.messages, 'toJSON', { value: serializeUnrelated });
     const { repository } = createRepository(affected);
     repository.replaceAll([affected, unrelated]);
 
-    const result = repository.invalidateProviderSessions(shouldInvalidateKiro ? ['kiro'] : []);
+    const result = repository.invalidateProviderSessions(invalidateKiro ? ['kiro'] : []);
 
-    expect(result).toEqual(shouldInvalidateKiro ? [repository.getSync(affected.id)] : []);
-    expect(repository.getSync(affected.id)!.sessionId).toBe(shouldInvalidateKiro ? null : 'session-1');
+    // Kiro reloads rather than invalidating native sessions, so its reconciler
+    // never returns invalidated conversations; the contract under test is that
+    // invalidation never serializes the unrelated provider's transcript.
+    expect(result).toEqual([]);
+    expect(repository.getSync(affected.id)!.sessionId).toBe('session-1');
     expect(repository.getSync(unrelated.id)!.sessionId).toBe('session-1');
     expect(serializeUnrelated).not.toHaveBeenCalled();
   });

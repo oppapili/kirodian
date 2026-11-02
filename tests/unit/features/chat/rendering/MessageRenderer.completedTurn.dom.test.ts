@@ -54,7 +54,10 @@ beforeEach(() => {
 });
 
 it.each([false, true])('collapses completed history above the answer and puts copy, fork, time below it (compaction: %s)', async compaction => {
-  const { renderer, messagesEl, fork } = setup();
+  // Fork placement is a provider-neutral renderer contract; exercise it with a
+  // fork-capable provider since kiro itself does not support fork. Kiro's own
+  // capability values are asserted in tests/unit/providers/kiro/capabilities.test.ts.
+  const { renderer, messagesEl, fork } = setup('kiro', { supportsFork: true });
   const historyMessages: ChatMessage[] = [...messages];
   if (compaction) historyMessages.splice(2, 0, {
     id: 'compact', role: 'assistant', content: '', timestamp: testDate().getTime(),
@@ -220,7 +223,7 @@ it('keeps Claude replay output expanded when a user-role interrupt follows it', 
 });
 
 it('offers fork on the final live response of a multi-message turn', async () => {
-  const { renderer, messagesEl, fork } = setup();
+  const { renderer, messagesEl, fork } = setup('kiro', { supportsFork: true });
   for (const message of messages) {
     const el = renderer.addMessage(message);
     if (message.role === 'assistant') {
@@ -237,7 +240,7 @@ it('offers fork on the final live response of a multi-message turn', async () =>
 });
 
 it('offers full-session fork only on the latest reply and removes it when another turn starts', async () => {
-  const { renderer, messagesEl, fork } = setup('kiro', { forkMode: 'full-session' });
+  const { renderer, messagesEl, fork } = setup('kiro', { supportsFork: true, forkMode: 'full-session' });
   const latest: ChatMessage = { id: 'a3', role: 'assistant', content: 'Latest answer', timestamp: 7,
     assistantMessageId: 'native-a3' };
   renderer.renderMessages([...messages, { id: 'u2', role: 'user', content: 'Next', timestamp: 6 }, latest], () => 'Hello');
@@ -385,8 +388,12 @@ it('keeps requested work on both sides of a mid-response notification in its own
 });
 
 
-it.each(['kiro'])('shows native throughput for %s on replay', async (provider) => {
-  const { renderer, messagesEl } = setup(provider);
+// Throughput display is a provider-neutral renderer contract gated on
+// supportsResponseThroughput; kiro does not advertise it (asserted in
+// tests/unit/providers/kiro/capabilities.test.ts), so exercise the rendering
+// path with the capability overridden on.
+it('shows native throughput on replay when the provider advertises it', async () => {
+  const { renderer, messagesEl } = setup('kiro', { supportsResponseThroughput: true });
   const response = { ...messages[2], turnStats: { outputTokens: 125, durationMs: 2500 } };
   renderer.renderMessages([messages[0], response], () => 'Hello');
   const stat = within(messagesEl).getByText('50.0 tok/s');
@@ -399,10 +406,12 @@ it.each(['kiro'])('shows native throughput for %s on replay', async (provider) =
 });
 
 it.each([
-  ['kiro', { outputTokens: 125, durationMs: 2500 }],
-  ['kiro', undefined],
-])('omits unavailable or unsupported throughput (%s, %j)', (provider, turnStats) => {
-  const { renderer, messagesEl } = setup(provider as string);
+  // Provider does not advertise throughput, even though stats are present.
+  ['unsupported provider', {}, { outputTokens: 125, durationMs: 2500 }],
+  // Provider advertises throughput, but the turn carries no usable stats.
+  ['supported provider without stats', { supportsResponseThroughput: true }, undefined],
+])('omits unavailable or unsupported throughput (%s)', (_label, capabilityOverride, turnStats) => {
+  const { renderer, messagesEl } = setup('kiro', capabilityOverride as Record<string, unknown>);
   renderer.renderMessages([messages[0], { ...messages[2], turnStats } as ChatMessage], () => 'Hello');
   expect(within(messagesEl).queryByText(/tok\/s/)).toBeNull();
   renderer.dispose();
@@ -413,14 +422,14 @@ it.each([
   [300, 119960, '2.5 tok/s', '300 tokens · 2m 0s'],
   [90, 3000, '30.0 tok/s', '90 tokens · 3s'],
 ])('summarizes %i tokens over %ims in the tooltip', (outputTokens, durationMs, rate, tooltip) => {
-  const { renderer, messagesEl } = setup();
+  const { renderer, messagesEl } = setup('kiro', { supportsResponseThroughput: true });
   renderer.renderMessages([messages[0], { ...messages[2], turnStats: { outputTokens, durationMs } }], () => 'Hello');
   expect(within(messagesEl).getByText(rate).getAttribute('aria-label')).toBe(tooltip);
   renderer.dispose();
 });
 
 it('keeps time after throughput when timestamps are refreshed or toggled', () => {
-  const { renderer, messagesEl, settings } = setup();
+  const { renderer, messagesEl, settings } = setup('kiro', { supportsFork: true, supportsResponseThroughput: true });
   renderer.renderMessages([messages[0], { ...messages[2], turnStats: { outputTokens: 158, durationMs: 10000 } }], () => 'Hello');
   const stat = within(messagesEl).getByText('15.8 tok/s');
   const toolbar = stat.parentElement!;

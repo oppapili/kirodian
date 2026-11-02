@@ -7,9 +7,9 @@ import { axe } from 'jest-axe';
 import { Notice } from 'obsidian';
 
 import { RoutedTitleGenerationService } from '@/core/auxiliary/RoutedTitleGenerationService';
-import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 import type { Conversation } from '@/core/types';
 import { SessionBrowser, type SessionBrowserDeps } from '@/features/chat/session-manager/SessionBrowser';
+import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };

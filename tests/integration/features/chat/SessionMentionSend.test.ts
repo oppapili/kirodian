@@ -14,7 +14,7 @@ const time = testDate().getTime();
 
 function setup() {
   const native = createHarness();
-  const fixture = createFixture({ getExecutionCoordinator: () => native.coordinator });
+  const fixture = createFixture({ getExecutionCoordinator: () => native.coordinator, getTabProviderId: () => 'kiro' });
   const write = jest.fn().mockResolvedValue('/tmp/claudian-sessions/snapshot.md');
   Object.assign(fixture.plugin, {
     writeSessionSnapshot: write,

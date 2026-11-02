@@ -1,7 +1,7 @@
 import '@/providers';
 
-import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
 import type { SubagentInfo } from '@/core/types';
+import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
 
 jest.mock('@/features/chat/subagents/SubagentRenderer', () => ({
   createSubagentBlock: jest.fn((_parentEl: any, info: SubagentInfo) => ({ info, wrapperEl: {} })),
@@ -39,7 +39,7 @@ describe('SubagentManager', () => {
 
     it('returns null when finalizing nonexistent subagent', () => {
       const manager = new SubagentManager(() => {});
-      const result = manager.finalizeSyncSubagent('nonexistent');
+      const result = manager.finalizeSyncSubagent('nonexistent', 'Done', false);
       expect(result).toBeNull();
     });
 
@@ -54,9 +54,6 @@ describe('SubagentManager', () => {
       const parentEl = createMockEl();
 
       manager.handleTaskToolUse('task-1', { prompt: 'test' }, parentEl);
-      // spawned count depends on whether sync was created
-      const countBefore = manager.subagentsSpawnedThisStream;
-
       manager.resetSpawnedCount();
       expect(manager.subagentsSpawnedThisStream).toBe(0);
     });

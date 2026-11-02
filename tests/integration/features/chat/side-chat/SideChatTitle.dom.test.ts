@@ -1,24 +1,46 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
-import { claudeCatalogFixture } from '@test/helpers/claudeModels';
 import { createHarness, releaseSideChatHarnesses, startSideChat } from '@test/helpers/features/chat/SideChatDOMHarness';
 import { screen, waitFor } from '@testing-library/dom';
 
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
+import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 
-beforeEach(() => ProviderWorkspaceRegistry.setServices('claude', {}));
+// Kiro resolves the title model through its own catalog: the selection carries
+// the `kiro/` prefix and availability is read from the host catalog plus the
+// provider's visibleModels (not a bare id or providerConfigs). Mirrors the
+// setup in SessionBrowser.titleGeneration.dom.test.ts.
+function kiroTitleSettings(extra: Record<string, unknown> = {}): Record<string, unknown> {
+  const settings: Record<string, unknown> = {
+    enableAutoTitleGeneration: true,
+    titleGenerationModel: 'kiro/haiku',
+    ...extra,
+  };
+  updateCurrentKiroCatalog(settings, {
+    defaultModelId: null,
+    fingerprint: 'test-fingerprint',
+    refreshedAt: 0,
+    models: [{
+      rawId: 'haiku',
+      displayName: 'Haiku',
+      description: 'Title model',
+      reasoningEfforts: [],
+      supportsReasoning: false,
+    }],
+  });
+  updateKiroProviderSettings(settings, { enabled: true, visibleModels: ['haiku'] });
+  return settings;
+}
+
+beforeEach(() => ProviderWorkspaceRegistry.setServices('kiro', {}));
 afterEach(async () => {
   await releaseSideChatHarnesses();
   ProviderWorkspaceRegistry.clear();
 });
 
 it('generates a side title from its initial prompt without blocking chat or changing destination', async () => {
-  const harness = createHarness({ settings: {
-    enableAutoTitleGeneration: true,
-    titleGenerationModel: 'haiku',
-    providerConfigs: { claude: claudeCatalogFixture(['haiku']) },
-  } });
+  const harness = createHarness({ settings: kiroTitleSettings() });
   const titles = {
     get sessions() {
       return harness.backend.sessions.filter(session => session.requests[0]?.toolPolicy.kind === 'passive');
@@ -68,11 +90,7 @@ it('keeps the generic title without launching title generation when disabled', a
 });
 
 it('retains the initial prompt fallback if the title request fails', async () => {
-  const harness = createHarness({ settings: {
-    enableAutoTitleGeneration: true,
-    titleGenerationModel: 'haiku',
-    providerConfigs: { claude: claudeCatalogFixture(['haiku']) },
-  } });
+  const harness = createHarness({ settings: kiroTitleSettings() });
   const titles = {
     get sessions() {
       return harness.backend.sessions.filter(session => session.requests[0]?.toolPolicy.kind === 'passive');
@@ -88,11 +106,7 @@ it('retains the initial prompt fallback if the title request fails', async () =>
 });
 
 it('cancels a discarded side title without disturbing its replacement', async () => {
-  const harness = createHarness({ settings: {
-    enableAutoTitleGeneration: true,
-    titleGenerationModel: 'haiku',
-    providerConfigs: { claude: claudeCatalogFixture(['haiku']) },
-  } });
+  const harness = createHarness({ settings: kiroTitleSettings() });
   const titles = {
     get sessions() {
       return harness.backend.sessions.filter(session => session.requests[0]?.toolPolicy.kind === 'passive');
@@ -115,11 +129,7 @@ it('cancels a discarded side title without disturbing its replacement', async ()
 });
 
 it('keeps the prompt title without a provider request until a title model is selected', async () => {
-  const harness = createHarness({ settings: {
-    enableAutoTitleGeneration: true,
-    titleGenerationModel: '',
-    providerConfigs: { claude: claudeCatalogFixture(['haiku']) },
-  } });
+  const harness = createHarness({ settings: kiroTitleSettings({ titleGenerationModel: '' }) });
   const { started } = await startSideChat(harness, 'Explore storage. Consider a log.');
   harness.backend.latest.complete();
   await started;
