@@ -18,7 +18,7 @@ HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
 HTMLElement.prototype.removeClass = function (...classes) { this.classList.remove(...classes); };
 
-function setup(providerId = 'claude', capabilityOverride: Record<string, unknown> = {}) {
+function setup(providerId = 'kiro', capabilityOverride: Record<string, unknown> = {}) {
   const messagesEl = document.body.createDiv();
   const fork = jest.fn().mockResolvedValue(undefined);
   const settings = { mediaFolder: '', showMessageTimestamps: true };
@@ -237,7 +237,7 @@ it('offers fork on the final live response of a multi-message turn', async () =>
 });
 
 it('offers full-session fork only on the latest reply and removes it when another turn starts', async () => {
-  const { renderer, messagesEl, fork } = setup('claude', { forkMode: 'full-session' });
+  const { renderer, messagesEl, fork } = setup('kiro', { forkMode: 'full-session' });
   const latest: ChatMessage = { id: 'a3', role: 'assistant', content: 'Latest answer', timestamp: 7,
     assistantMessageId: 'native-a3' };
   renderer.renderMessages([...messages, { id: 'u2', role: 'user', content: 'Next', timestamp: 6 }, latest], () => 'Hello');
@@ -385,7 +385,7 @@ it('keeps requested work on both sides of a mid-response notification in its own
 });
 
 
-it.each(['claude'])('shows native throughput for %s on replay', async (provider) => {
+it.each(['kiro'])('shows native throughput for %s on replay', async (provider) => {
   const { renderer, messagesEl } = setup(provider);
   const response = { ...messages[2], turnStats: { outputTokens: 125, durationMs: 2500 } };
   renderer.renderMessages([messages[0], response], () => 'Hello');
@@ -400,7 +400,7 @@ it.each(['claude'])('shows native throughput for %s on replay', async (provider)
 
 it.each([
   ['kiro', { outputTokens: 125, durationMs: 2500 }],
-  ['claude', undefined],
+  ['kiro', undefined],
 ])('omits unavailable or unsupported throughput (%s, %j)', (provider, turnStats) => {
   const { renderer, messagesEl } = setup(provider as string);
   renderer.renderMessages([messages[0], { ...messages[2], turnStats } as ChatMessage], () => 'Hello');

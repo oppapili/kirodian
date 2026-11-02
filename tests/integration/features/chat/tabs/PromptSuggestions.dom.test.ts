@@ -55,13 +55,13 @@ async function createView(fakeBackend?: FakeSideBackend) {
   const settings = {
     model: 'claude-sonnet-4-5', effortLevel: 'high', permissionMode: 'normal',
     enableAutoTitleGeneration: false, excludedTags: [], mediaFolder: '', systemPrompt: '', userName: '',
-    providerConfigs: { claude: {
+    providerConfigs: { kiro: {
       ...claudeCatalogFixture(['claude-sonnet-4-5', 'claude-opus-4-6'], ['low', 'high']),
       promptSuggestions: true,
     } },
   } as unknown as ClaudianSettings;
   const conversation = {
-    id: 'conversation-1', providerId: 'claude', selectedModel: 'claude-sonnet-4-5',
+    id: 'conversation-1', providerId: 'kiro', selectedModel: 'claude-sonnet-4-5',
     sessionId: 'main-session', messages: [],
   } as unknown as Conversation;
   const saved: unknown[] = [];
@@ -97,7 +97,7 @@ async function createView(fakeBackend?: FakeSideBackend) {
     getProviderCatalogConfig: () => null, isRuntimeLive: () => true,
   });
   tab.hydrationState = 'ready';
-  await tab.executionCoordinator.bindConversation({ conversationId: conversation.id, providerId: 'claude' });
+  await tab.executionCoordinator.bindConversation({ conversationId: conversation.id, providerId: 'kiro' });
   await tab.executionCoordinator.prepare();
   activateTab(tab);
   tab.dom.inputEl.focus();
@@ -217,7 +217,7 @@ it.each(['tab', 'conversation', 'provider', 'model', 'send'] as const)(
         deactivateTab(view.tab); activateTab(view.tab);
       } else if (change === 'conversation' || change === 'provider') {
         view.tab.session.bindConversation(change === 'conversation' ? 'other-conversation' : view.conversation.id,
-          change === 'provider' ? 'codex' : 'claude');
+          change === 'provider' ? 'other' : 'kiro');
       } else if (change === 'model') {
         await selectToolbarModel(view, /opus/i);
       } else {

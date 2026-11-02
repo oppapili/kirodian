@@ -44,11 +44,11 @@ function createMockComponent() {
   return new Component();
 }
 
-function mockCapabilities(providerId: 'claude' | 'kiro' = 'claude') {
+function mockCapabilities(providerId: 'kiro' = 'kiro') {
   return () => ({
     providerId,
     supportsEphemeralSessions: false,
-    supportsNativeHistory: providerId === 'claude',
+    supportsNativeHistory: false,
     supportsRewind: true,
     supportsFork: true,
     supportsProviderCommands: true,
@@ -59,7 +59,7 @@ function mockCapabilities(providerId: 'claude' | 'kiro' = 'claude') {
 
 function createRenderer(
   messagesEl?: any,
-  providerId: 'claude' | 'kiro' = 'claude',
+  providerId: 'kiro' = 'kiro',
   settings: Record<string, unknown> = {},
 ) {
   const el = messagesEl ?? createMockEl();
@@ -183,7 +183,7 @@ describe('MessageRenderer', () => {
 
   it('renders timestamps when the setting is enabled', () => {
     const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'claude', { showMessageTimestamps: true });
+    const { renderer } = createRenderer(messagesEl, 'kiro', { showMessageTimestamps: true });
     const timestamp = new Date('2026-08-12T10:30:00Z').getTime();
 
     renderer.renderStoredMessage({
@@ -206,7 +206,7 @@ describe('MessageRenderer', () => {
 
   it('does not render timestamps when the setting is disabled', () => {
     const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'claude', { showMessageTimestamps: false });
+    const { renderer } = createRenderer(messagesEl, 'kiro', { showMessageTimestamps: false });
 
     renderer.renderStoredMessage({
       id: 'untimed-user',
@@ -529,7 +529,7 @@ describe('MessageRenderer', () => {
     const messagesEl = createMockEl();
     const mockComponent = createMockComponent();
     const renderer = new MessageRenderer(
-      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities('claude'),
+      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities(),
     );
     const renderContentSpy = jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
@@ -611,7 +611,7 @@ describe('MessageRenderer', () => {
 
   it('passes expanded file-edit default to stored Write/Edit renderer', () => {
     const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'claude', { expandFileEditsByDefault: true });
+    const { renderer } = createRenderer(messagesEl, 'kiro', { expandFileEditsByDefault: true });
 
     const msg: ChatMessage = {
       id: 'm-write-expanded',
@@ -885,7 +885,7 @@ describe('MessageRenderer', () => {
     const messagesEl = createMockEl();
     const mockComponent = createMockComponent();
     const renderer = new MessageRenderer(
-      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities('claude'),
+      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities(),
     );
 
     (renderStoredToolCall as jest.Mock).mockClear();
@@ -912,7 +912,7 @@ describe('MessageRenderer', () => {
     const messagesEl = createMockEl();
     const mockComponent = createMockComponent();
     const renderer = new MessageRenderer(
-      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities('claude'),
+      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities(),
     );
 
     (renderStoredToolCall as jest.Mock).mockClear();

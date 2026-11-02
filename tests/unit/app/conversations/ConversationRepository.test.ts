@@ -9,7 +9,7 @@ import type { Conversation } from '@/core/types';
 function createConversation(id = 'conversation-1'): Conversation {
   return {
     id,
-    providerId: 'claude',
+    providerId: 'kiro',
     title: 'Conversation',
     createdAt: 1,
     lastActivityAt: 1,
@@ -53,7 +53,7 @@ function createRepository(conversation = createConversation()) {
 }
 
 describe('ConversationRepository hydration', () => {
-  it.each([false, true])('does not copy unrelated history when invalidating providers (Claude: %s)', (invalidateClaude) => {
+  it.each([false, true])('does not copy unrelated history when invalidating providers (Claude: %s)', (shouldInvalidateKiro) => {
     const affected = createConversation();
     const unrelated = { ...createConversation('other'), providerId: 'codex' as const };
     const serializeUnrelated = jest.fn(() => []);
@@ -61,10 +61,10 @@ describe('ConversationRepository hydration', () => {
     const { repository } = createRepository(affected);
     repository.replaceAll([affected, unrelated]);
 
-    const result = repository.invalidateProviderSessions(invalidateClaude ? ['claude'] : []);
+    const result = repository.invalidateProviderSessions(shouldInvalidateKiro ? ['kiro'] : []);
 
-    expect(result).toEqual(invalidateClaude ? [repository.getSync(affected.id)] : []);
-    expect(repository.getSync(affected.id)!.sessionId).toBe(invalidateClaude ? null : 'session-1');
+    expect(result).toEqual(shouldInvalidateKiro ? [repository.getSync(affected.id)] : []);
+    expect(repository.getSync(affected.id)!.sessionId).toBe(shouldInvalidateKiro ? null : 'session-1');
     expect(repository.getSync(unrelated.id)!.sessionId).toBe('session-1');
     expect(serializeUnrelated).not.toHaveBeenCalled();
   });
@@ -75,7 +75,7 @@ describe('ConversationRepository hydration', () => {
     const getConfig = ProviderRegistry.getModelPolicy.bind(ProviderRegistry);
     jest.spyOn(ProviderRegistry, 'getModelPolicy').mockImplementation(id => {
       const config = getConfig(id);
-      return id === 'claude' ? {
+      return id === 'kiro' ? {
         ...config,
         preserveUnavailableModelSelection: false,
         getModelOptions: () => ['haiku', 'sonnet', 'opus', 'fable'].map(value => ({ value, label: value })),
@@ -540,7 +540,7 @@ describe('ConversationRepository hydration', () => {
     const { repository, persistence } = createRepository(affected);
     repository.replaceAll([affected, unaffected]);
 
-    await expect(repository.reconcileSelectedModels('claude'))
+    await expect(repository.reconcileSelectedModels('kiro'))
       .resolves.toEqual([]);
 
     expect(repository.getSync(affected.id)!.selectedModel).toBe('claude-code/retired-model');
@@ -609,7 +609,7 @@ describe('ConversationRepository hydration', () => {
       'binding-1',
       1,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 1,
         providerSessionId: 'native-session',
         status: 'idle',
@@ -1024,7 +1024,7 @@ describe('ConversationRepository hydration', () => {
       'binding-1',
       1,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 1,
         status: 'idle',
         providerSessionId: 'provider-session-1',
@@ -1063,7 +1063,7 @@ describe('ConversationRepository hydration', () => {
       'replacement-binding',
       2,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 1,
         status: 'idle',
         providerSessionId: 'replacement-provider-session',
@@ -1093,7 +1093,7 @@ it('does not require a metadata write to keep an unavailable selection', async (
   };
   const { repository, persistence } = createRepository(conversation);
   persistence.saveMetadata.mockRejectedValue(new Error('disk full'));
-  await expect(repository.reconcileSelectedModels('claude')).resolves.toEqual([]);
+  await expect(repository.reconcileSelectedModels('kiro')).resolves.toEqual([]);
   expect(repository.getSync(conversation.id)!.selectedModel).toBe('claude-code/retired-model');
   expect(persistence.saveMetadata).not.toHaveBeenCalled();
   expect(repository.getSync(conversation.id)!.providerState).toEqual({
