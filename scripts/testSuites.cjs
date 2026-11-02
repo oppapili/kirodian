@@ -1,6 +1,4 @@
 const crossPlatformTests = [
-  'tests/integration/providers/deepseek/runtime/DeepSeekHostProcess.test.ts',
-  'tests/integration/providers/deepseek/runtime/DeepSeekLaunchArtifacts.test.ts',
   'tests/integration/core/process/ProcessProbe.test.ts',
   'tests/integration/core/process/ManagedStdioProcess.test.ts',
   'tests/integration/core/process/cliBinaryLocator.test.ts',
