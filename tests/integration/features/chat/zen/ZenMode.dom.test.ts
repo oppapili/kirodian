@@ -103,7 +103,7 @@ function createWorkspace() {
 }
 
 function createSettings(enabled: boolean): ClaudianSettings {
-  const entry = modelCatalogCases.find(candidate => candidate.id === 'claude')!;
+  const entry = modelCatalogCases.find(candidate => candidate.id === 'kiro')!;
   const settings = JSON.parse(JSON.stringify(DEFAULT_CLAUDIAN_SETTINGS)) as ClaudianSettings;
   entry.populate(settings);
   settings.enableZenMode = enabled;
@@ -113,14 +113,14 @@ function createSettings(enabled: boolean): ClaudianSettings {
 async function createZenFixture(options: { enabled?: boolean; ready?: boolean } = {}) {
   const settings = createSettings(options.enabled ?? true);
   const harness = createHarness({ settings: settings as unknown as Record<string, unknown> });
-  ProviderWorkspaceRegistry.setServices('claude', {});
+  ProviderWorkspaceRegistry.setServices('kiro', {});
   const app = new App();
   Object.assign(app.vault.adapter, { basePath: '/vault' });
   Object.assign(app.vault, { on: () => ({}), offref: () => undefined });
   const layout = createWorkspace();
   Object.assign(app, { workspace: layout.workspace, keymap: layout.keymap, scope: new Scope() });
   const sessions: FakeSideSession[] = [];
-  jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockImplementation((_host, providerId = 'claude') => ({
+  jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockImplementation((_host, providerId = 'kiro') => ({
     providerId,
     createSession: config => {
       const session = new FakeSideSession(config);
@@ -168,8 +168,8 @@ async function createZenFixture(options: { enabled?: boolean; ready?: boolean } 
   const addView = async (placement: 'left' | 'right' | 'main', ready = true) => {
     const conversation = {
       id: `conversation-${conversations.length + 1}`,
-      providerId: 'claude',
-      selectedModel: modelCatalogCases.find(candidate => candidate.id === 'claude')!.selected,
+      providerId: 'kiro',
+      selectedModel: modelCatalogCases.find(candidate => candidate.id === 'kiro')!.selected,
       messages: [],
       sessionId: `session-${conversations.length + 1}`,
     } as unknown as Conversation;
@@ -283,7 +283,7 @@ it('follows the view brand provider after it changes while zen is open', async (
   const { view, tab, rightSplit, setCollapsed } = await createZenFixture();
   setCollapsed(rightSplit, true);
   view.syncProviderBrandColor();
-  expect(zenPanel()!.dataset.provider).toBe('claude');
+  expect(zenPanel()!.dataset.provider).toBe('kiro');
 
   // The tab switches to another provider's model from the zen composer.
   view.plugin.getConversationSummary(tab.conversationId).providerId = 'kiro';
@@ -563,7 +563,7 @@ it('clears a pending waiting status when provider invalidation ends the turn', a
   const session = await sendFromZen(tab, sessions, 'Invalidate during text');
   session.emitText('Partial response');
   await waitFor(() => expect(preview()).toBe('Partial response'));
-  await view.plugin.providerHost.executionLifecycleRegistry.runTransition(['claude'], async () => undefined);
+  await view.plugin.providerHost.executionLifecycleRegistry.runTransition(['kiro'], async () => undefined);
   await tab.session.turns.drain();
   expect(session.cancelCalls).toBeGreaterThan(0);
 

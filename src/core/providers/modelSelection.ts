@@ -1,8 +1,9 @@
 import type { ProviderId } from './types';
 
-const PROVIDER_MODEL_SELECTION_PREFIXES: Partial<Record<ProviderId, string>> = {
-  claude: 'claude-code/',
-};
+// Providers that namespace their model-selection ids with a prefix. Kiro uses
+// its own encode/decode and registers no prefix here, so this map is currently
+// empty; it stays as the registration point for any future prefixed provider.
+const PROVIDER_MODEL_SELECTION_PREFIXES: Partial<Record<ProviderId, string>> = {};
 
 export interface ProviderModelSelection {
   modelId: string;

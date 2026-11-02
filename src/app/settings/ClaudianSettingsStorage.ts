@@ -35,6 +35,17 @@ export {
 
 export type StoredClaudianSettings = ClaudianSettings;
 
+/**
+ * Provider ids that were once registered (and hidden) but whose source has
+ * since been removed from the build. A legacy settings file may still name one
+ * as `settingsProvider`, carrying that provider's model in the top-level
+ * `model`. Because the provider is no longer registered, the hidden-flag check
+ * can no longer recognize it, so we keep this explicit set to preserve the
+ * pre-removal coercion contract: a legacy selection on a retired provider is
+ * migrated to the default provider WITHOUT carrying its now-invalid model.
+ */
+const RETIRED_LEGACY_PROVIDER_IDS: ReadonlySet<ProviderId> = new Set(['claude']);
+
 const RETIRED_SHARED_SETTING_FIELDS = [
   'pinnedLinkedNotePaths',
   'enableFilePane',
@@ -428,7 +439,13 @@ function migrateLegacyChatModelSelection(
   const registeredProviderIds = new Set(ProviderRegistry.getRegisteredProviderIds());
   const storedProviderId = trimStoredString(stored.settingsProvider);
   const storedProviderKnown = registeredProviderIds.has(storedProviderId);
-  const storedProviderHidden = storedProviderKnown && isHiddenProviderId(storedProviderId);
+  // A retired legacy provider (e.g. claude after its source was removed) is no
+  // longer registered, so the hidden-flag check can't see it. Treat it as the
+  // post-migration hidden case so its now-invalid top-level model is dropped
+  // rather than mislabeled under the default provider.
+  const storedProviderRetired = RETIRED_LEGACY_PROVIDER_IDS.has(storedProviderId);
+  const storedProviderHidden =
+    (storedProviderKnown && isHiddenProviderId(storedProviderId)) || storedProviderRetired;
   const providerId = storedProviderKnown && !storedProviderHidden
     ? storedProviderId
     : DEFAULT_CHAT_PROVIDER_ID;
@@ -443,7 +460,7 @@ function migrateLegacyChatModelSelection(
     ? trimStoredString((savedProviderModels as Record<string, unknown>)[providerId])
     : '';
   // The top-level `model` belongs to the stored provider. When that provider is
-  // a known HIDDEN one (e.g. claude post-migration), the model is a claude
+  // a hidden or retired one (e.g. claude post-removal), the model is a claude
   // model that would be mislabeled under the default provider, so drop it and
   // use the target provider's own saved model. For an unknown source the model
   // has no known owner; keep the legacy carry so runtime resolution can handle it.

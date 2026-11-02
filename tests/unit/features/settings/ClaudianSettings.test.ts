@@ -42,7 +42,7 @@ describe('ClaudianSettingTab model option updates', () => {
     await (tab as any).restartServiceForPromptChange();
 
     expect(runProviderExecutionTransition).toHaveBeenCalledWith(
-      expect.arrayContaining(['claude', 'kiro']),
+      expect.arrayContaining(['kiro']),
       expect.any(Function),
     );
   });

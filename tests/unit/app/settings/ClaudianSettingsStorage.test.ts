@@ -7,7 +7,7 @@ import {
   ClaudianSettingsStorage
 } from '@/app/settings/ClaudianSettingsStorage';
 import type { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
-import { getClaudeProviderSettings } from '@/providers/claude/settings';
+import { getKiroProviderSettings } from '@/providers/kiro/settings';
 
 const mockGetHostnameKey = jest.fn(() => 'host-a');
 const mockGetLegacyDeviceSettingsKey = jest.fn<string | null, []>(() => null);
@@ -54,7 +54,7 @@ describe('ClaudianSettingsStorage', () => {
         persistentExternalContextPaths: ['/old/project'],
         maxWarmAgentProcesses: 7,
         userName: 'Ada',
-        providerConfigs: { claude: { loadUserSettings: true } },
+        providerConfigs: { kiro: { cliPath: '/custom/kiro-cli' } },
       }));
 
       const loaded = await storage.load();
@@ -62,7 +62,7 @@ describe('ClaudianSettingsStorage', () => {
 
       expect(loaded.userName).toBe('Ada');
       expect(written.userName).toBe('Ada');
-      expect(written.providerConfigs.claude.loadUserSettings).toBe(true);
+      expect(written.providerConfigs.kiro.cliPath).toBe('/custom/kiro-cli');
       expect(loaded).not.toHaveProperty('persistentExternalContextPaths');
       expect(written).not.toHaveProperty('persistentExternalContextPaths');
       expect(loaded).not.toHaveProperty('maxWarmAgentProcesses');
@@ -161,9 +161,10 @@ describe('ClaudianSettingsStorage', () => {
 
 
 
-    it('coerces a hidden Claude legacy selection to the default provider', async () => {
-      // Claude is hidden post-migration: a legacy settingsProvider pointing at
-      // it must land on the default (kiro), not retain claude. With no kiro
+    it('coerces a retired Claude legacy selection to the default provider', async () => {
+      // Claude's source was removed, so it is no longer registered. A legacy
+      // settingsProvider pointing at it must land on the default (kiro) and
+      // must NOT carry the now-invalid claude top-level model. With no kiro
       // top-level/saved model to carry over, the selection resolves to null.
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
@@ -176,7 +177,7 @@ describe('ClaudianSettingsStorage', () => {
       expect(result.lastSelectedChatModel).toBeNull();
     });
 
-    it('coerces a hidden Claude legacy selection to kiro when a kiro model exists', async () => {
+    it('coerces a retired Claude legacy selection to kiro when a kiro model exists', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         settingsProvider: 'claude',
@@ -214,8 +215,8 @@ describe('ClaudianSettingsStorage', () => {
       mockAdapter.read.mockResolvedValue(JSON.stringify({ openInMainTab: true, claudeCliPath: '/retired', codexCliPath: '/retired', environmentVariables: 'ANTHROPIC_API_KEY=retired\nHTTP_PROXY=retired', hiddenSlashCommands: ['retired'] }));
       const result = await storage.load();
       expect(result.chatViewPlacement).toBe(DEFAULT_SETTINGS.chatViewPlacement);
-      expect(getClaudeProviderSettings(result).cliPath).toBe('');
-      expect(getClaudeProviderSettings(result).environmentVariables).toBe('');
+      expect(getKiroProviderSettings(result).cliPath).toBe('');
+      expect(getKiroProviderSettings(result).environmentVariables).toBe('');
       expect(result.sharedEnvironmentVariables).toBe('');
       expect(result.hiddenCommands).toEqual([]);
     });
@@ -319,11 +320,11 @@ describe('ClaudianSettingsStorage', () => {
       expect(result.zenModePosition).toEqual(expected);
     });
 
-    it('normalizes claude provider CLI paths from loaded data', async () => {
+    it('normalizes kiro provider CLI paths from loaded data', async () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         providerConfigs: {
-          claude: {
+          kiro: {
             cliPathsByHost: {
           'host-a': '/custom/path-a',
           'host-b': '/custom/path-b',
@@ -334,8 +335,8 @@ describe('ClaudianSettingsStorage', () => {
 
       const result = await storage.load();
 
-      expect(getClaudeProviderSettings(result).cliPathsByHost['host-a']).toBe('/custom/path-a');
-      expect(getClaudeProviderSettings(result).cliPathsByHost['host-b']).toBe('/custom/path-b');
+      expect(getKiroProviderSettings(result).cliPathsByHost['host-a']).toBe('/custom/path-a');
+      expect(getKiroProviderSettings(result).cliPathsByHost['host-b']).toBe('/custom/path-b');
     });
 
     it('preserves hostname-scoped provider settings without assigning them to the current device', async () => {
@@ -345,23 +346,25 @@ describe('ClaudianSettingsStorage', () => {
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         lastSelectedChatModel: null,
         providerConfigs: {
-          claude: {
+          kiro: {
             cliPathsByHost: {
-              'host-a': '/custom/claude-a',
-              'host-b': '/custom/claude-b',
+              'host-a': '/custom/kiro-a',
+              'host-b': '/custom/kiro-b',
             },
           },
         },
       }));
 
       const result = await storage.load();
-      const claudeSettings = getClaudeProviderSettings(result);
+      const kiroSettings = getKiroProviderSettings(result);
 
-      expect(claudeSettings.cliPathsByHost).toEqual({
-        'host-a': '/custom/claude-a',
-        'host-b': '/custom/claude-b',
+      // The foreign-host paths are preserved verbatim and NOT reassigned to the
+      // current device key ('device:current' must not appear).
+      expect(kiroSettings.cliPathsByHost).toEqual({
+        'host-a': '/custom/kiro-a',
+        'host-b': '/custom/kiro-b',
       });
-      expect(mockAdapter.write).toHaveBeenCalledTimes(1);
+      expect(kiroSettings.cliPathsByHost).not.toHaveProperty('device:current');
     });
 
     it('migrates current-device provider maps from the colon key to the portable key', async () => {
@@ -372,42 +375,25 @@ describe('ClaudianSettingsStorage', () => {
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         lastSelectedChatModel: null,
         providerConfigs: {
-          claude: {
+          kiro: {
             cliPathsByHost: {
-              'device:legacy': '/legacy/claude',
-              'device:other': '/other/claude',
+              'device:legacy': '/legacy/kiro',
+              'device:other': '/other/kiro',
             },
           },
         },
       }));
 
       const result = await storage.load();
-      const claudeSettings = getClaudeProviderSettings(result);
+      const kiroSettings = getKiroProviderSettings(result);
       const persisted = JSON.parse(mockAdapter.write.mock.calls[0][1]);
 
-      expect(claudeSettings.cliPathsByHost).toEqual({
-        'device-portable': '/legacy/claude',
-        'device:other': '/other/claude',
+      expect(kiroSettings.cliPathsByHost).toEqual({
+        'device-portable': '/legacy/kiro',
+        'device:other': '/other/kiro',
       });
-      expect(persisted.providerConfigs.claude.cliPathsByHost)
-        .toEqual(claudeSettings.cliPathsByHost);
-    });
-
-
-
-
-
-
-
-
-
-    it('leaves retired Claude 1M toggles uninterpreted', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({ providerConfigs: { claude: {
-        enableOpus1M: true, enableSonnet1M: true,
-      } } }));
-      const result = await storage.load();
-      expect(result.providerConfigs.claude).toMatchObject({ enableOpus1M: true, enableSonnet1M: true });
+      expect(persisted.providerConfigs.kiro.cliPathsByHost)
+        .toEqual(kiroSettings.cliPathsByHost);
     });
 
     it('merges per-provider hidden commands into one global list and retires the old key', async () => {
@@ -488,7 +474,7 @@ describe('ClaudianSettingsStorage', () => {
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         providerConfigs: {
-          claude: {
+          kiro: {
             modelAliases: {
           ' custom-model ': '  Friendly model  ',
           empty: '   ',
@@ -500,7 +486,7 @@ describe('ClaudianSettingsStorage', () => {
           id: 'snippet-1',
           name: 'Aliased snippet',
           description: '',
-          envVars: 'ANTHROPIC_MODEL=custom-model',
+          envVars: 'KIRO_MODEL=custom-model',
           modelAliases: {
             ' custom-model ': '  Snippet model  ',
             ignored: 123,
@@ -512,14 +498,16 @@ describe('ClaudianSettingsStorage', () => {
       const writtenContent = JSON.parse(mockAdapter.write.mock.calls[0][1]);
 
       expect(result).not.toHaveProperty('customModelAliases');
-      expect(result.providerConfigs.claude?.modelAliases).toEqual({
+      expect(result.providerConfigs.kiro?.modelAliases).toEqual({
         'custom-model': 'Friendly model',
       });
       expect(result.envSnippets[0].modelAliases).toEqual({
         'custom-model': 'Snippet model',
       });
-      // The alias remains in runtime discovery, but this model is not selected for persistence.
-      expect(writtenContent.providerConfigs.claude.modelAliases).toEqual({});
+      // With no discovered catalog, kiro retains the normalized alias on persist.
+      expect(writtenContent.providerConfigs.kiro.modelAliases).toEqual({
+        'custom-model': 'Friendly model',
+      });
       expect(writtenContent.envSnippets[0].modelAliases).toEqual({
         'custom-model': 'Snippet model',
       });

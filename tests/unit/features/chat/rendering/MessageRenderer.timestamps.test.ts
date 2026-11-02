@@ -14,7 +14,7 @@ HTMLElement.prototype.setText = function (text) { this.textContent = String(text
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
 
-const providers: ProviderId[] = ['claude', 'kiro'];
+const providers: ProviderId[] = ['kiro'];
 const timestamp = 1786528800000;
 
 function createRenderer(providerId: ProviderId, enabled = true) {
@@ -53,7 +53,7 @@ describe.each(providers)('%s message timestamps', (providerId) => {
 
 describe('message timestamp refresh', () => {
   it.each(['addMessage', 'renderStoredMessage'] as const)('%s shows a timestamp only once a completion time exists', (method) => {
-    const { renderer, messagesEl, settings } = createRenderer('claude', false);
+    const { renderer, messagesEl, settings } = createRenderer('kiro', false);
     const msg: ChatMessage = { id: 'assistant', role: 'assistant', content: 'Final reply', timestamp };
     renderer[method](msg);
     const messageEl = messagesEl.querySelector<HTMLElement>('[data-message-id="assistant"]')!;
@@ -96,7 +96,7 @@ it.each([
   [13, '13:05'],
   [0, '00:05'],
 ])('renders hour %s in 24-hour format', (hour, expected) => {
-  const { renderer, messagesEl } = createRenderer('claude');
+  const { renderer, messagesEl } = createRenderer('kiro');
   renderer.addMessage({
     id: 'clock', role: 'user', content: 'Hello',
     timestamp: new Date(2026, 8, 7, hour, 5).getTime(),

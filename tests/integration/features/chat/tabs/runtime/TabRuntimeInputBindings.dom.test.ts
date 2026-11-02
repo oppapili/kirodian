@@ -23,7 +23,7 @@ beforeEach(async () => {
   Object.assign(app.vault.adapter, { basePath: '/vault' });
   Object.assign(app.vault, { on: () => ({}), offref: () => undefined });
   const conversation = {
-    id: 'conversation-1', providerId: 'claude', selectedModel: 'claude-sonnet-4-5',
+    id: 'conversation-1', providerId: 'kiro', selectedModel: 'claude-sonnet-4-5',
     sessionId: 'main-session', messages: [],
   } as unknown as Conversation;
   const plugin = {
@@ -32,7 +32,7 @@ beforeEach(async () => {
     settings: {
       model: 'claude-sonnet-4-5', permissionMode: 'normal',
       keyboardNavigation: { focusInputKey: 'i', scrollUpKey: 'w', scrollDownKey: 's' },
-      providerConfigs: { claude: { enabled: true } },
+      providerConfigs: { kiro: { enabled: true } },
     },
     getActiveEnvironmentVariables: () => '',
     getConversationSummary: () => conversation,

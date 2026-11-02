@@ -57,7 +57,7 @@ function createRouting(
       onBeforeShow: () => () => undefined,
     }),
     drafts: harness.drafts,
-    getSettings: () => ({ model: 'claude-model', reasoning: 'high', permissionMode: 'normal', serviceTier: 'default' }),
+    getSettings: () => ({ model: 'kiro-model', reasoning: 'high', permissionMode: 'normal', serviceTier: 'default' }),
     conversationController: { save: async () => undefined, commitBranchDraft: async () => true, cancelBranchDraft: () => undefined },
     ensureExecutionInitialized: async () => failAt !== 'initialization',
     getExecutionCoordinator: () => failAt === 'missing-coordinator' ? null : ({
@@ -72,7 +72,7 @@ function createRouting(
     getInputContainerEl: () => harness.inputContainerEl,
     getInputEl: () => harness.inputEl,
     getSideChatController: () => harness.controller,
-    getTabProviderId: () => 'claude',
+    getTabProviderId: () => 'kiro',
     generateId: () => `main-${mainExecutions.length}`,
     getMessagesEl: () => document.body,
     getLinkedContentController: () => ({
@@ -437,7 +437,7 @@ it('uses saved native execution when the provider requires persistent forks', as
 });
 
 it('uses the captured conversation capabilities for ephemeral side execution', async () => {
-  const base = ProviderRegistry.getCapabilities('claude');
+  const base = ProviderRegistry.getCapabilities('kiro');
   const state = { version: 'supports-ephemeral-forks' };
   const harness = createHarness({
     supportsEphemeralFork: false, providerState: state,
@@ -452,7 +452,7 @@ it('uses the captured conversation capabilities for ephemeral side execution', a
 it('uses the configured provider environment when preparing the native side fork', async () => {
   let database: string | undefined;
   const harness = createHarness({
-    settings: { providerConfigs: { claude: { environmentVariables: 'KIRO_DB=/custom/chat.db' } } },
+    settings: { providerConfigs: { kiro: { environmentVariables: 'KIRO_DB=/custom/chat.db' } } },
     buildForkProviderState: (_session, _checkpoint, _state, _vault, context, options) => {
       expect(options).toEqual({ lifecycle: 'ephemeral' });
       database = context?.environment.KIRO_DB;

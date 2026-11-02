@@ -3,14 +3,17 @@ import '@/providers';
 
 import { createHarness, releaseSideChatHarnesses, startSideChat } from '@test/helpers/features/chat/SideChatDOMHarness';
 import { screen, waitFor } from '@testing-library/dom';
-import { axe } from 'jest-axe';
 import { MarkdownRenderer } from 'obsidian';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { cancelSelectedDestinationTurn } from '@/features/chat/tabs/TabInputEvents';
 
-const subagentAdapter = ProviderRegistry.getSubagentAdapter('claude')!;
-const taskResultInterpreter = ProviderRegistry.getTaskResultInterpreter('claude');
+// Kiro's no-op task-result interpreter. Kiro has no managed-agent task mode
+// (describeTask -> { mode: null }), so the managed-agent async/foreground
+// subagent-card flows that claude exercised here have no kiro equivalent;
+// subagent rendering under kiro is covered by the MessageRenderer lifecycle
+// tests and kiroSubagentNormalization.
+const taskResultInterpreter = ProviderRegistry.getTaskResultInterpreter('kiro');
 
 beforeEach(() => {
   jest.spyOn(MarkdownRenderer, 'render').mockImplementation(async (_app, markdown, el) => {
@@ -77,91 +80,11 @@ it('does not render late events after side disposal', async () => {
   expect(harness.controller.hasSideChat).toBe(false);
 });
 
-it('settles an async subagent from a session notification after the requested turn', async () => {
-  const harness = createHarness({ subagentAdapter, taskResultInterpreter });
-  const { started } = await startSideChat(harness);
-  const native = harness.backend.latest;
-  native.establishChild('side-session');
-  native.emitOutput({
-    type: 'tool_started', toolCallId: 'task-1', toolScope: { kind: 'main' }, name: 'Agent',
-    input: { description: 'Background research', prompt: 'Find details', run_in_background: true },
-  });
-  native.emitOutput({
-    type: 'tool_completed', toolCallId: 'task-1', toolScope: { kind: 'main' }, content: 'Launched',
-    providerPayload: { rawOutput: { isAsync: true, status: 'async_launched', agentId: 'agent-1' } },
-  });
-  native.complete();
-  await started;
-  expect(screen.getByRole('button', { name: /Background research.*Running/i })).toBeDefined();
-  native.emitSessionEvent({
-    type: 'async_subagent_completed', originatingTurnId: 'task-1', subagentId: 'agent-1',
-    providerSessionId: 'side-session', status: 'completed', result: 'Background finding',
-  });
-  await waitFor(() => expect(screen.getByRole('button', { name: /Background research.*Completed/i })).toBeDefined());
-  expect(screen.getByText('Background finding')).toBeDefined();
-});
-
-it('shows live progress on a foreground subagent card until its result arrives', async () => {
-  const harness = createHarness({ subagentAdapter, taskResultInterpreter });
-  const { started } = await startSideChat(harness);
-  const native = harness.backend.latest;
-  native.establishChild('side-session');
-  native.emitOutput({
-    type: 'tool_started', toolCallId: 'task-1', toolScope: { kind: 'main' }, name: 'Agent',
-    input: { description: 'Audit auth', prompt: 'Review auth', run_in_background: false },
-  });
-  await waitFor(() => expect(screen.getByRole('button', { name: /Subagent task: Audit auth/ })).toBeDefined());
-  native.emitSessionEvent({ type: 'subagent_progress', progress: { toolCallId: 'task-1', lastToolName: 'Grep', toolUses: 1 } });
-  await waitFor(() => expect(screen.getByText('Last tool: Grep')).toBeDefined());
-  expect(screen.getByText('1 tool use')).toBeDefined();
-  native.emitSessionEvent({
-    type: 'subagent_progress',
-    progress: { toolCallId: 'task-1', summary: 'Reading the auth module', toolUses: 3, totalTokens: 12_300, durationMs: 64_000 },
-  });
-  await waitFor(() => expect(screen.getByText('Reading the auth module')).toBeDefined());
-  expect(screen.queryByText('Last tool: Grep')).toBeNull();
-  expect(screen.getByText('3 tool uses · 12.3k tokens · 1m 4s')).toBeDefined();
-  const card = screen.getByRole('button', { name: /Subagent task: Audit auth/ }).closest('.claudian-subagent-list')!;
-  expect(await axe(card)).toHaveNoViolations();
-  native.emitSessionEvent({ type: 'subagent_progress', progress: { toolCallId: 'task-1', lastToolName: 'Read', toolUses: 4 } });
-  await waitFor(() => expect(screen.getByText('4 tool uses · 12.3k tokens · 1m 4s')).toBeDefined());
-  expect(screen.getByText('Reading the auth module')).toBeDefined();
-
-  native.emitOutput({ type: 'tool_completed', toolCallId: 'task-1', toolScope: { kind: 'main' }, content: 'Auth looks fine' });
-  native.complete();
-  await started;
-  expect(screen.queryByText('Reading the auth module')).toBeNull();
-  native.emitSessionEvent({ type: 'subagent_progress', progress: { toolCallId: 'task-1', summary: 'Late summary' } });
-  await Promise.resolve();
-  expect(screen.queryByText('Late summary')).toBeNull();
-});
-
-it('shows live progress on a background subagent card after the requested turn', async () => {
-  const harness = createHarness({ subagentAdapter, taskResultInterpreter });
-  const { started } = await startSideChat(harness);
-  const native = harness.backend.latest;
-  native.establishChild('side-session');
-  native.emitOutput({
-    type: 'tool_started', toolCallId: 'task-1', toolScope: { kind: 'main' }, name: 'Agent',
-    input: { description: 'Background research', prompt: 'Find details', run_in_background: true },
-  });
-  native.emitOutput({
-    type: 'tool_completed', toolCallId: 'task-1', toolScope: { kind: 'main' }, content: 'Launched',
-    providerPayload: { rawOutput: { isAsync: true, status: 'async_launched', agentId: 'agent-1' } },
-  });
-  native.complete();
-  await started;
-  native.emitSessionEvent({
-    type: 'subagent_progress', progress: { toolCallId: 'task-1', summary: 'Searching release notes' },
-  });
-  await waitFor(() => expect(screen.getByText('Searching release notes')).toBeDefined());
-  native.emitSessionEvent({
-    type: 'async_subagent_completed', originatingTurnId: 'task-1', subagentId: 'agent-1',
-    providerSessionId: 'side-session', status: 'completed', result: 'Background finding',
-  });
-  await waitFor(() => expect(screen.getByRole('button', { name: /Background research.*Completed/i })).toBeDefined());
-  expect(screen.queryByText('Searching release notes')).toBeNull();
-});
+// The managed-agent async/foreground subagent-card flows (Agent tool launch,
+// subagent_progress, async_subagent_completed interpreted by a task-result
+// interpreter) were claude-specific. Kiro has no managed-task mode, so these
+// have no kiro equivalent and are covered instead by the MessageRenderer
+// lifecycle tests and kiroSubagentNormalization.
 
 it('leaves the working state and drops queued input when background execution fails', async () => {
   const harness = await finishedSide();
@@ -345,29 +268,8 @@ it('keeps completed automatic turns before a later notification while their rend
 });
 
 
-it('accepts usage in the next side response after a subagent response', async () => {
-  const harness = createHarness({ subagentAdapter, taskResultInterpreter });
-  const { started } = await startSideChat(harness);
-  const native = harness.backend.latest;
-  native.establishChild('side-session');
-  native.emitOutput({
-    type: 'tool_started', toolCallId: 'usage-task', toolScope: { kind: 'main' }, name: 'Agent',
-    input: { description: 'Research', prompt: 'Find details', run_in_background: false },
-  });
-  native.emitOutput({ type: 'tool_completed', toolCallId: 'usage-task', toolScope: { kind: 'main' }, content: 'Done' });
-  native.emitOutput({ type: 'usage_updated', usage: {
-    inputTokens: 900, contextTokens: 900, contextWindow: 200000, percentage: 0,
-  } });
-  native.complete();
-  await started;
-  expect(harness.controller.runtime?.state.usage).toBeNull();
-
-  const next = harness.controller.submitToSide('Follow up without a subagent', []);
-  await waitFor(() => expect(native.requests).toHaveLength(2));
-  native.emitOutput({ type: 'usage_updated', usage: {
-    inputTokens: 100, contextTokens: 100, contextWindow: 200000, percentage: 0,
-  } });
-  native.complete();
-  await next;
-  expect(harness.controller.runtime?.state.usage?.contextTokens).toBe(100);
-});
+// The "usage suppressed during a managed-subagent turn" contract was a
+// claude managed-agent semantic (the task-result interpreter marked the turn as
+// subagent-bearing). Kiro has no managed-task mode and does not suppress usage,
+// so this has no kiro equivalent. Usage acceptance/update is covered by
+// usageInfo, ContextUsageMeter, StreamController, and SideChatToolbar tests.

@@ -9,6 +9,7 @@ import type { Conversation } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { destroyTab } from '@/features/chat/tabs/TabLifecycle';
 import { createTabRuntime } from '@/features/chat/tabs/TabRuntimeFactory';
+import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
 const originalResizeObserver = globalThis.ResizeObserver;
@@ -30,27 +31,33 @@ it('refreshes destination settings when the side panel collapses, expands, and i
   Object.assign(app.vault.adapter, { basePath: '/vault' });
   Object.assign(app.vault, { on: () => ({}), offref: () => undefined });
   const conversation = {
-    id: 'conversation-1', providerId: 'claude', selectedModel: 'claude-sonnet-4-5',
+    id: 'conversation-1', providerId: 'kiro', selectedModel: 'kiro/sonnet',
     sessionId: 'main-session', messages: harness.tab.state.messages,
   } as Conversation;
+  const settings: Record<string, unknown> = {
+    settingsProvider: 'kiro',
+    // Kiro offers only Safe (normal) and YOLO permission modes (no Manual).
+    model: 'kiro/opus', effortLevel: 'medium', permissionMode: 'normal',
+    savedProviderModel: { kiro: 'kiro/opus' }, savedProviderEffort: { kiro: 'medium' },
+  };
+  // Advertise the main conversation's models + efforts through the kiro catalog.
+  updateCurrentKiroCatalog(settings, {
+    defaultModelId: null,
+    fingerprint: 'test-fingerprint',
+    refreshedAt: 0,
+    models: [
+      { rawId: 'sonnet', displayName: 'Sonnet', description: '',
+        reasoningEfforts: [{ label: 'low', value: 'low' }, { label: 'high', value: 'high' }], supportsReasoning: true },
+      { rawId: 'opus', displayName: 'Opus', description: '',
+        reasoningEfforts: [{ label: 'medium', value: 'medium' }, { label: 'high', value: 'high' }], supportsReasoning: true },
+    ],
+  });
+  updateKiroProviderSettings(settings, { enabled: true, visibleModels: ['sonnet', 'opus'] });
   const plugin = {
     ...(harness.plugin as ChatFeatureHost),
     app,
     getCommittedSettings: () => plugin.settings,
-    settings: {
-      // Pin the settings provider to claude: this conversation is a claude
-      // conversation, and kiro now defaults to enabled (#88), so an unset
-      // provider would resolve to kiro and project its (non-Manual) permission
-      // labels onto the main destination.
-      settingsProvider: 'claude',
-      model: 'claude-opus-4-6', effortLevel: 'medium', permissionMode: 'manual',
-      savedProviderModel: { claude: 'claude-opus-4-6' }, savedProviderEffort: { claude: 'medium' },
-      providerConfigs: { claude: { enabled: true, visibleModels: ['claude-sonnet-4-5', 'claude-opus-4-6'],
-        discoveredModels: [
-          { value: 'claude-sonnet-4-5', label: 'Sonnet', supportedEffortLevels: ['low', 'high'] },
-          { value: 'claude-opus-4-6', label: 'Opus', supportedEffortLevels: ['medium', 'high'] },
-        ] } },
-    },
+    settings,
     getActiveEnvironmentVariables: () => '',
     getConversationSummary(id: string) { return (this as unknown as { getConversationSync: (id: string) => any }).getConversationSync(id); },
     getConversationSync: () => conversation,
@@ -70,7 +77,7 @@ it('refreshes destination settings when the side panel collapses, expands, and i
   try {
     const started = side.handleCommandSubmission('Explore settings', []);
     await waitFor(() => expect(harness.backend.sessions).toHaveLength(1));
-    expect(harness.backend.latest.requests[0].configuration).toMatchObject({ model: 'claude-code/claude-sonnet-4-5', reasoning: 'high' });
+    expect(harness.backend.latest.requests[0].configuration).toMatchObject({ model: 'kiro/sonnet', reasoning: 'high' });
     harness.backend.latest.establishChild('child-session');
     harness.backend.latest.complete();
     await started;
@@ -80,17 +87,17 @@ it('refreshes destination settings when the side panel collapses, expands, and i
     fireEvent.click(ui.getByRole('button', { name: 'Side chat' }));
     expect(ui.queryByRole('button', { name: 'Permission mode: YOLO' })).not.toBeNull();
     expect(ui.getByText('Low', { selector: '.claudian-thinking-current' })).toBeDefined();
-    expect(ui.queryByRole('button', { name: 'Permission mode: Manual' })).toBeNull();
+    expect(ui.queryByRole('button', { name: 'Permission mode: Safe' })).toBeNull();
 
     fireEvent.click(ui.getByRole('button', { name: 'Collapse' }));
-    expect(ui.queryByRole('button', { name: 'Permission mode: Manual' })).not.toBeNull();
+    expect(ui.queryByRole('button', { name: 'Permission mode: Safe' })).not.toBeNull();
     expect(ui.getByText('High', { selector: '.claudian-thinking-current' })).toBeDefined();
     expect(ui.queryByRole('button', { name: 'Permission mode: YOLO' })).toBeNull();
 
     fireEvent.click(ui.getByRole('button', { name: 'Side chat' }));
     expect(ui.queryByRole('button', { name: 'Permission mode: YOLO' })).not.toBeNull();
     expect(ui.getByText('Low', { selector: '.claudian-thinking-current' })).toBeDefined();
-    expect(ui.queryByRole('button', { name: 'Permission mode: Manual' })).toBeNull();
+    expect(ui.queryByRole('button', { name: 'Permission mode: Safe' })).toBeNull();
 
     let finishDisposal!: () => void;
     const disposalGate = new Promise<void>(resolve => { finishDisposal = resolve; });
@@ -103,7 +110,7 @@ it('refreshes destination settings when the side panel collapses, expands, and i
     const discarded = side.discard();
     try {
       expect(side.destination).toBe('main');
-      expect(ui.queryByRole('button', { name: 'Permission mode: Manual' })).not.toBeNull();
+      expect(ui.queryByRole('button', { name: 'Permission mode: Safe' })).not.toBeNull();
     expect(ui.getByText('High', { selector: '.claudian-thinking-current' })).toBeDefined();
       expect(ui.queryByRole('button', { name: 'Permission mode: YOLO' })).toBeNull();
     } finally {
@@ -116,22 +123,23 @@ it('refreshes destination settings when the side panel collapses, expands, and i
 });
 
 it('side usage must carry the side model when native usage omits model', async () => {
-  const harness = createHarness({ settings: {
-    model: 'claude-opus-4-6', settingsProvider: 'claude',
-    savedProviderModel: { claude: 'claude-opus-4-6' },
-    providerConfigs: { claude: { enabled: true, visibleModels: ['claude-sonnet-4-5', 'claude-opus-4-6'] } },
-  } });
+  const settings: Record<string, unknown> = {
+    model: 'kiro/opus', settingsProvider: 'kiro',
+    savedProviderModel: { kiro: 'kiro/opus' },
+  };
+  updateKiroProviderSettings(settings, { enabled: true, visibleModels: ['sonnet', 'opus'] });
+  const harness = createHarness({ settings });
   const { started } = await startSideChat(harness);
   harness.backend.latest.complete();
   await started;
-  harness.controller.updateSideSettings({ model: 'claude-code/claude-sonnet-4-5', reasoning: 'high', permissionMode: 'normal', serviceTier: 'default' });
+  harness.controller.updateSideSettings({ model: 'kiro/sonnet', reasoning: 'high', permissionMode: 'normal', serviceTier: 'default' });
   const pending = harness.controller.submitToSide('second turn', []);
   await waitFor(() => expect(harness.backend.latest.requests).toHaveLength(2));
-  expect(harness.backend.latest.requests[1].configuration.model).toBe('claude-code/claude-sonnet-4-5');
+  expect(harness.backend.latest.requests[1].configuration.model).toBe('kiro/sonnet');
   harness.backend.latest.emitOutput({ type: 'usage_updated', usage: {
     inputTokens: 100, contextTokens: 100, contextWindow: 200000, percentage: 0,
   } });
   harness.backend.latest.complete();
   await pending;
-  expect(harness.controller.runtime?.state.usage?.model).toBe('claude-code/claude-sonnet-4-5');
+  expect(harness.controller.runtime?.state.usage?.model).toBe('kiro/sonnet');
 });

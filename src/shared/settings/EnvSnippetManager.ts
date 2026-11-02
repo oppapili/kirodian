@@ -9,6 +9,7 @@ import {
 } from '../../core/providers/providerEnvironment';
 import type { ProviderHost } from '../../core/providers/ProviderHost';
 import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
+import { DEFAULT_CHAT_PROVIDER_ID } from '../../core/providers/types';
 import type { EnvironmentScope, EnvSnippet } from '../../core/types';
 import { t } from '../../i18n/i18n';
 import { confirmDelete } from '../modals/ConfirmModal';
@@ -118,7 +119,11 @@ export class EnvSnippetModal extends Modal {
       contextLimitsContainer.removeClass('claudian-hidden');
 
       const existingLimits = this.snippet?.contextLimits ?? this.plugin.settings.customContextLimits ?? {};
-      const existingAliases = this.snippet?.modelAliases ?? (ProviderRegistry.getChatUIConfig('claude').customModelAliases?.get(this.plugin.settings) ?? {});
+      const existingAliases =
+        this.snippet?.modelAliases ??
+        (ProviderRegistry.getChatUIConfig(DEFAULT_CHAT_PROVIDER_ID).customModelAliases?.get(
+          this.plugin.settings,
+        ) ?? {});
 
       contextLimitsContainer.createDiv({
         text: t('settings.customModelOverrides.name'),
@@ -373,7 +378,7 @@ export class EnvSnippetManager {
       // Explicit empty aliases clear the aliases for this snippet's model IDs.
       if (snippet.modelAliases) {
         const modelIds = ProviderRegistry.getCustomModelIds(parseEnvironmentVariables(snippet.envVars));
-        const modelAliases = ProviderRegistry.getChatUIConfig('claude').customModelAliases;
+        const modelAliases = ProviderRegistry.getChatUIConfig(DEFAULT_CHAT_PROVIDER_ID).customModelAliases;
         const nextAliases = modelAliases?.get(settings) ?? {};
         for (const modelId of modelIds) {
           const alias = snippet.modelAliases[modelId]?.trim();

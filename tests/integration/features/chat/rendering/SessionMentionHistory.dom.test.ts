@@ -1,19 +1,14 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
-import * as fs from 'node:fs/promises';
-
-import { testTime } from '@test/helpers/testClock';
+import { testDate } from '@test/helpers/testClock';
 import { within } from '@testing-library/dom';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import type { ChatMessage } from '@/core/types';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
-import { loadSDKSessionMessages } from '@/providers/claude/history/ClaudeHistoryStore';
 
-jest.mock('node:fs/promises');
-
-const prompt = 'ref @"Review"\n\n<context_sessions>\n<context_session title="Review" id="conv-1-ref" provider="claude" updated="updated" path="/tmp/claudian-sessions/private.md" />\n</context_sessions>';
+const prompt = 'ref @"Review"\n\n<context_sessions>\n<context_session title="Review" id="conv-1-ref" provider="kiro" updated="updated" path="/tmp/kiro-sessions/private.md" />\n</context_sessions>';
 
 beforeEach(() => {
   HTMLElement.prototype.empty = function () { this.replaceChildren(); };
@@ -24,10 +19,12 @@ beforeEach(() => {
   });
 });
 
-it('hides snapshot XML after claude native history reload', async () => {
-  jest.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ type: 'user', uuid: 'u', timestamp: testTime(), message: { content: prompt } }));
-  const messages: ChatMessage[] = (await loadSDKSessionMessages('/vault', 'session', undefined, '/session.jsonl')).messages;
-  expect(messages).toHaveLength(1);
+it('hides snapshot XML when rendering a stored user message with a context-session snapshot', async () => {
+  // Neutral renderer contract: a stored user message carrying a <context_sessions>
+  // snapshot shows the author's prompt but not the snapshot XML or its paths.
+  const messages: ChatMessage[] = [
+    { id: 'u', role: 'user', content: prompt, timestamp: testDate().getTime() },
+  ];
   const parent = document.body.createDiv();
   const renderer = new MessageRenderer({ app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as never, new Component(), parent);
   try {

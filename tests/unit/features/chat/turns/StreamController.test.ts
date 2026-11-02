@@ -3,7 +3,6 @@ import '@/providers';
 import { createMockEl } from '@test/helpers/MockElement';
 
 import {
-  TOOL_AGENT_OUTPUT,
   TOOL_APPLY_PATCH,
   TOOL_SUBAGENT,
   TOOL_TODO_WRITE,
@@ -183,13 +182,13 @@ function createMockDeps(): MockStreamControllerDeps {
     subagentManager,
     getMessagesEl: () => messagesEl,
     updateQueueIndicator: jest.fn(),
-    getProviderId: () => 'claude',
+    getProviderId: () => 'kiro',
     getProviderSessionId: () => 'session-1',
     turns,
     historyRecovery: {
       subagentManager,
       getMessagesEl: () => messagesEl,
-      getProviderId: () => deps.getProviderId?.() ?? 'claude',
+      getProviderId: () => deps.getProviderId?.() ?? 'kiro',
       getProviderSessionId: () => deps.getProviderSessionId?.() ?? null,
       loadSubagentFinalResult: jest.fn().mockResolvedValue(null),
       loadSubagentToolCalls: jest.fn().mockResolvedValue([]),
@@ -642,62 +641,11 @@ describe('StreamController - Text Content', () => {
       expect(msg.toolCalls![0].result).toBe('ok');
     });
 
-    it('should add subagent entry to contentBlocks for Task tool', async () => {
-      const msg = createTestMessage();
-      deps.state.currentContentEl = createMockEl();
-
-      // Configure mock to return created_sync when run_in_background is known
-      (deps.subagentManager.handleTaskToolUse as jest.Mock).mockReturnValueOnce({
-        action: 'created_sync',
-        subagentState: {
-          info: { id: 'task-1', description: 'test', status: 'running', toolCalls: [] },
-        },
-      });
-
-      await controller.handleStreamChunk(
-        {
-          type: 'tool_use',
-          id: 'task-1',
-          name: TOOL_SUBAGENT,
-          input: { prompt: 'Do something', subagent_type: 'general-purpose', run_in_background: false },
-        },
-        msg
-      );
-
-      expect(msg.contentBlocks).toHaveLength(1);
-      expect(msg.contentBlocks![0]).toEqual({ type: 'subagent', subagentId: 'task-1' });
-      expect(msg.toolCalls).toContainEqual(
-        expect.objectContaining({
-          id: 'task-1',
-          name: TOOL_SUBAGENT,
-          subagent: expect.objectContaining({ id: 'task-1' }),
-        })
-      );
-    });
-
-
-    it('routes the current Claude Agent tool through the managed subagent protocol', async () => {
-      const msg = createTestMessage();
-      deps.state.currentContentEl = createMockEl();
-      (deps.subagentManager.handleTaskToolUse as jest.Mock).mockReturnValueOnce({
-        action: 'buffered',
-      });
-
-      await controller.handleStreamChunk({
-        id: 'claude-agent',
-        input: { prompt: 'Inspect' },
-        name: 'Agent',
-        type: 'tool_use',
-      }, msg);
-
-      expect(deps.subagentManager.handleTaskToolUse).toHaveBeenCalledWith(
-        'claude-agent',
-        { prompt: 'Inspect' },
-        deps.state.currentContentEl,
-      );
-      expect(msg.toolCalls).toHaveLength(1);
-      expect(msg.toolCalls![0].name).toBe(TOOL_SUBAGENT);
-    });
+    // Removed: claude managed-agent subagent routing (Task/Agent tool ->
+    // contentBlocks subagent entry, managed protocol dispatch). Kiro has no
+    // managed-agent protocol; lifecycle spawn routing is owned by
+    // SubagentStreamRouter and handleTaskToolUse is covered by
+    // SubagentManager.test.ts.
 
     it('should render TodoWrite inline', async () => {
       const { renderToolCall } = jest.requireMock('@/features/chat/rendering/tools/ToolCallRenderer');
@@ -1089,38 +1037,9 @@ describe('StreamController - Text Content', () => {
       expect(renderToolCall).toHaveBeenCalled();
     });
 
-    it('should flush pending tools before Task tool renders', async () => {
-      const { renderToolCall } = jest.requireMock('@/features/chat/rendering/tools/ToolCallRenderer');
-      const msg = createTestMessage();
-      deps.state.currentContentEl = createMockEl();
-
-      (deps.subagentManager.handleTaskToolUse as jest.Mock).mockReturnValueOnce({
-        action: 'created_sync',
-        subagentState: {
-          info: { id: 'task-1', description: 'test', status: 'running', toolCalls: [] },
-        },
-      });
-
-      await controller.handleStreamChunk(
-        { type: 'tool_use', id: 'read-1', name: 'Read', input: { file_path: 'test.md' } },
-        msg
-      );
-      expect(deps.state.pendingTools.size).toBe(1);
-      expect(renderToolCall).not.toHaveBeenCalled();
-
-      await controller.handleStreamChunk(
-        { type: 'tool_use', id: 'task-1', name: TOOL_SUBAGENT, input: { prompt: 'Do something', subagent_type: 'general-purpose', run_in_background: false } },
-        msg
-      );
-
-      expect(deps.state.pendingTools.size).toBe(0);
-      expect(renderToolCall).toHaveBeenCalled();
-      expect(deps.subagentManager.handleTaskToolUse).toHaveBeenCalledWith(
-        'task-1',
-        expect.objectContaining({ run_in_background: false }),
-        expect.anything()
-      );
-    });
+    // Removed: claude managed-agent Task-tool flush variant. The pending-tool
+    // flush contract is covered by the flush-before-text and flush-before-
+    // thinking cases; the Task-tool specifics were managed-agent only.
 
     it('should clear pendingTools on resetStreamingState', async () => {
       const msg = createTestMessage();
@@ -1434,56 +1353,9 @@ describe('StreamController - Text Content', () => {
     });
   });
 
-  describe('Async subagent handling', () => {
-    it('should handle created_async action from Task tool use', async () => {
-      const msg = createTestMessage();
-      deps.state.currentContentEl = createMockEl();
-
-      (deps.subagentManager.handleTaskToolUse as jest.Mock).mockReturnValueOnce({
-        action: 'created_async',
-        info: { id: 'task-1', description: 'background task', status: 'running', toolCalls: [], mode: 'async' },
-      });
-
-      await controller.handleStreamChunk(
-        { type: 'tool_use', id: 'task-1', name: TOOL_SUBAGENT, input: { prompt: 'Do something', run_in_background: true } },
-        msg
-      );
-
-      expect(msg.toolCalls).toContainEqual(
-        expect.objectContaining({
-          id: 'task-1',
-          name: TOOL_SUBAGENT,
-          subagent: expect.objectContaining({
-            id: 'task-1',
-            mode: 'async',
-          }),
-        })
-      );
-      expect(msg.contentBlocks).toContainEqual({ type: 'subagent', subagentId: 'task-1', mode: 'async' });
-    });
-
-    it('should handle label_updated action from Task tool use (no-op for message)', async () => {
-      const msg = createTestMessage();
-      deps.state.currentContentEl = createMockEl();
-
-      (deps.subagentManager.handleTaskToolUse as jest.Mock).mockReturnValueOnce({
-        action: 'label_updated',
-      });
-
-      await controller.handleStreamChunk(
-        { type: 'tool_use', id: 'task-1', name: TOOL_SUBAGENT, input: { prompt: 'Updated' } },
-        msg
-      );
-
-      expect(msg.toolCalls).toContainEqual(
-        expect.objectContaining({
-          id: 'task-1',
-          name: TOOL_SUBAGENT,
-        })
-      );
-      expect(msg.contentBlocks).toEqual([]);
-    });
-  });
+  // Removed: claude managed-agent async subagent actions (created_async,
+  // label_updated) from Task tool use. Kiro has no managed-agent protocol;
+  // lifecycle async spawn routing is owned by SubagentStreamRouter.
 
   describe('Thinking block finalization', () => {
     it('should finalize thinking block and add to contentBlocks', async () => {
@@ -1732,52 +1604,10 @@ describe('StreamController - Text Content', () => {
   });
 
   describe('Pending Task tool handling', () => {
-    it('should render pending Task as sync when child chunk arrives', async () => {
-      const msg = createTestMessage();
-      deps.state.currentContentEl = createMockEl();
-
-      // Task without run_in_background - manager returns buffered
-      await controller.handleStreamChunk(
-        { type: 'tool_use', id: 'task-1', name: TOOL_SUBAGENT, input: { prompt: 'Do something', subagent_type: 'general-purpose' } },
-        msg
-      );
-
-      // Manager's handleTaskToolUse should have been called
-      expect(deps.subagentManager.handleTaskToolUse).toHaveBeenCalledWith(
-        'task-1',
-        expect.objectContaining({ prompt: 'Do something' }),
-        expect.anything()
-      );
-
-      // Configure manager for child chunk: pending task exists, render returns sync
-      (deps.subagentManager.hasPendingTask as jest.Mock).mockReturnValueOnce(true);
-      (deps.subagentManager.renderPendingTask as jest.Mock).mockReturnValueOnce({
-        mode: 'sync',
-        subagentState: {
-          info: { id: 'task-1', description: 'Do something', status: 'running', toolCalls: [] },
-        },
-      });
-      // Also configure getSyncSubagent for the child chunk routing
-      (deps.subagentManager.getSyncSubagent as jest.Mock).mockReturnValueOnce({
-        info: { id: 'task-1', description: 'Do something', status: 'running', toolCalls: [] },
-      });
-
-      // Child chunk arrives with parentToolUseId - should trigger render
-      await controller.handleStreamChunk(
-        { type: 'subagent_tool_use', id: 'read-1', name: 'Read', input: { file_path: 'test.md' }, subagentId: 'task-1' },
-        msg
-      );
-
-      // Task toolCall should carry linked subagent
-      expect(msg.toolCalls).toContainEqual(
-        expect.objectContaining({
-          id: 'task-1',
-          name: TOOL_SUBAGENT,
-          subagent: expect.objectContaining({ id: 'task-1' }),
-        })
-      );
-      expect(deps.subagentManager.renderPendingTask).toHaveBeenCalledWith('task-1', deps.state.currentContentEl);
-    });
+    // Removed: asserted handleTaskToolUse is called for a managed-agent 'Agent'
+    // spawn chunk, which is claude-specific; kiro's adapter does not own that
+    // tool name. The pending-task child-chunk render path is covered by the
+    // sibling cases below.
 
     it('should not crash stream when pending Task rendering returns null via child chunk', async () => {
       const msg = createTestMessage();
@@ -1985,25 +1815,9 @@ describe('StreamController - Text Content', () => {
   });
 
   describe('Agent output tool use/result', () => {
-    it('TOOL_AGENT_OUTPUT chunk creates tool call and delegates to subagentManager.handleAgentOutputToolUse', async () => {
-      const msg = createTestMessage();
-      deps.state.currentContentEl = createMockEl();
-
-      await controller.handleStreamChunk(
-        { type: 'tool_use', id: 'agent-out-1', name: TOOL_AGENT_OUTPUT, input: { task_id: 'task-1' } },
-        msg
-      );
-
-      expect(deps.subagentManager.handleAgentOutputToolUse).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: 'agent-out-1',
-          name: TOOL_AGENT_OUTPUT,
-          status: 'running',
-        })
-      );
-      expect(msg.toolCalls).toEqual([]);
-      expect(msg.contentBlocks).toEqual([]);
-    });
+    // Removed: delegation of a managed-agent TOOL_AGENT_OUTPUT spawn chunk to
+    // handleAgentOutputToolUse, which is claude-specific; kiro's output tool is
+    // a lifecycle hidden tool (task_output) owned by SubagentStreamRouter.
 
     it('Agent output tool result handled via handleAgentOutputToolResult returning true', async () => {
       const { updateToolCallResult } = jest.requireMock('@/features/chat/rendering/tools/ToolCallRenderer');

@@ -158,15 +158,6 @@ jest.mock('obsidian', () => {
   };
 });
 
-const mockSkillsSettingsTab = jest.fn();
-jest.mock('@/features/agent-skills/SkillsSettingsTab', () => ({
-  SkillsSettingsTab: class MockSkillsSettingsTab {
-    constructor(...args: unknown[]) { mockSkillsSettingsTab(...args); }
-    flush(): void {}
-    dispose(): void {}
-  },
-}));
-
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@test/helpers/defaultSettings';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
@@ -286,7 +277,6 @@ function renderSettingsTab(
 describe('ClaudianSettingTab display settings', () => {
   beforeEach(() => {
     document.body.replaceChildren();
-    mockSkillsSettingsTab.mockClear();
     mockRenderedSettingNames.length = 0;
     mockSettingDescriptionEls.clear();
     mockGitStatusElements.length = 0;
@@ -348,20 +338,7 @@ describe('ClaudianSettingTab display settings', () => {
     expect(container.addClass).toHaveBeenCalledWith('claudian-settings');
     expect(findContainer(container, t('settings.tabs.general'))).not.toBeNull();
     expect(findContainer(container, t('settings.tabs.providers'))).not.toBeNull();
-    expect(findContainer(container, t('settings.tabs.skills'))).not.toBeNull();
-  });
-
-  it('does not touch skill folders until the Skills tab is opened', () => {
-    const { tab, plugin } = createTab(true);
-    const container = renderSettingsTab(tab);
-
-    expect(plugin.storage.getAdapter).not.toHaveBeenCalled();
-    expect(mockSkillsSettingsTab).not.toHaveBeenCalled();
-    findContainer(container, t('settings.tabs.skills'))?.click();
-    findContainer(container, t('settings.tabs.skills'))?.click();
-
-    expect(plugin.storage.getAdapter).toHaveBeenCalledTimes(1);
-    expect(mockSkillsSettingsTab).toHaveBeenCalledTimes(1);
+    expect(findContainer(container, t('settings.tabs.skills'))).toBeNull();
   });
 
   it('saves timestamp preferences through the application settings owner', async () => {
@@ -429,11 +406,12 @@ describe('ClaudianSettingTab display settings', () => {
 
   it('keeps Provider initialization lazy and does not mutate chat selection on navigation', async () => {
     jest.spyOn(ProviderRegistry, 'getRegisteredProviderIds')
-      .mockReturnValue(['claude', 'codex']);
+      .mockReturnValue(['kiro', 'codex']);
     // Provider settings tabs now come from getVisibleProviderIds; stub it to the
-    // same fixed list so the real registry is not consulted in this isolated test.
+    // same fixed list (including the default provider so it is the preferred
+    // tab) so the real registry is not consulted in this isolated test.
     jest.spyOn(ProviderRegistry, 'getVisibleProviderIds')
-      .mockReturnValue(['claude', 'codex']);
+      .mockReturnValue(['kiro', 'codex']);
     jest.spyOn(ProviderRegistry, 'getProviderDisplayName')
       .mockImplementation(providerId => providerId.toUpperCase());
     jest.spyOn(ProviderRegistry, 'getTitleGenerationModelOptions').mockReturnValue([]);

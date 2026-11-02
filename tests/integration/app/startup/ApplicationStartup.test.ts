@@ -4,17 +4,15 @@ import { SettingsCoordinator } from '@/app/settings/SettingsCoordinator';
 import { type ApplicationDomains, startApplication } from '@/app/startup/ApplicationStartup';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
-import * as sdkSession from '@/providers/claude/history/ClaudeHistoryStore';
 
 // Provider history readers touch the filesystem through Node's fs.
 jest.mock('fs');
 
-// Kiro is the default provider, so conversations with no explicit providerId
-// hydrate through the kiro native-history resolver, which reads the real fs sync
-// API directly. Under `jest.mock('fs')` those reads return undefined and crash
-// path containment. Mirror how the claude store is mocked below: resolve no
-// native session directory, so hydration is a no-op and returns the conversation
-// unchanged (the production path when no native history file exists).
+// Kiro is the sole provider, so conversations hydrate through the kiro
+// native-history resolver, which reads the real fs sync API directly. Under
+// `jest.mock('fs')` those reads return undefined and crash path containment.
+// Resolve no native session directory, so hydration is a no-op and returns the
+// conversation unchanged (the production path when no native history file exists).
 jest.mock('@/providers/kiro/history/KiroHistoryPathResolver', () => ({
   ...jest.requireActual('@/providers/kiro/history/KiroHistoryPathResolver'),
   resolveKiroSessionDirectory: () => null,
@@ -79,16 +77,6 @@ describe('startApplication', () => {
   beforeEach(() => {
     jest.restoreAllMocks();
     jest.clearAllMocks();
-    jest.spyOn(sdkSession, 'locateSDKSession').mockImplementation(async (_vaultPath, sessionId) => ({
-      availability: 'available',
-      sessionPath: `/test/claude-project/${sessionId}.jsonl`,
-    }));
-    jest.spyOn(sdkSession, 'locateSDKSessions').mockImplementation(async (_vaultPath, sessionIds) => new Map(
-      sessionIds.map(sessionId => [sessionId, {
-        availability: 'available' as const,
-        sessionPath: `/test/claude-project/${sessionId}.jsonl`,
-      }]),
-    ));
     mockApp = {
       vault: {
         adapter: {
@@ -173,7 +161,7 @@ describe('startApplication', () => {
       mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
         if (path === '.claudian/claudian-settings.json') {
           return JSON.stringify({
-            providerConfigs: { claude: { environmentVariables: 'ANTHROPIC_MODEL=custom-model' } },
+            providerConfigs: { kiro: { environmentVariables: 'KIRO_CUSTOM_ENV=custom-value' } },
             lastEnvHash: '',
           });
         }
@@ -189,11 +177,11 @@ describe('startApplication', () => {
   });
 
   describe('session metadata', () => {
-    it('should preserve Claude metadata during startup when local native history is missing', async () => {
+    it('should preserve provider metadata during startup when local native history is missing', async () => {
       const timestamp = Date.now();
       const sessionMeta = JSON.stringify({
         id: 'conv-stale-1',
-        providerId: 'claude',
+        providerId: 'kiro',
         title: 'Stale Chat',
         createdAt: timestamp,
         lastActivityAt: timestamp,
@@ -275,57 +263,6 @@ describe('startApplication', () => {
       const loaded = await domains.conversations.getConversationById('conv-saved-1');
       expect(loaded?.id).toBe('conv-saved-1');
       expect(loaded?.title).toBe('Saved Chat');
-    });
-
-    it('should clear session IDs when provider base URL changes', async () => {
-      const timestamp = Date.now();
-      const sessionMeta = JSON.stringify({
-        id: 'conv-saved-1',
-        title: 'Saved Chat',
-        providerId: 'claude',
-        createdAt: timestamp,
-        lastActivityAt: timestamp,
-        sessionId: 'saved-session',
-      });
-
-      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => {
-        return path === '.claudian/claudian-settings.json' ||
-          path === '.claudian/sessions' ||
-          path === '.claudian/sessions/conv-saved-1.meta.json';
-      });
-      mockApp.vault.adapter.list.mockImplementation(async (path: string) => {
-        if (path === '.claudian/sessions') {
-          return { files: ['.claudian/sessions/conv-saved-1.meta.json'], folders: [] };
-        }
-        return { files: [], folders: [] };
-      });
-      mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
-        if (path === '.claudian/claudian-settings.json') {
-          // All these fields are now in claudian-settings.json
-          return JSON.stringify({
-            providerConfigs: { claude: { environmentHash: 'old-hash', environmentVariables: 'ANTHROPIC_BASE_URL=https://api.example.com' } },
-          });
-        }
-        if (path === '.claudian/sessions/conv-saved-1.meta.json') {
-          return sessionMeta;
-        }
-        return '';
-      });
-
-      // data.json is minimal (already migrated)
-      plugin.loadData.mockResolvedValue({});
-
-      const domains = await loadApplication();
-
-      const loaded = await domains.conversations.getConversationById('conv-saved-1');
-      expect(loaded?.sessionId).toBeNull();
-
-      const sessionWrite = (mockApp.vault.adapter.write as jest.Mock).mock.calls.find(
-        ([path]) => path === '.claudian/sessions/conv-saved-1.meta.json'
-      );
-      expect(sessionWrite).toBeDefined();
-      const meta = JSON.parse(sessionWrite?.[1] as string);
-      expect(meta.sessionId).toBeNull();
     });
 
     it('should ignore legacy activeConversationId when no sessions exist', async () => {

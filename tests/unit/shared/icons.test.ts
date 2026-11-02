@@ -1,21 +1,28 @@
 /** @jest-environment jsdom */
 
+import type { ProviderIconSvg } from '@/core/providers/types';
 import {
-  CLAUDE_PROVIDER_ICON,
   createProviderIconSvg,
   KIRO_PROVIDER_ICON,
 } from '@/shared/icons';
 
+// A path-based icon fixture. Kiro's icon is composite, so a local fixture keeps
+// coverage of the single-path rendering branch independent of any provider.
+const PATH_ICON: ProviderIconSvg = {
+  viewBox: '0 0 24 24',
+  path: 'M4 4 L20 20',
+};
+
 describe('createProviderIconSvg', () => {
   it('renders path-based provider icons with currentColor fill', () => {
-    const svg = createProviderIconSvg(CLAUDE_PROVIDER_ICON, {
+    const svg = createProviderIconSvg(PATH_ICON, {
       className: 'test-icon',
       height: 12,
       parent: document.body,
       width: 12,
     });
 
-    expect(svg.getAttribute('viewBox')).toBe(CLAUDE_PROVIDER_ICON.viewBox);
+    expect(svg.getAttribute('viewBox')).toBe(PATH_ICON.viewBox);
     expect(svg.getAttribute('width')).toBe('12');
     expect(svg.getAttribute('height')).toBe('12');
     expect(svg.classList.contains('claudian-provider-icon')).toBe(true);

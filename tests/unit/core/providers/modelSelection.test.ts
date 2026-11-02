@@ -5,26 +5,24 @@ import {
   toProviderRuntimeModelId,
 } from '@/core/providers/modelSelection';
 
-describe('model selection namespacing', () => {
+// After the claude provider removal, no built-in provider registers a
+// model-selection prefix (kiro uses its own encode/decode). The namespacing
+// helpers therefore treat every id as unprefixed; this suite pins that
+// behaviour so a future prefixed provider re-registration is a deliberate change.
+describe('model selection namespacing (no registered prefixes)', () => {
   describe('encodeProviderModelSelectionId', () => {
-    it('trims surrounding whitespace before prefixing', () => {
-      expect(encodeProviderModelSelectionId('claude', '  deepseek-v4-pro  ')).toBe('claude-code/deepseek-v4-pro');
+    it('trims surrounding whitespace and leaves an unprefixed provider id untouched', () => {
+      expect(encodeProviderModelSelectionId('kiro', '  deepseek-v4-pro  ')).toBe('deepseek-v4-pro');
     });
 
     it('returns an empty string for empty or whitespace-only input', () => {
-      expect(encodeProviderModelSelectionId('claude', '')).toBe('');
-      expect(encodeProviderModelSelectionId('claude', '   ')).toBe('');
+      expect(encodeProviderModelSelectionId('kiro', '')).toBe('');
+      expect(encodeProviderModelSelectionId('kiro', '   ')).toBe('');
     });
 
-    // encode only guards against its OWN prefix, so a value that already carries a
-    // different provider's namespace is treated as opaque and re-prefixed. This is
-    // acceptable because callers only ever encode bare ids they own.
-    it('re-prefixes a value that carries another provider namespace', () => {
-      expect(encodeProviderModelSelectionId('claude', 'other-ns/gpt-5')).toBe('claude-code/other-ns/gpt-5');
-    });
-
-    it('leaves the id untouched when the provider has no registered prefix', () => {
+    it('leaves the id untouched for any provider when no prefix is registered', () => {
       expect(encodeProviderModelSelectionId('unknown-provider', 'deepseek-v4-pro')).toBe('deepseek-v4-pro');
+      expect(encodeProviderModelSelectionId('kiro', 'other-ns/gpt-5')).toBe('other-ns/gpt-5');
     });
   });
 
@@ -39,62 +37,30 @@ describe('model selection namespacing', () => {
       expect(decodeProviderModelSelectionId('sonnet')).toBeNull();
     });
 
-    it('returns null when only the prefix is present (no model id)', () => {
-      expect(decodeProviderModelSelectionId('claude-code/')).toBeNull();
-      expect(decodeProviderModelSelectionId('other-ns/   ')).toBeNull();
-    });
-
-    it('trims surrounding whitespace before decoding', () => {
-      expect(decodeProviderModelSelectionId('  claude-code/deepseek-v4-pro  ')).toEqual({
-        providerId: 'claude',
-        modelId: 'deepseek-v4-pro',
-      });
+    it('returns null for a namespaced-looking id when no prefix is registered', () => {
+      expect(decodeProviderModelSelectionId('other-ns/gpt-5')).toBeNull();
     });
   });
 
   describe('isProviderModelSelectionId', () => {
-    // The cross-provider check is the core invariant that lets identically-named
-    // custom models coexist: a claude-namespaced id must NOT be claimed by another provider.
-    it('is false for a value carrying a different provider namespace', () => {
-      expect(isProviderModelSelectionId('kiro', 'claude-code/deepseek-v4-pro')).toBe(false);
-      expect(isProviderModelSelectionId('claude', 'other-ns/gpt-5')).toBe(false);
-    });
-
-    it('is false for a bare model id and for empty input', () => {
-      expect(isProviderModelSelectionId('claude', 'deepseek-v4-pro')).toBe(false);
-      expect(isProviderModelSelectionId('claude', '')).toBe(false);
+    it('is false for any value when no prefix is registered', () => {
+      expect(isProviderModelSelectionId('kiro', 'other-ns/gpt-5')).toBe(false);
+      expect(isProviderModelSelectionId('kiro', 'deepseek-v4-pro')).toBe(false);
+      expect(isProviderModelSelectionId('kiro', '')).toBe(false);
     });
   });
 
   describe('toProviderRuntimeModelId', () => {
     it('leaves a bare model id unchanged', () => {
-      expect(toProviderRuntimeModelId('claude', 'deepseek-v4-pro')).toBe('deepseek-v4-pro');
+      expect(toProviderRuntimeModelId('kiro', 'deepseek-v4-pro')).toBe('deepseek-v4-pro');
     });
 
-    // Never strip another provider's namespace: handing it through verbatim is what
-    // keeps a stray cross-provider id from being misrouted at the runtime seam.
-    it('leaves a value unchanged when it carries another provider namespace', () => {
-      expect(toProviderRuntimeModelId('kiro', 'claude-code/deepseek-v4-pro')).toBe('claude-code/deepseek-v4-pro');
+    it('leaves a namespaced-looking value unchanged when no prefix is registered', () => {
+      expect(toProviderRuntimeModelId('kiro', 'other-ns/gpt-5')).toBe('other-ns/gpt-5');
     });
 
     it('returns an empty string unchanged', () => {
-      expect(toProviderRuntimeModelId('claude', '')).toBe('');
-    });
-  });
-
-  describe('encode/decode round-trip', () => {
-    it.each([
-      ['claude', 'claude-code/', 'deepseek-v4-pro'],
-    ] as const)('round-trips a %s model id through encode and toRuntimeModelId', (providerId, prefix, modelId) => {
-      const encoded = encodeProviderModelSelectionId(providerId, modelId);
-      expect(encoded).toBe(`${prefix}${modelId}`);
-      expect(isProviderModelSelectionId(providerId, encoded)).toBe(true);
-      // Stripping the runtime id must recover the original bare model id.
-      expect(toProviderRuntimeModelId(providerId, encoded)).toBe(modelId);
-      // Encoding is idempotent, so re-encoding never double-prefixes.
-      expect(encodeProviderModelSelectionId(providerId, encoded)).toBe(encoded);
-      // Decoding must attribute the id back to the owning provider.
-      expect(decodeProviderModelSelectionId(encoded)).toEqual({ providerId, modelId });
+      expect(toProviderRuntimeModelId('kiro', '')).toBe('');
     });
   });
 });

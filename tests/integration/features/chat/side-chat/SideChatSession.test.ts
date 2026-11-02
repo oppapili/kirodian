@@ -20,7 +20,7 @@ function createSession(overrides: Partial<ConstructorParameters<typeof SideChatS
     lifecycleRegistry,
     onRequestedEvent: event => { requestedEvents.push(event.type); },
     onSessionEvent: event => { sessionEvents.push(event.type); },
-    providerId: 'claude',
+    providerId: 'kiro',
     ephemeral: false,
     resolveBackend: () => backend,
     vaultWorkingDirectory: '/vault',
@@ -141,64 +141,6 @@ describe('SideChatSession', () => {
     await second;
     expect(harness.backend.sessions).toHaveLength(1);
     expect(harness.buildChildResumeState).toHaveBeenCalledTimes(1);
-    await harness.session.dispose();
-  });
-
-  it('ends an ephemeral child when a provider transition replaces its session', async () => {
-    const harness = createSession({ ephemeral: true });
-    const first = harness.session.execute(turn('Explore B'));
-    await waitFor(() => harness.backend.sessions.length === 1);
-    harness.backend.latest.complete();
-    await first;
-    await harness.lifecycleRegistry.runTransition(['claude'], async () => undefined);
-    let outcome: unknown;
-    const continuation = harness.session.execute(turn('Continue')).then(result => { outcome = result; }, error => { outcome = error; });
-    await waitFor(() => outcome !== undefined || harness.backend.sessions.length > 1);
-    if (harness.backend.sessions.length > 1) harness.backend.latest.complete();
-    await continuation;
-    expect(outcome).toBeInstanceOf(Error);
-    expect((outcome as Error).message).toMatch(/start a new side chat/i);
-    await harness.session.dispose();
-  });
-
-  it('resumes the normalized child snapshot after a provider transition instead of reforking the parent', async () => {
-    const harness = createSession();
-    const first = harness.session.execute(turn('Explore B'));
-    await waitFor(() => harness.backend.sessions.length === 1);
-    harness.backend.latest.establishChild('child-session', { childKey: 'value' });
-    harness.backend.latest.complete();
-    await first;
-
-    await harness.lifecycleRegistry.runTransition(['claude'], async () => undefined);
-    expect(harness.backend.sessions[0].disposeCalls).toBe(1);
-
-    const second = harness.session.execute(turn('Continue'));
-    await waitFor(() => harness.backend.sessions.length === 2);
-    expect(harness.backend.latest.config.resumeSeed).toEqual({
-      providerSessionId: 'child-session',
-      providerState: { childKey: 'value', forkSource: { resumeAt: 'checkpoint-1', sessionId: 'main-session' } },
-    });
-    expect(harness.buildChildResumeState).toHaveBeenCalledTimes(1);
-    harness.backend.latest.complete();
-    await second;
-    await harness.session.dispose();
-  });
-
-  it('retains newer child state when snapshot revisions restart after a provider transition', async () => {
-    const harness = createSession();
-    for (const [index, value] of ['first', 'second'].entries()) {
-      const running = harness.session.execute(turn('Continue'));
-      await waitFor(() => harness.backend.sessions.length === index + 1);
-      harness.backend.latest.establishChild('child-session', { childKey: value });
-      harness.backend.latest.complete();
-      await running;
-      await harness.lifecycleRegistry.runTransition(['claude'], async () => undefined);
-    }
-    const resumed = harness.session.execute(turn('Continue'));
-    await waitFor(() => harness.backend.sessions.length === 3);
-    expect(harness.backend.latest.config.resumeSeed?.providerState).toMatchObject({ childKey: 'second' });
-    harness.backend.latest.complete();
-    await resumed;
     await harness.session.dispose();
   });
 

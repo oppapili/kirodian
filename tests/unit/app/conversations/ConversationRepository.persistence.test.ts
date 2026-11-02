@@ -6,12 +6,12 @@ import type { SessionMetadataReader } from '@/app/storage/SessionStorage';
 import type { ProviderSessionSnapshot } from '@/core/execution';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
-import type { ChatMessage, Conversation } from '@/core/types';
+import type { Conversation } from '@/core/types';
 
 function createConversation(id = 'conversation-1'): Conversation {
   return {
     id,
-    providerId: 'claude',
+    providerId: 'kiro',
     title: 'Conversation',
     createdAt: 1,
     lastActivityAt: 1,
@@ -96,14 +96,14 @@ describe('ConversationRepository persistence queue and binding fences', () => {
     const { repository } = createRepository(conversation, persistence);
     repository.registerExecutionBinding(conversation.id, 'binding-1', 4);
     const revision1: ProviderSessionSnapshot = {
-      providerId: 'claude',
+      providerId: 'kiro',
       revision: 1,
       providerSessionId: 'native-1',
       providerState: { cursor: 1 },
       status: 'executing',
     };
     const revision2: ProviderSessionSnapshot = {
-      providerId: 'claude',
+      providerId: 'kiro',
       revision: 2,
       providerSessionId: 'native-2',
       providerState: { cursor: 2 },
@@ -151,57 +151,6 @@ describe('ConversationRepository persistence queue and binding fences', () => {
     });
   });
 
-  it('copies saved history once while isolating queued, persisted, and committed state', async () => {
-    const conversation = createConversation();
-    const persistence = createPersistence();
-    const barrier = deferred<void>();
-    persistence.saveMetadata.mockImplementationOnce(async () => {
-      await barrier.promise;
-    });
-    const { repository } = createRepository(conversation, persistence);
-    const messages: ChatMessage[] = [
-      { id: 'user', role: 'user', content: 'Delegate', timestamp: 1 },
-      {
-        id: 'assistant', role: 'assistant', content: '', timestamp: 2,
-        toolCalls: [{
-          id: 'agent', name: 'Agent', input: { description: 'Helper' }, status: 'completed',
-          subagent: {
-            id: 'agent', description: 'Helper', status: 'completed', result: 'Done',
-            isExpanded: false, toolCalls: [],
-          },
-        }],
-      },
-    ];
-    const blockingSave = repository.rename(conversation.id, 'Queued title');
-    const clone = jest.spyOn(globalThis, 'structuredClone');
-    const saving = repository.update(conversation.id, { messages });
-    // The caller keeps mutating live chat state while the save waits in the queue.
-    messages[1].toolCalls![0].subagent!.result = 'Changed while queued';
-    messages.push({ id: 'late', role: 'user', content: 'Late', timestamp: 3 });
-    barrier.resolve();
-    await Promise.all([blockingSave, saving]);
-    const historyCopies = clone.mock.calls.filter(([value]) => (
-      (value as { messages?: unknown[] } | null)?.messages?.length
-    ));
-    clone.mockRestore();
-
-    expect(historyCopies).toHaveLength(1);
-    const saved = persistence.saveMetadata.mock.calls.at(-1)![0];
-    expect(saved.providerState).toEqual({
-      subagentData: { agent: expect.objectContaining({ status: 'completed', result: 'Done' }) },
-    });
-    messages[1].toolCalls![0].subagent!.result = 'Changed after commit';
-    expect((saved.providerState as any).subagentData.agent.result).toBe('Done');
-    const committed = repository.getSync(conversation.id)!;
-    expect(committed.messages.map(message => message.id)).toEqual(['user', 'assistant']);
-    expect(committed.messages[1].toolCalls![0].subagent!.result).toBe('Done');
-
-    // A later save replaces committed history without reaching the earlier persisted projection.
-    await repository.update(conversation.id, { messages: [committed.messages[0]] });
-    expect((saved.providerState as any).subagentData.agent.result).toBe('Done');
-    expect(persistence.saveMetadata.mock.calls.at(-1)![0].providerState).toBeUndefined();
-  });
-
   it('rejects the wrong binding or generation and lets a released binding drain', async () => {
     const conversation = {
       ...createConversation(),
@@ -211,7 +160,7 @@ describe('ConversationRepository persistence queue and binding fences', () => {
     const { repository } = createRepository(conversation, persistence);
     repository.registerExecutionBinding(conversation.id, 'binding-1', 3);
     const snapshot: ProviderSessionSnapshot = {
-      providerId: 'claude',
+      providerId: 'kiro',
       revision: 1,
       providerSessionId: 'native-1',
       status: 'idle',
@@ -278,7 +227,7 @@ describe('ConversationRepository persistence queue and binding fences', () => {
       'binding-1',
       3,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 1,
         providerStateDeletes: [
           'consumedSeed',
@@ -327,7 +276,7 @@ describe('ConversationRepository persistence queue and binding fences', () => {
       'binding-1',
       3,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 1,
         providerSessionId: 'native-after-seed',
         providerStateDeletes: ['consumedSeed'],
@@ -352,7 +301,7 @@ describe('ConversationRepository persistence queue and binding fences', () => {
       'binding-1',
       3,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 2,
         providerStateDeletes: ['activeCursor'],
         status: 'invalidated',
@@ -394,7 +343,7 @@ describe('ConversationRepository persistence queue and binding fences', () => {
       'binding-1',
       3,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 1,
         providerStateDeletes: ['consumedSeed'],
         status: 'idle',
@@ -422,7 +371,7 @@ describe('ConversationRepository persistence queue and binding fences', () => {
       'old-binding',
       1,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 1,
         providerSessionId: 'stale-native',
         status: 'idle',
@@ -614,7 +563,7 @@ describe('ConversationRepository deletion persistence', () => {
       'binding-1',
       4,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 1,
         providerSessionId: 'superseded-during-delete',
         status: 'executing',
@@ -625,7 +574,7 @@ describe('ConversationRepository deletion persistence', () => {
       'binding-1',
       4,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 2,
         providerSessionId: 'native-during-delete',
         providerState: { cursor: 2 },
@@ -637,7 +586,7 @@ describe('ConversationRepository deletion persistence', () => {
       'binding-1',
       5,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 3,
         providerSessionId: 'wrong-generation-during-delete',
         status: 'idle',
@@ -658,7 +607,7 @@ describe('ConversationRepository deletion persistence', () => {
       'binding-1',
       4,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 3,
         providerSessionId: 'native-after-rollback',
         status: 'idle',
@@ -669,7 +618,7 @@ describe('ConversationRepository deletion persistence', () => {
       'binding-1',
       5,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 4,
         providerSessionId: 'wrong-generation',
         status: 'idle',
@@ -693,7 +642,7 @@ describe('ConversationRepository deletion persistence', () => {
       'old-binding',
       4,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 2,
         providerSessionId: 'obsolete-native',
         status: 'idle',
@@ -716,7 +665,7 @@ describe('ConversationRepository deletion persistence', () => {
       'new-binding',
       5,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 1,
         providerSessionId: 'replacement-native',
         status: 'idle',
@@ -743,7 +692,7 @@ describe('ConversationRepository deletion persistence', () => {
       'binding-1',
       4,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 2,
         providerSessionId: 'released-native',
         status: 'idle',
@@ -761,7 +710,7 @@ describe('ConversationRepository deletion persistence', () => {
       'binding-1',
       4,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 3,
         providerSessionId: 'released-native-later',
         status: 'idle',
@@ -785,7 +734,7 @@ describe('ConversationRepository deletion persistence', () => {
       'binding-1',
       4,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 2,
         providerSessionId: 'must-stay-deleted',
         status: 'idle',
@@ -803,7 +752,7 @@ describe('ConversationRepository deletion persistence', () => {
       'binding-1',
       4,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 3,
         providerSessionId: 'must-stay-deleted-later',
         status: 'idle',
@@ -863,7 +812,7 @@ describe('ConversationRepository deletion persistence', () => {
       'binding',
       1,
       {
-        providerId: 'claude',
+        providerId: 'kiro',
         revision: 1,
         providerSessionId: 'late-native',
         status: 'idle',

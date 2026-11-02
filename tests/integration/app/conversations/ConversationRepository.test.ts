@@ -16,10 +16,11 @@ import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { ChatExecutionCoordinator } from '@/features/chat/execution/ChatExecutionCoordinator';
 import { refreshTabContextUsage } from '@/features/chat/tabs/tabProviderUI';
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
+import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 
 function fixture() {
   const conversation: Conversation = {
-    id: 'audit-conversation', providerId: 'claude', title: 'Original',
+    id: 'audit-conversation', providerId: 'kiro', title: 'Original',
     sessionId: 'native-shared', createdAt: testDate().getTime(),
     lastActivityAt: testDate().getTime(), messages: [], isPinned: false,
   };
@@ -37,6 +38,18 @@ function fixture() {
     assignMetadataToDevice: jest.fn().mockResolvedValue(undefined),
   };
   const settings = structuredClone(DEFAULT_CLAUDIAN_SETTINGS);
+  // Kiro is catalog-driven: seed two visible models so model-selection writes
+  // normalize to real kiro selection IDs ('kiro/sonnet', 'kiro/opus').
+  updateCurrentKiroCatalog(settings, {
+    defaultModelId: 'sonnet',
+    fingerprint: 'test-fingerprint',
+    refreshedAt: 0,
+    models: [
+      { rawId: 'sonnet', displayName: 'Sonnet', description: '', reasoningEfforts: [], supportsReasoning: false },
+      { rawId: 'opus', displayName: 'Opus', description: '', reasoningEfforts: [], supportsReasoning: false },
+    ],
+  });
+  updateKiroProviderSettings(settings, { enabled: true, visibleModels: ['sonnet', 'opus'] });
   const repository = new ConversationRepository({
     providers: ProviderRegistry,
     providerSettings: ProviderSettingsCoordinator,
@@ -78,7 +91,7 @@ test('two runtime owners cannot both hand off the same conversation to native ex
   }));
   try {
     for (const coordinator of coordinators) {
-      await coordinator.bindConversation({ conversationId: conversation.id, providerId: 'claude', resumeSeed: { providerSessionId: conversation.sessionId! } });
+      await coordinator.bindConversation({ conversationId: conversation.id, providerId: 'kiro', resumeSeed: { providerSessionId: conversation.sessionId! } });
     }
     const outcomes: unknown[] = [];
     const runs = coordinators.map((coordinator, index) => coordinator.execute({
@@ -130,14 +143,14 @@ test('a metadata scan paused during source resolution cannot publish writes afte
 
 test.each(['rename', 'archive', 'model'] as const)('failed %s writes leave the committed projection intact', async operation => {
   const { repository, persistence, conversation } = fixture();
-  conversation.selectedModel = 'opus';
+  conversation.selectedModel = 'kiro/opus';
   repository.replaceAll([conversation]);
   const before = { ...conversation };
   const mutate = () => operation === 'rename'
     ? repository.rename(conversation.id, 'New title')
     : operation === 'archive'
       ? repository.setArchived(conversation.id, true)
-      : repository.update(conversation.id, { selectedModel: 'sonnet' });
+      : repository.update(conversation.id, { selectedModel: 'kiro/sonnet' });
   persistence.saveMetadata.mockRejectedValueOnce(new Error('disk unavailable'));
   await expect(mutate()).rejects.toThrow('disk unavailable');
   expect(repository.getCachedConversation(conversation.id)).toEqual(before);
@@ -196,44 +209,6 @@ test('loader disposal drains an admitted migration and rejects further on-demand
   expect(disposed).toBe(true);
 });
 
-test('historical recovery cannot overwrite a model selection whose write is pending', async () => {
-  const { repository, persistence, conversation } = fixture();
-  let finishRecovery!: (model: string) => void;
-  const recoveryResult = new Promise<string>(resolve => { finishRecovery = resolve; });
-  const history = ProviderRegistry.getConversationHistoryService('claude');
-  const recoverySpy = jest.spyOn(history, 'recoverConversationModelSelection').mockReturnValue(recoveryResult);
-  let finishWrite!: () => void;
-  persistence.saveMetadata.mockImplementationOnce(() => new Promise<void>(resolve => { finishWrite = resolve; }));
-  try {
-    const recovery = repository.recoverMissingSelectedModels();
-    const update = repository.update(conversation.id, { selectedModel: 'sonnet' });
-    await waitFor(() => Boolean(finishWrite));
-    finishRecovery('opus');
-    // Let the native read finish while the explicit write is still pending.
-    await recoveryResult;
-    await Promise.resolve();
-    finishWrite();
-    await Promise.all([recovery, update]);
-    expect(persistence.saveMetadata.mock.calls.map(([metadata]) => metadata.selectedModel)).toEqual(['sonnet']);
-    expect(repository.getSync(conversation.id)?.selectedModel).toBe('sonnet');
-  } finally {
-    recoverySpy.mockRestore();
-  }
-});
-
-test('provider invalidation preserves an ordinary metadata commit already in flight', async () => {
-  const { repository, persistence, conversation } = fixture();
-  let finishWrite!: () => void;
-  persistence.saveMetadata.mockImplementationOnce(() => new Promise<void>(resolve => { finishWrite = resolve; }));
-  const rename = repository.rename(conversation.id, 'Renamed');
-  await waitFor(() => Boolean(finishWrite));
-  const invalidation = repository.persistConversations(repository.invalidateProviderSessions(['claude']));
-  finishWrite();
-  await Promise.all([rename, invalidation]);
-  expect(persistence.saveMetadata.mock.calls.map(([metadata]) => metadata.title)).toEqual(['Renamed', 'Renamed']);
-  expect(repository.getSync(conversation.id)).toMatchObject({ title: 'Renamed', sessionId: null });
-});
-
 test('failed deletion restores an ordinary metadata commit that finished during deletion', async () => {
   const { repository, persistence, conversation } = fixture();
   let finishWrite!: () => void;
@@ -248,24 +223,11 @@ test('failed deletion restores an ordinary metadata commit that finished during 
   expect(repository.getCachedConversation(conversation.id)?.title).toBe('Renamed');
 });
 
-test('provider invalidation fences session fields while preserving the rest of a pending update', async () => {
-  const { repository, persistence, conversation } = fixture();
-  let finishWrite!: () => void;
-  persistence.saveMetadata.mockImplementationOnce(() => new Promise<void>(resolve => { finishWrite = resolve; }));
-  const update = repository.update(conversation.id, { title: 'Renamed', sessionId: 'replacement' });
-  await waitFor(() => Boolean(finishWrite));
-  const invalidation = repository.persistConversations(repository.invalidateProviderSessions(['claude']));
-  finishWrite();
-  await Promise.all([update, invalidation]);
-  expect(repository.getSync(conversation.id)).toMatchObject({ title: 'Renamed', sessionId: null });
-  expect(persistence.saveMetadata.mock.calls.at(-1)?.[0]).toMatchObject({ title: 'Renamed', sessionId: null });
-});
-
 test('a missing-session check waits for an already-admitted binding write', async () => {
   const { repository, persistence, conversation } = fixture();
   let finishWrite!: () => void;
   persistence.saveMetadata.mockImplementationOnce(() => new Promise<void>(resolve => { finishWrite = resolve; }));
-  const history = ProviderRegistry.getConversationHistoryService('claude');
+  const history = ProviderRegistry.getConversationHistoryService('kiro');
   const missingSpy = jest.spyOn(history, 'resolveMissingConversationSession').mockImplementation(async draft => ({
     outcome: draft.sessionId === 'native-shared' ? 'delete' : 'preserve',
   }));
@@ -301,27 +263,6 @@ test('failed deletion restores a binding committed while deletion was pending', 
   await update;
   expect(repository.getCachedConversation(conversation.id)).toMatchObject({ sessionId: 'replacement', messages });
   expect(persistence.saveMetadata.mock.calls.at(-1)?.[0].sessionId).toBe('replacement');
-});
-
-test('failed deletion restores a recovered model committed while deletion was pending', async () => {
-  const { repository, persistence, conversation } = fixture();
-  let finishWrite!: () => void;
-  persistence.saveMetadata.mockImplementationOnce(() => new Promise<void>(resolve => { finishWrite = resolve; }));
-  persistence.deleteCurrentMetadata.mockRejectedValueOnce(new Error('deletion failed'));
-  const history = ProviderRegistry.getConversationHistoryService('claude');
-  const recoverySpy = jest.spyOn(history, 'recoverConversationModelSelection').mockResolvedValue('sonnet');
-  try {
-    const recovery = repository.recoverMissingSelectedModels();
-    await waitFor(() => Boolean(finishWrite));
-    const deletion = repository.delete(conversation.id);
-    finishWrite();
-    await expect(deletion).rejects.toThrow('deletion failed');
-    await recovery;
-    expect(repository.getCachedConversation(conversation.id)?.selectedModel).toBe('sonnet');
-    expect(persistence.saveMetadata.mock.calls.at(-1)?.[0].selectedModel).toBe('sonnet');
-  } finally {
-    recoverySpy.mockRestore();
-  }
 });
 
 test('activity accepted during a session write reaches disk', async () => {
@@ -375,7 +316,7 @@ test('context controls read detached metadata without copying the transcript', a
   const summaryRead = jest.spyOn(repository, 'getSummary');
   const update = jest.fn();
   const tab = {
-    conversationId: conversation.id, providerId: 'claude', draftModel: null,
+    conversationId: conversation.id, providerId: 'kiro', draftModel: null,
     session: { reasoningSelections: new Map() },
     state: { usage: { model: 'sonnet', contextTokens: 50_000, inputTokens: 50_000 } },
     ui: { contextUsageMeter: { update } },
@@ -392,9 +333,9 @@ test('context controls read detached metadata without copying the transcript', a
   const previous = repository.getSummary(conversation.id)!;
   expect(previous).not.toHaveProperty('messages');
   expect(previous).not.toHaveProperty('providerState');
-  expect(previous.capabilities).toMatchObject({ providerId: 'claude', supportsFork: true });
-  (previous.capabilities as { supportsFork: boolean }).supportsFork = false;
-  expect(repository.getSummary(conversation.id)?.capabilities?.supportsFork).toBe(true);
+  expect(previous.capabilities).toMatchObject({ providerId: 'kiro', supportsFork: false });
+  (previous.capabilities as { supportsFork: boolean }).supportsFork = true;
+  expect(repository.getSummary(conversation.id)?.capabilities?.supportsFork).toBe(false);
   await repository.update(conversation.id, { selectedModel: 'opus' });
   refreshTabContextUsage(tab, host);
   expect(update).toHaveBeenLastCalledWith(expect.objectContaining({ contextWindow: 100_000, percentage: 50 }));

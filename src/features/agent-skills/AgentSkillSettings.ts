@@ -1,6 +1,5 @@
 import { type App, Modal, Notice, setIcon, Setting } from 'obsidian';
 
-import { extractFirstParagraph } from '@/core/commands/slashCommand';
 import {
   ManagedResourcePathError,
   ManagedResourceRelocationError,
@@ -16,12 +15,6 @@ import {
   AgentSkillRepositoryError,
   AgentSkillRevisionConflictError,
 } from '@/features/agent-skills/AgentSkillRepository';
-import {
-  ClaudeCommandCollisionError,
-  type ClaudeCommandDocument,
-  ClaudeCommandRevisionConflictError,
-  commandSkillName,
-} from '@/features/agent-skills/ClaudeCommandRepository';
 import { AgentSkillValidationError } from '@/features/agent-skills/validateAgentSkill';
 import { t } from '@/i18n/i18n';
 
@@ -37,10 +30,7 @@ function errorMessage(error: unknown): string {
 }
 
 function showSaveError(error: unknown, name: string): void {
-  if (
-    error instanceof AgentSkillRevisionConflictError
-    || error instanceof ClaudeCommandRevisionConflictError
-  ) {
+  if (error instanceof AgentSkillRevisionConflictError) {
     new Notice(t('settings.agentSkills.staleConflict'));
     return;
   }
@@ -50,10 +40,6 @@ function showSaveError(error: unknown, name: string): void {
   }
   if (error instanceof AgentSkillCollisionError) {
     new Notice(t('settings.agentSkills.collisionFailed', { name }));
-    return;
-  }
-  if (error instanceof ClaudeCommandCollisionError) {
-    new Notice(t('settings.skills.commands.collisionFailed', { name }));
     return;
   }
   new Notice(t('settings.agentSkills.saveFailed', { message: errorMessage(error) }));
@@ -197,10 +183,7 @@ class AgentSkillDeleteModal extends Modal {
           : this.options.successMessage);
         this.close();
       } catch (error) {
-        if (
-          error instanceof AgentSkillRevisionConflictError
-          || error instanceof ClaudeCommandRevisionConflictError
-        ) {
+        if (error instanceof AgentSkillRevisionConflictError) {
           new Notice(t('settings.agentSkills.staleConflict'));
           return;
         }
@@ -237,13 +220,11 @@ export interface AgentSkillSettingsOptions {
   title?: string;
   /** Renders extra controls before the refresh and add buttons. */
   renderHeaderAccessory?: (actions: HTMLElement) => void;
-  /** Omits the command section entirely when there are no commands. */
-  hideEmptyCommands?: boolean;
   /** Replaces the refresh button's own re-read, for owners that must also re-read other state. */
   onRefresh?: () => void;
 }
 
-/** Lists one skills folder and, when the coordinator manages them, Claude commands. */
+/** Lists one skills folder's packages with create/edit/delete/repair actions. */
 export class AgentSkillSettings {
   private renderGeneration = 0;
   private disposed = false;
@@ -273,12 +254,8 @@ export class AgentSkillSettings {
     if (this.disposed) return;
     const generation = ++this.renderGeneration;
     let result;
-    let commands;
     try {
-      [result, commands] = await Promise.all([
-        this.coordinator.list(),
-        this.coordinator.listCommands(),
-      ]);
+      result = await this.coordinator.list();
     } catch {
       if (generation !== this.renderGeneration) return;
       this.rootEl.empty();
@@ -304,10 +281,6 @@ export class AgentSkillSettings {
       for (const skill of result.skills) {
         this.#renderSkill(list, skill);
       }
-    }
-
-    if (this.coordinator.managesCommands && !(this.options.hideEmptyCommands && commands.commands.length === 0)) {
-      this.#renderCommands(commands.commands);
     }
 
     // Only packages the user can fix or delete; links and unreadable files are left to Sync.
@@ -380,51 +353,6 @@ export class AgentSkillSettings {
         successMessage: t('settings.agentSkills.deleted', { name: skill.name }),
       });
     }, 'claudian-settings-delete-btn');
-  }
-
-  #renderCommands(commands: ClaudeCommandDocument[]): void {
-    const section = this.rootEl.createDiv({ cls: 'claudian-agent-skills-commands' });
-    section.createDiv({
-      cls: 'claudian-agent-skills-commands-title',
-      text: t('settings.skills.commands.title'),
-    });
-    section.createEl('p', {
-      cls: 'setting-item-description',
-      text: t('settings.skills.commands.hint'),
-    });
-    if (commands.length === 0) {
-      section.createDiv({ cls: 'claudian-sp-empty-state', text: t('settings.skills.commands.empty') });
-      return;
-    }
-    const list = section.createDiv({ cls: 'claudian-sp-list' });
-    for (const command of commands) {
-      const item = list.createDiv({ cls: 'claudian-sp-item' });
-      const info = item.createDiv({ cls: 'claudian-sp-info' });
-      const itemHeader = info.createDiv({ cls: 'claudian-sp-item-header' });
-      itemHeader.createSpan({ text: `/${command.name}`, cls: 'claudian-sp-item-name' });
-      itemHeader.createSpan({ text: t('settings.skills.commands.badge'), cls: 'claudian-slash-item-badge' });
-      if (command.description) {
-        info.createDiv({ text: command.description, cls: 'claudian-sp-item-desc' });
-      }
-
-      const actions = item.createDiv({ cls: 'claudian-sp-item-actions' });
-      this.#actionButton(actions, t('common.edit'), 'pencil', () => this.#openCommandEditor(command));
-      this.#actionButton(
-        actions,
-        t('settings.skills.commands.convert'),
-        'package',
-        () => this.#openConvertEditor(command),
-      );
-      this.#actionButton(actions, t('common.delete'), 'trash-2', () => {
-        this.#openDelete({
-          title: t('settings.skills.commands.deleteTitle'),
-          description: t('settings.skills.commands.deleteDescription'),
-          path: command.filePath,
-          remove: () => this.coordinator.trashCommand(command),
-          successMessage: t('settings.skills.commands.deleted', { name: command.name }),
-        });
-      }, 'claudian-settings-delete-btn');
-    }
   }
 
   #renderDiagnostic(container: HTMLElement, diagnostic: AgentSkillDiagnostic): void {
@@ -519,32 +447,6 @@ export class AgentSkillSettings {
         existing ? 'settings.agentSkills.updated' : 'settings.agentSkills.created',
         { name },
       ),
-    });
-  }
-
-  #openCommandEditor(command: ClaudeCommandDocument): void {
-    this.#openEditor({
-      title: t('settings.skills.commands.editTitle'),
-      initial: command,
-      nameDesc: t('settings.skills.commands.nameDesc'),
-      descriptionDesc: t('settings.skills.commands.descriptionDesc'),
-      droppedKeys: this.#droppedKeys(command.frontmatter),
-      save: input => this.coordinator.updateCommand(command, input),
-      successMessage: name => t('settings.skills.commands.updated', { name }),
-    });
-  }
-
-  #openConvertEditor(command: ClaudeCommandDocument): void {
-    this.#openEditor({
-      title: t('settings.skills.commands.convertTitle'),
-      initial: {
-        name: commandSkillName(command.name),
-        description: command.description || extractFirstParagraph(command.instructions) || '',
-        instructions: command.instructions,
-      },
-      droppedKeys: this.#droppedKeys(command.frontmatter),
-      save: input => this.coordinator.convertCommand(command, input),
-      successMessage: name => t('settings.skills.commands.converted', { name }),
     });
   }
 }

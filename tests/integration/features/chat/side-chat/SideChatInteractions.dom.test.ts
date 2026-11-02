@@ -36,7 +36,7 @@ function formatQuestionReplyFixture(tool: ToolCallInfo, answers: AskUserAnswers)
   };
 }
 
-const taskResultInterpreter = ProviderRegistry.getTaskResultInterpreter('claude');
+const taskResultInterpreter = ProviderRegistry.getTaskResultInterpreter('kiro');
 
 afterEach(releaseSideChatHarnesses);
 

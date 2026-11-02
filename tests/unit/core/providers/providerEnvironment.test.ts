@@ -15,17 +15,15 @@ import {
 
 describe('providerEnvironment', () => {
   describe('classifyEnvironmentVariablesByOwnership', () => {
-    it('splits shared, Claude, and Kiro vars by ownership', () => {
+    it('splits shared and Kiro vars by ownership', () => {
       const result = classifyEnvironmentVariablesByOwnership([
         'PATH=/usr/local/bin',
-        'ANTHROPIC_API_KEY=claude-key',
         'AWS_ACCESS_KEY_ID=kiro-key',
         'KIRO_SANDBOX=workspace-write',
         'CUSTOM_FLAG=1',
       ].join('\n'));
 
       expect(result.shared).toBe(['PATH=/usr/local/bin', 'CUSTOM_FLAG=1'].join('\n'));
-      expect(result.providers.claude).toBe('ANTHROPIC_API_KEY=claude-key');
       expect(result.providers.kiro).toBe([
         'AWS_ACCESS_KEY_ID=kiro-key',
         'KIRO_SANDBOX=workspace-write',
@@ -38,12 +36,12 @@ describe('providerEnvironment', () => {
         '# shared comment',
         'PATH=/usr/local/bin',
         '',
-        '# claude comment',
-        'ANTHROPIC_MODEL=claude-custom',
+        '# kiro comment',
+        'KIRO_SANDBOX=workspace-write',
       ].join('\n'));
 
       expect(result.shared).toBe(['# shared comment', 'PATH=/usr/local/bin'].join('\n'));
-      expect(result.providers.claude).toBe(['', '# claude comment', 'ANTHROPIC_MODEL=claude-custom'].join('\n'));
+      expect(result.providers.kiro).toBe(['', '# kiro comment', 'KIRO_SANDBOX=workspace-write'].join('\n'));
     });
   });
 
@@ -117,7 +115,7 @@ describe('providerEnvironment', () => {
     it('keeps mixed-ownership legacy snippets unscoped', () => {
       expect(inferEnvironmentSnippetScope([
         'PATH=/usr/local/bin',
-        'ANTHROPIC_MODEL=claude-custom',
+        'KIRO_SANDBOX=workspace-write',
       ].join('\n'))).toBeUndefined();
     });
   });
@@ -126,7 +124,7 @@ describe('providerEnvironment', () => {
     it('normalizes mixed snippets back to unscoped even if a stale scope was saved', () => {
       expect(resolveEnvironmentSnippetScope([
         'PATH=/usr/local/bin',
-        'ANTHROPIC_MODEL=claude-custom',
+        'KIRO_SANDBOX=workspace-write',
       ].join('\n'), 'shared')).toBeUndefined();
     });
 
@@ -139,16 +137,16 @@ describe('providerEnvironment', () => {
     it('reclassifies mixed snippets into separate scope updates', () => {
       expect(getEnvironmentScopeUpdates([
         'PATH=/usr/local/bin',
-        'ANTHROPIC_MODEL=claude-custom',
+        'KIRO_SANDBOX=workspace-write',
       ].join('\n'), 'shared')).toEqual([
         { scope: 'shared', envText: 'PATH=/usr/local/bin' },
-        { scope: 'provider:claude', envText: 'ANTHROPIC_MODEL=claude-custom' },
+        { scope: 'provider:kiro', envText: 'KIRO_SANDBOX=workspace-write' },
       ]);
     });
 
     it('uses the fallback scope only when there is no inferable content', () => {
-      expect(getEnvironmentScopeUpdates('', 'provider:claude')).toEqual([
-        { scope: 'provider:claude', envText: '' },
+      expect(getEnvironmentScopeUpdates('', 'provider:kiro')).toEqual([
+        { scope: 'provider:kiro', envText: '' },
       ]);
     });
   });

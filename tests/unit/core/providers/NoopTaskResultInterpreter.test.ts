@@ -24,8 +24,5 @@ describe('NOOP_TASK_RESULT_INTERPRETER', () => {
       expect(ProviderRegistry.getTaskResultInterpreter(providerId))
         .toBe(NOOP_TASK_RESULT_INTERPRETER);
     }
-
-    expect(ProviderRegistry.getTaskResultInterpreter('claude'))
-      .not.toBe(NOOP_TASK_RESULT_INTERPRETER);
   });
 });

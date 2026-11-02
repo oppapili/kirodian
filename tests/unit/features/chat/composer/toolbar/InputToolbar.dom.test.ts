@@ -9,7 +9,7 @@ import { setIcon } from 'obsidian';
 import type { ProviderPermissionModeOption } from '@/core/providers/types';
 import { createInputToolbar } from '@/features/chat/composer/toolbar/InputToolbar';
 import type { ToolbarCallbacks } from '@/features/chat/composer/toolbar/types';
-import { claudeChatUIConfig } from '@/providers/claude/ui/ClaudeChatUIConfig';
+
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
@@ -89,7 +89,7 @@ function renderToolbar(fixture: FixtureOptions = {}) {
     onServiceTierChange: jest.fn(async (tier: string) => { settings.serviceTier = tier; }),
     onPermissionModeChange: jest.fn(async (mode: string) => { settings.permissionMode = mode; }),
     getSettings: () => settings,
-    getEnvironmentVariables: () => 'ANTHROPIC_MODEL=opus',
+    getEnvironmentVariables: () => 'KIRO_MODEL=opus',
     getUIConfig: () => uiConfig,
     getCapabilities: () => ({ reasoningControl: fixture.reasoningControl ?? 'effort' }),
   } as unknown as ToolbarCallbacks & Record<string, jest.Mock>;
@@ -428,15 +428,15 @@ describe('model button', () => {
     uiConfig.getModelOptions.mockImplementation(() => [
       { value: 'gpt-new', label: 'GPT New', group: 'Kiro' },
       { value: 'gpt-fast', label: 'GPT Fast', group: 'Kiro' },
-      { value: 'claude', label: 'Claude', group: 'Claude' },
+      { value: 'other-model', label: 'Other', group: 'Other' },
     ]);
     settings.model = 'gpt-new';
     fireEvent.click(ui.getByRole('button', { name: /^Model: Sonnet/ }));
     expect(ui.getByRole('button', { name: /^Model: GPT New/ })).toBeDefined();
     const kiro = ui.getByRole('group', { name: 'Kiro' });
     expect(within(kiro).getAllByRole('option').map(item => item.textContent)).toEqual(['GPT New', 'GPT Fast']);
-    expect(within(ui.getByRole('group', { name: 'Claude' })).getAllByRole('option')).toHaveLength(1);
-    expect(uiConfig.getModelOptions).toHaveBeenLastCalledWith({ ...settings, environmentVariables: 'ANTHROPIC_MODEL=opus' });
+    expect(within(ui.getByRole('group', { name: 'Other' })).getAllByRole('option')).toHaveLength(1);
+    expect(uiConfig.getModelOptions).toHaveBeenLastCalledWith({ ...settings, environmentVariables: 'KIRO_MODEL=opus' });
   });
 });
 
@@ -491,35 +491,6 @@ describe('permission button', () => {
     expect(ui.queryByRole('button', { name: /^Permission mode/ })).toBeNull();
     toolbar.permissionToggle.setVisible(true);
     expect(ui.getByRole('button', { name: 'Permission mode: YOLO' })).toBe(button);
-  });
-
-  it('lists every Claude permission mode with its description and alerts only on YOLO', async () => {
-    const { callbacks, ui } = renderToolbar({
-      settings: { permissionMode: 'auto' },
-      permissionModes: claudeChatUIConfig.getPermissionModeOptions?.() ?? undefined,
-    });
-    const button = ui.getByRole('button', { name: 'Permission mode: Auto' });
-    expect(button.classList.contains('claudian-toolbar-chip--alert')).toBe(false);
-    fireEvent.click(button);
-    const items = within(ui.getByRole('menu', { name: 'Permission mode' })).getAllByRole('menuitemradio');
-    expect(items.map(item => [item.textContent, item.getAttribute('aria-checked')])).toEqual([
-      ['AutoClaude handles permission decisions', 'true'],
-      ['ManualAlways ask before making changes', 'false'],
-      ['Accept editsAutomatically accept all file edits', 'false'],
-      ['YOLOAccept all permissions without asking', 'false'],
-    ]);
-    fireEvent.click(button);
-
-    for (const [name, value, alert] of [
-      ['Manual', 'manual', false], ['Accept edits', 'acceptEdits', false], ['YOLO', 'yolo', true],
-    ] as const) {
-      fireEvent.click(button);
-      fireEvent.click(ui.getByRole('menuitemradio', { name: new RegExp(`^${name}`) }));
-      await flush();
-      expect(callbacks.onPermissionModeChange).toHaveBeenLastCalledWith(value);
-      expect(ui.getByRole('button', { name: `Permission mode: ${name}` })).toBe(button);
-      expect(button.classList.contains('claudian-toolbar-chip--alert')).toBe(alert);
-    }
   });
 
   it('is absent when the provider has no permission toggle', () => {

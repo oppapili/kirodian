@@ -62,15 +62,15 @@ describe('usageInfo', () => {
 
     it('matches custom limits by runtime model id for provider selection ids', () => {
       expect(projectContextUsageDisplay(
-        usage({ model: 'claude-code/model-a' }),
-        { ...context({ 'model-a': 100_000 }, 'claude-code/model-a'), providerId: 'claude' as const },
+        usage({ model: 'model-a' }),
+        { ...context({ 'model-a': 100_000 }, 'model-a'), providerId: 'kiro' as const },
       )).toMatchObject({ contextWindow: 100_000, percentage: 50 });
     });
 
     it('matches custom limits by an unambiguous case-insensitive runtime id', () => {
       const displayContext = {
-        ...context({ 'model-a': 100_000 }, 'claude-code/old-model-a'),
-        providerId: 'claude' as const,
+        ...context({ 'model-a': 100_000 }, 'kiro:old-model-a'),
+        providerId: 'kiro' as const,
         normalizeCustomContextLimitModel: (model: string) => model === 'old-model-a' ? 'model-a' : model,
       };
 

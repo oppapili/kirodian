@@ -3,8 +3,7 @@ import '@/providers';
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
-import { ClaudeExecutionBackend } from '@/providers/claude/execution/ClaudeExecutionBackend';
-import { ClaudeSubagentHistoryService } from '@/providers/claude/history/ClaudeSubagentHistoryService';
+import { KiroExecutionBackend } from '@/providers/kiro/execution/KiroExecutionBackend';
 
 function createHost(): any {
   const executionLifecycleRegistry = new ProviderExecutionLifecycleRegistry();
@@ -22,7 +21,7 @@ function createHost(): any {
     ) => executionLifecycleRegistry.runTransition(providerIds as any, mutation),
     settings: {
       providerConfigs: {
-        claude: { enabled: true },
+        kiro: { enabled: true },
       },
     },
   };
@@ -30,20 +29,19 @@ function createHost(): any {
 
 describe('provider execution registration', () => {
   afterEach(() => {
-    ProviderWorkspaceRegistry.setServices('claude', undefined);
+    ProviderWorkspaceRegistry.setServices('kiro', undefined);
   });
 
   it('constructs every registered backend without creating a provider session', () => {
     const host = createHost();
+    // The kiro backend factory reads its workspace services; stub the two it
+    // needs so construction does not require full workspace initialization.
+    ProviderWorkspaceRegistry.setServices('kiro', {
+      commandCatalog: {} as any,
+      modelCatalogCoordinator: {} as any,
+    } as any);
 
-    expect(ProviderRegistry.createExecutionBackend(host, 'claude'))
-      .toBeInstanceOf(ClaudeExecutionBackend);
-  });
-
-  it('registers Claude transcript recovery without provider parity placeholders', () => {
-    const host = createHost();
-
-    expect(ProviderRegistry.createSubagentHistoryService(host, 'claude'))
-      .toBeInstanceOf(ClaudeSubagentHistoryService);
+    expect(ProviderRegistry.createExecutionBackend(host, 'kiro'))
+      .toBeInstanceOf(KiroExecutionBackend);
   });
 });

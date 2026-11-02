@@ -2,7 +2,6 @@
 
 import '@/providers';
 
-import { claudeCatalogFixture } from '@test/helpers/claudeModels';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
 import { Notice } from 'obsidian';
@@ -10,6 +9,7 @@ import { Notice } from 'obsidian';
 import { RoutedTitleGenerationService } from '@/core/auxiliary/RoutedTitleGenerationService';
 import type { Conversation } from '@/core/types';
 import { SessionBrowser, type SessionBrowserDeps } from '@/features/chat/session-manager/SessionBrowser';
+import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
@@ -21,10 +21,22 @@ function setup(status?: Conversation['titleGenerationStatus'], enabled = true) {
     id: 'conversation', title: 'Fallback title', createdAt: 1, lastActivityAt: 2,
     titleGenerationStatus: status, messages: [{ role: 'user', content: 'Explain the code' }],
   };
-  const settings = {
-    enableAutoTitleGeneration: enabled, titleGenerationModel: 'haiku',
-    providerConfigs: { claude: claudeCatalogFixture(['haiku']) },
+  const settings: Record<string, unknown> = {
+    enableAutoTitleGeneration: enabled, titleGenerationModel: 'kiro/haiku',
   };
+  updateCurrentKiroCatalog(settings, {
+    defaultModelId: null,
+    fingerprint: 'test-fingerprint',
+    refreshedAt: 0,
+    models: [{
+      rawId: 'haiku',
+      displayName: 'Haiku',
+      description: 'Title model',
+      reasoningEfforts: [],
+      supportsReasoning: false,
+    }],
+  });
+  updateKiroProviderSettings(settings, { enabled: true, visibleModels: ['haiku'] });
   const generateTitle = jest.fn(async (id, _text, callback) => callback(id, { success: true, title: 'Code explained' }));
   const renameConversation = jest.fn(async (_id, title) => { conversation.title = title; });
   const updateConversation = jest.fn(async (_id, patch) => { Object.assign(conversation, patch); });
@@ -55,7 +67,7 @@ it('generates a title for a previously skipped chat after selecting an available
   expect(fixture.generateTitle).not.toHaveBeenCalled();
   expect(fixture.conversation.title).toBe('Fallback title');
   expect(fixture.conversation.titleGenerationStatus).toBeUndefined();
-  fixture.settings.titleGenerationModel = 'haiku';
+  fixture.settings.titleGenerationModel = 'kiro/haiku';
   fireEvent.click(button);
   await waitFor(() => expect(fixture.conversation.titleGenerationStatus).toBe('success'));
   expect(fixture.renameConversation).toHaveBeenCalledWith('conversation', 'Code explained');
@@ -87,7 +99,7 @@ it('does not offer generation when automatic titles are disabled', () => {
 it('leaves pending and exposes retry when provider initialization fails', async () => {
   const fixture = setup();
   const service = new RoutedTitleGenerationService({
-    resolveProviderId: () => 'claude',
+    resolveProviderId: () => 'kiro',
     initializeProvider: async () => { throw new Error('Initialization failed'); },
     createService: () => { throw new Error('Execution must not start'); },
   });

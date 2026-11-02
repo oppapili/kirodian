@@ -5,7 +5,7 @@ import { Notice, TFile, TFolder } from 'obsidian';
 import type { ConversationRepository } from '@/app/conversations/ConversationRepository';
 import { SessionSnapshotStore } from '@/app/conversations/SessionSnapshotStore';
 import { PinnedLinkedContentPathCoordinator } from '@/app/settings/PinnedLinkedContentPathCoordinator';
-import { ConversationPersistenceStore } from '@/app/storage/ConversationPersistenceStore';
+import type { ConversationPersistenceStore } from '@/app/storage/ConversationPersistenceStore';
 import type { SessionMetadataReadResult } from '@/app/storage/SessionStorage';
 import { SessionStorage } from '@/app/storage/SessionStorage';
 import { SharedStorageService } from '@/app/storage/SharedStorageService';
@@ -16,20 +16,36 @@ import { getInstallationKey as getHostnameKey } from '@/core/device/Installation
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
-import { isVersionedRuntimeInputFingerprint } from '@/core/providers/settings/RuntimeInputFingerprint';
-import { TOOL_SUBAGENT } from '@/core/tools/toolNames';
-import { type ClaudianSettings, type Conversation, type SessionMetadata, VIEW_TYPE_CLAUDIAN } from '@/core/types';
+import { type ClaudianSettings, type SessionMetadata, VIEW_TYPE_CLAUDIAN } from '@/core/types';
 import { ZenModeController } from '@/features/chat/zen/ZenModeController';
-import * as sdkSession from '@/providers/claude/history/ClaudeHistoryStore';
-import {
-  getClaudeProviderSettings,
-  updateClaudeProviderSettings,
-} from '@/providers/claude/settings';
 import { computeKiroEnvironmentHash } from '@/providers/kiro/env/KiroSettingsReconciler';
 import {
   getKiroProviderSettings,
+  updateCurrentKiroCatalog,
   updateKiroProviderSettings,
 } from '@/providers/kiro/settings';
+
+/**
+ * Populate the kiro catalog so a selected model survives model reconciliation.
+ * kiro's `ownsModel` only keeps a selection that the live catalog advertises; an
+ * empty catalog (the default under test) drops any selection. The id is kept as
+ * `kiro/<rawId>` by the kiro model-selection encoding.
+ */
+function seedKiroModel(plugin: { settings: Record<string, unknown> }, rawId: string): void {
+  updateCurrentKiroCatalog(plugin.settings, {
+    defaultModelId: null,
+    fingerprint: 'test-fingerprint',
+    refreshedAt: 0,
+    models: [{
+      rawId,
+      displayName: rawId,
+      description: '',
+      reasoningEfforts: [],
+      supportsReasoning: false,
+    }],
+  });
+  updateKiroProviderSettings(plugin.settings, { enabled: true, visibleModels: [rawId] });
+}
 
 // Mock fs for ClaudianService
 jest.mock('fs');
@@ -101,11 +117,6 @@ describe('ClaudianPlugin', () => {
     return chatHostOf(target).executionPersistence;
   }
 
-  /** The runtime settings coordinator wired into the plugin's session metadata loader. */
-  function runtimeSettingsOf(target: ClaudianPlugin = plugin): any {
-    return (target as any).sessionMetadata.options.runtimeSettings;
-  }
-
   function getConversationPersistence(
     target: ClaudianPlugin,
   ): ConversationPersistenceStore {
@@ -119,7 +130,7 @@ describe('ClaudianPlugin', () => {
   function mockMetadataSources(
     ...metadata: Array<{
       id: string;
-      providerId: 'claude' | 'kiro';
+      providerId: 'kiro' | 'kiro';
       title: string;
       createdAt: number;
       lastActivityAt: number;
@@ -201,16 +212,6 @@ describe('ClaudianPlugin', () => {
     // Reset mocks
     jest.restoreAllMocks();
     jest.clearAllMocks();
-    jest.spyOn(sdkSession, 'locateSDKSession').mockImplementation(async (_vaultPath, sessionId) => ({
-      availability: 'available',
-      sessionPath: `/test/claude-project/${sessionId}.jsonl`,
-    }));
-    jest.spyOn(sdkSession, 'locateSDKSessions').mockImplementation(async (_vaultPath, sessionIds) => new Map(
-      sessionIds.map(sessionId => [sessionId, {
-        availability: 'available' as const,
-        sessionPath: `/test/claude-project/${sessionId}.jsonl`,
-      }]),
-    ));
 
     mockApp = {
       vault: {
@@ -352,22 +353,6 @@ describe('ClaudianPlugin', () => {
   });
 
   describe('onload', () => {
-    it.each([true, false])('migrates missing selected effort metadata after layout when enabled: %s', async enabled => {
-      const initialize = jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized').mockResolvedValue(undefined);
-      const refresh = jest.fn().mockResolvedValue({ changed: true });
-      await plugin.onload();
-      plugin.settings.providerConfigs.claude = {
-        ...plugin.settings.providerConfigs.claude, enabled, visibleModels: ['sonnet'], discoveredModels: [],
-      };
-      ProviderWorkspaceRegistry.setServices('claude', { modelCatalog: { refresh } as any });
-      expect(refresh).not.toHaveBeenCalled();
-      for (const [ready] of mockApp.workspace.onLayoutReady.mock.calls) ready();
-      await (plugin as any).modelMetadataMigration;
-      expect(initialize.mock.calls.filter(([, id, reason]) => id === 'claude' && reason === 'model-metadata-migration'))
-        .toHaveLength(enabled ? 1 : 0);
-      expect(refresh).toHaveBeenCalledTimes(enabled ? 1 : 0);
-    });
-
     it.each(['run', 'before-layout', 'before-timer'])('defers obsolete input cleanup until after layout and respects unload: %s', async mode => {
       const inputPath = '.claudian/sessions/old.inputs.json';
       const files = installVaultFiles({ [inputPath]: '{}' });
@@ -509,7 +494,7 @@ describe('ClaudianPlugin', () => {
       });
       const restoredMetadata = {
         id: 'restored-conversation',
-        providerId: 'claude' as const,
+        providerId: 'kiro' as const,
         title: 'Restored conversation',
         createdAt: 1,
         lastActivityAt: 2,
@@ -548,7 +533,7 @@ describe('ClaudianPlugin', () => {
     it('loads metadata requested by a view-scoped tab workspace', async () => {
       const restoredMetadata = {
         id: 'view-restored-conversation',
-        providerId: 'claude' as const,
+        providerId: 'kiro' as const,
         title: 'View restored conversation',
         createdAt: 1,
         lastActivityAt: 2,
@@ -604,7 +589,7 @@ describe('ClaudianPlugin', () => {
       const layoutCallbacks: Array<() => void> = [];
       const backgroundMetadata = {
         id: 'background-conversation',
-        providerId: 'claude' as const,
+        providerId: 'kiro' as const,
         title: 'Background conversation',
         createdAt: 1,
         lastActivityAt: 2,
@@ -658,7 +643,7 @@ describe('ClaudianPlugin', () => {
     it('publishes an unavailable Claude selection without silently persisting a fallback', async () => {
       const deferredMetadata = {
         id: 'deferred-retired-model',
-        providerId: 'claude' as const,
+        providerId: 'kiro' as const,
         title: 'Deferred retired model',
         createdAt: 1,
         lastActivityAt: 2,
@@ -709,157 +694,10 @@ describe('ClaudianPlugin', () => {
       recoverySpy.mockRestore();
     });
 
-    it('recovers models from original metadata before persisting session invalidation', async () => {
-      const metadata = {
-        id: 'claude-model-before-invalidation',
-        providerId: 'claude' as const,
-        title: 'Claude model before invalidation',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'thread-before-invalidation',
-        providerState: { providerSessionId: 'thread-before-invalidation' },
-      };
-      await plugin.onload();
-      runtimeSettingsOf(plugin).pendingEnvironmentInvalidationGenerations.set('claude', 1);
-      const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan')
-        .mockResolvedValue({
-          records: deviceMetadataRecords(metadata),
-          complete: true,
-          invalidMetadataCount: 0,
-        });
-      const loadSpy = mockMetadataSources(metadata);
-      const repository = repositoryOf(plugin);
-      const registeredSources: Conversation[] = [];
-      const originalRegister = repository.registerHistoricalModelRecoverySources
-        .bind(repository);
-      const registerSpy = jest.spyOn(repository, 'registerHistoricalModelRecoverySources')
-        .mockImplementation((...args: unknown[]) => {
-          const sources = args[0] as readonly Conversation[];
-          registeredSources.push(...sources);
-          originalRegister(sources);
-        });
-      const events: string[] = [];
-      const persistedRecoverySources: unknown[] = [];
-      const recoverySpy = jest.spyOn(repository, 'recoverMissingSelectedModels')
-        .mockImplementation(async () => {
-          events.push('recover');
-          return [];
-        });
-      const persistSpy = jest.spyOn(repository, 'persistConversations')
-        .mockImplementation(async (...args: unknown[]) => {
-          const conversations = args[0] as readonly Conversation[];
-          events.push(`persist:${String(conversations[0]?.sessionId)}`);
-          persistedRecoverySources.push(conversations[0] ? repository.getSync(conversations[0].id)?.modelRecoverySource : undefined);
-        });
-
-      await (plugin as any).sessionMetadata.loadRemaining();
-
-      expect(registeredSources).toContainEqual(expect.objectContaining({
-        id: metadata.id,
-        sessionId: 'thread-before-invalidation',
-        providerState: { providerSessionId: 'thread-before-invalidation' },
-      }));
-      expect(events).toEqual(['recover', 'persist:null']);
-      expect(persistedRecoverySources).toEqual([{
-        sessionId: 'thread-before-invalidation',
-        providerState: { providerSessionId: 'thread-before-invalidation' },
-      }]);
-
-      scanSpy.mockRestore();
-      loadSpy.mockRestore();
-      registerSpy.mockRestore();
-      recoverySpy.mockRestore();
-      persistSpy.mockRestore();
-    });
-
-    it('invalidates restored and deferred sessions after a provider environment change', async () => {
-      const restoredMetadata = {
-        id: 'restored-environment-session',
-        providerId: 'claude' as const,
-        title: 'Restored environment session',
-        createdAt: 1,
-        lastActivityAt: 3,
-        sessionId: 'restored-session-id',
-        providerState: { providerSessionId: 'restored-provider-session-id' },
-        resumeAtMessageId: 'restored-message-id',
-      };
-      const deferredMetadata = {
-        id: 'deferred-environment-session',
-        providerId: 'claude' as const,
-        title: 'Deferred environment session',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'deferred-session-id',
-        providerState: { providerSessionId: 'deferred-provider-session-id' },
-        resumeAtMessageId: 'deferred-message-id',
-      };
-      mockApp.vault.adapter.exists.mockImplementation(async (path: string) => (
-        path === '.claudian/claudian-settings.json'
-      ));
-      mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
-        if (path === '.claudian/claudian-settings.json') {
-          return JSON.stringify({
-            providerConfigs: {
-              claude: {
-                environmentHash: 'ANTHROPIC_BASE_URL=https://old.example.com',
-                environmentVariables: 'ANTHROPIC_BASE_URL=https://new.example.com',
-              },
-            },
-          });
-        }
-        return '';
-      });
-      (plugin.loadData as jest.Mock).mockResolvedValue({
-        tabManagerState: {
-          openTabs: [{ tabId: 'tab-1', conversationId: restoredMetadata.id }],
-          activeTabId: 'tab-1',
-        },
-      });
-      const loadSpy = jest.spyOn(SessionStorage.prototype, 'loadMetadata')
-        .mockResolvedValue(restoredMetadata);
-      const listSpy = jest.spyOn(SessionStorage.prototype, 'scan')
-        .mockImplementation(async (options) => {
-          options?.onBatch?.(deviceMetadataRecords(restoredMetadata, deferredMetadata));
-          return {
-            records: deviceMetadataRecords(restoredMetadata, deferredMetadata),
-            complete: true,
-            invalidMetadataCount: 0,
-          };
-        });
-      const loadSourceSpy = mockMetadataSources(
-        restoredMetadata,
-        deferredMetadata,
-      );
-
-      await plugin.onload();
-      await (plugin as any).sessionMetadata.loadRemaining();
-
-      const restored = chatHostOf(plugin).getCachedConversation(restoredMetadata.id);
-      const deferred = chatHostOf(plugin).getCachedConversation(deferredMetadata.id);
-      loadSpy.mockRestore();
-      listSpy.mockRestore();
-      loadSourceSpy.mockRestore();
-
-      expect(restored).toEqual(expect.objectContaining({
-        sessionId: null,
-        providerState: {
-          previousProviderSessionIds: ['restored-provider-session-id'],
-        },
-        resumeAtMessageId: 'restored-message-id',
-      }));
-      expect(deferred).toEqual(expect.objectContaining({
-        sessionId: null,
-        providerState: {
-          previousProviderSessionIds: ['deferred-provider-session-id'],
-        },
-        resumeAtMessageId: 'deferred-message-id',
-      }));
-    });
-
     it('preserves restored and deferred sessions for a reload-policy environment change', async () => {
       const restoredMetadata = {
         id: 'restored-reload-session',
-        providerId: 'claude' as const,
+        providerId: 'kiro' as const,
         title: 'Restored reload session',
         createdAt: 1,
         lastActivityAt: 3,
@@ -868,7 +706,7 @@ describe('ClaudianPlugin', () => {
       };
       const deferredMetadata = {
         id: 'deferred-reload-session',
-        providerId: 'claude' as const,
+        providerId: 'kiro' as const,
         title: 'Deferred reload session',
         createdAt: 1,
         lastActivityAt: 2,
@@ -896,16 +734,16 @@ describe('ClaudianPlugin', () => {
         restoredMetadata,
         deferredMetadata,
       );
-      const claudeReconciler = ProviderRegistry.getSettingsReconciler('claude');
-      const reconcileSpy = jest.spyOn(claudeReconciler, 'reconcileModelWithEnvironment')
+      // kiro's reconciler already declares `environmentSessionPolicy: 'reload'`,
+      // so an environment change reloads sessions instead of invalidating them.
+      const kiroReconciler = ProviderRegistry.getSettingsReconciler('kiro');
+      const reconcileSpy = jest.spyOn(kiroReconciler, 'reconcileModelWithEnvironment')
         .mockReturnValue({ changed: true, invalidatedConversations: [] });
-      claudeReconciler.environmentSessionPolicy = 'reload';
 
       try {
         await plugin.onload();
         await (plugin as any).sessionMetadata.loadRemaining();
       } finally {
-        delete claudeReconciler.environmentSessionPolicy;
         reconcileSpy.mockRestore();
         loadSpy.mockRestore();
         listSpy.mockRestore();
@@ -920,207 +758,7 @@ describe('ClaudianPlugin', () => {
         sessionId: 'deferred-session-id',
         providerState: { providerSessionId: 'deferred-provider-session-id' },
       }));
-      expect(plugin.settings.pendingProviderSessionInvalidations.claude).toBeUndefined();
-    });
-
-    it('invalidates later metadata batches when the environment changes during the scan', async () => {
-      const firstMetadata = {
-        id: 'first-scanned-session',
-        providerId: 'claude' as const,
-        title: 'First scanned session',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'first-session-id',
-        providerState: { providerSessionId: 'first-provider-session-id' },
-      };
-      const laterMetadata = {
-        id: 'later-scanned-session',
-        providerId: 'claude' as const,
-        title: 'Later scanned session',
-        createdAt: 1,
-        lastActivityAt: 1,
-        sessionId: 'later-session-id',
-        providerState: { providerSessionId: 'later-provider-session-id' },
-      };
-      let markFirstBatchPublished!: () => void;
-      const firstBatchPublished = new Promise<void>((resolve) => {
-        markFirstBatchPublished = resolve;
-      });
-      let releaseLaterBatch!: () => void;
-      const laterBatchRelease = new Promise<void>((resolve) => {
-        releaseLaterBatch = resolve;
-      });
-
-      await plugin.onload();
-      const listSpy = jest.spyOn(SessionStorage.prototype, 'scan')
-        .mockImplementation(async (options) => {
-          options?.onBatch?.(deviceMetadataRecords(firstMetadata));
-          markFirstBatchPublished();
-          await laterBatchRelease;
-          options?.onBatch?.(deviceMetadataRecords(laterMetadata));
-          return {
-            records: deviceMetadataRecords(firstMetadata, laterMetadata),
-            complete: true,
-            invalidMetadataCount: 0,
-          };
-        });
-      const loadSourceSpy = mockMetadataSources(firstMetadata, laterMetadata);
-
-      const load = (plugin as any).sessionMetadata.loadRemaining();
-      await firstBatchPublished;
-      await plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://changed-during-scan.example.com',
-      );
-      const pendingGeneration = plugin.settings.pendingProviderSessionInvalidations.claude;
-      releaseLaterBatch();
-      await load;
-
-      const first = chatHostOf(plugin).getCachedConversation(firstMetadata.id);
-      const later = chatHostOf(plugin).getCachedConversation(laterMetadata.id);
-      listSpy.mockRestore();
-      loadSourceSpy.mockRestore();
-
-      expect(first?.sessionId).toBeNull();
-      expect(first?.providerState).toEqual({
-        previousProviderSessionIds: ['first-provider-session-id'],
-      });
-      expect(later?.sessionId).toBeNull();
-      expect(later?.providerState).toEqual({
-        previousProviderSessionIds: ['later-provider-session-id'],
-      });
-      expect(pendingGeneration).toEqual(expect.any(Number));
-      expect(plugin.settings.pendingProviderSessionInvalidations.claude)
-        .toBeUndefined();
-    });
-
-    it('waits for an environment metadata write before completing its scan generation', async () => {
-      const firstMetadata = {
-        id: 'pending-environment-write-session',
-        providerId: 'claude' as const,
-        title: 'Pending environment write session',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'pending-environment-write-session-id',
-        providerState: { providerSessionId: 'pending-environment-write-provider-session-id' },
-      };
-      const laterMetadata = {
-        id: 'later-environment-write-session',
-        providerId: 'claude' as const,
-        title: 'Later environment write session',
-        createdAt: 1,
-        lastActivityAt: 1,
-        sessionId: 'later-environment-write-session-id',
-        providerState: { providerSessionId: 'later-environment-write-provider-session-id' },
-      };
-      let markFirstBatchPublished!: () => void;
-      const firstBatchPublished = new Promise<void>((resolve) => {
-        markFirstBatchPublished = resolve;
-      });
-      let finishScan!: () => void;
-      const scanRelease = new Promise<void>((resolve) => {
-        finishScan = resolve;
-      });
-      let markEnvironmentWriteStarted!: () => void;
-      const environmentWriteStarted = new Promise<void>((resolve) => {
-        markEnvironmentWriteStarted = resolve;
-      });
-      let finishEnvironmentWrite!: () => void;
-      const environmentWriteRelease = new Promise<void>((resolve) => {
-        finishEnvironmentWrite = resolve;
-      });
-
-      await plugin.onload();
-      const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan')
-        .mockImplementation(async (options) => {
-          options?.onBatch?.(deviceMetadataRecords(firstMetadata));
-          markFirstBatchPublished();
-          await scanRelease;
-          options?.onBatch?.(deviceMetadataRecords(laterMetadata));
-          return {
-            records: deviceMetadataRecords(firstMetadata, laterMetadata),
-            complete: true,
-            invalidMetadataCount: 0,
-          };
-        });
-      let blockedEnvironmentWrite = false;
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata')
-        .mockImplementation(async () => {
-          if (!blockedEnvironmentWrite) {
-            blockedEnvironmentWrite = true;
-            markEnvironmentWriteStarted();
-            await environmentWriteRelease;
-          }
-        });
-
-      const load = (plugin as any).sessionMetadata.loadRemaining();
-      await firstBatchPublished;
-      const apply = plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://pending-write.example.com',
-      );
-      await environmentWriteStarted;
-      const pendingGeneration = plugin.settings.pendingProviderSessionInvalidations.claude;
-      finishScan();
-      await load;
-
-      expect(plugin.settings.pendingProviderSessionInvalidations.claude)
-        .toBe(pendingGeneration);
-
-      finishEnvironmentWrite();
-      await apply;
-      scanSpy.mockRestore();
-      saveMetadataSpy.mockRestore();
-
-      expect(pendingGeneration).toEqual(expect.any(Number));
-      expect(plugin.settings.pendingProviderSessionInvalidations.claude)
-        .toBeUndefined();
-    });
-
-    it('keeps a pending provider invalidation after an incomplete metadata scan', async () => {
-      const settingsPath = '.claudian/claudian-settings.json';
-      const pendingGeneration = 11;
-      const deferredMetadata = {
-        id: 'incomplete-scan-session',
-        providerId: 'claude' as const,
-        title: 'Incomplete scan session',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'incomplete-scan-session-id',
-        providerState: { providerSessionId: 'incomplete-scan-provider-session-id' },
-      };
-      const files = installVaultFiles({
-        [settingsPath]: JSON.stringify({
-          pendingProviderSessionInvalidations: { claude: pendingGeneration },
-          providerConfigs: {
-            claude: {
-              environmentHash: 'ANTHROPIC_BASE_URL=https://same.example.com',
-              environmentVariables: 'ANTHROPIC_BASE_URL=https://same.example.com',
-            },
-          },
-        }),
-      });
-
-      await plugin.onload();
-      const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan')
-        .mockImplementation(async (options) => {
-          options?.onBatch?.(deviceMetadataRecords(deferredMetadata));
-          return {
-            records: deviceMetadataRecords(deferredMetadata),
-            complete: false,
-            invalidMetadataCount: 0,
-          };
-        });
-      (plugin as any).sessionMetadata.pendingScan = false;
-
-      await (plugin as any).sessionMetadata.loadRemaining();
-
-      const persistedSettings = JSON.parse(files.get(settingsPath) ?? '{}');
-      scanSpy.mockRestore();
-
-      expect(persistedSettings.pendingProviderSessionInvalidations?.claude)
-        .toBe(pendingGeneration);
-      expect((plugin as any).sessionMetadata.loadedAll).toBe(false);
+      expect(plugin.settings.pendingProviderSessionInvalidations.kiro).toBeUndefined();
     });
 
     it('does not persist a background metadata shell deleted before reconciliation', async () => {
@@ -1134,7 +772,7 @@ describe('ClaudianPlugin', () => {
       });
       const backgroundMetadata = {
         id: 'deleted-background-conversation',
-        providerId: 'claude' as const,
+        providerId: 'kiro' as const,
         title: 'Deleted background conversation',
         createdAt: 1,
         lastActivityAt: 2,
@@ -1177,7 +815,7 @@ describe('ClaudianPlugin', () => {
     it('suppresses metadata tombstoned after scanning but before source resolution', async () => {
       const tombstonedMetadata = {
         id: 'tombstoned-during-source-resolution',
-        providerId: 'claude' as const,
+        providerId: 'kiro' as const,
         title: 'Tombstoned during source resolution',
         createdAt: 1,
         lastActivityAt: 2,
@@ -1208,7 +846,7 @@ describe('ClaudianPlugin', () => {
     it('suppresses an already cached shell tombstoned during source resolution', async () => {
       const tombstonedMetadata = {
         id: 'cached-shell-tombstoned-during-source-resolution',
-        providerId: 'claude' as const,
+        providerId: 'kiro' as const,
         title: 'Cached shell tombstoned during source resolution',
         createdAt: 1,
         lastActivityAt: 2,
@@ -1237,145 +875,6 @@ describe('ClaudianPlugin', () => {
 
       scanSpy.mockRestore();
       loadSpy.mockRestore();
-    });
-
-    it('retries a pending provider invalidation after unload and restart', async () => {
-      const settingsPath = '.claudian/claudian-settings.json';
-      const deferredMetadata = {
-        id: 'restart-deferred-session',
-        providerId: 'claude' as const,
-        title: 'Restart deferred session',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'restart-session-id',
-        providerState: { providerSessionId: 'restart-provider-session-id' },
-      };
-      const files = installVaultFiles({
-        [settingsPath]: JSON.stringify({
-          providerConfigs: {
-            claude: {
-              environmentHash: 'ANTHROPIC_BASE_URL=https://old.example.com',
-              environmentVariables: 'ANTHROPIC_BASE_URL=https://new.example.com',
-            },
-          },
-        }),
-      });
-
-      await plugin.onload();
-      const firstRunSettings = JSON.parse(files.get(settingsPath) ?? '{}');
-      const pendingGeneration = firstRunSettings.pendingProviderSessionInvalidations?.claude;
-
-      expect(pendingGeneration).toEqual(expect.any(Number));
-
-      plugin.onunload();
-      const restartedPlugin = createPlugin();
-      (restartedPlugin.loadData as jest.Mock).mockResolvedValue({});
-      const restartedSaveMetadataSpy = jest.spyOn(
-        ConversationPersistenceStore.prototype,
-        'saveMetadata',
-      );
-      const listSpy = jest.spyOn(SessionStorage.prototype, 'scan')
-        .mockImplementation(async (options) => {
-          options?.onBatch?.(deviceMetadataRecords(deferredMetadata));
-          return {
-            records: deviceMetadataRecords(deferredMetadata),
-            complete: true,
-            invalidMetadataCount: 0,
-          };
-        });
-      const loadSourceSpy = mockMetadataSources(deferredMetadata);
-
-      await restartedPlugin.onload();
-      await (restartedPlugin as any).sessionMetadata.loadRemaining();
-
-      const restartedConversation = chatHostOf(restartedPlugin).getCachedConversation(deferredMetadata.id);
-      const persistedMetadata = JSON.parse(
-        files.get(
-          `${getDeviceSessionsPath(getHostnameKey())}/restart-deferred-session.meta.json`,
-        ) ?? '{}',
-      );
-      const restartedSettings = JSON.parse(files.get(settingsPath) ?? '{}');
-      const deferredInvalidationWrites = restartedSaveMetadataSpy.mock.calls.filter(
-        ([metadata]) => metadata.id === deferredMetadata.id,
-      );
-      listSpy.mockRestore();
-      loadSourceSpy.mockRestore();
-      restartedSaveMetadataSpy.mockRestore();
-
-      expect(restartedConversation?.sessionId).toBeNull();
-      expect(restartedConversation?.providerState).toEqual({
-        previousProviderSessionIds: ['restart-provider-session-id'],
-      });
-      expect(persistedMetadata.sessionId).toBeNull();
-      expect(persistedMetadata.providerState).toEqual({
-        previousProviderSessionIds: ['restart-provider-session-id'],
-      });
-      expect(restartedSettings.pendingProviderSessionInvalidations?.claude).toBeUndefined();
-      expect(deferredInvalidationWrites).toHaveLength(1);
-    });
-
-    it('keeps a pending provider invalidation when a metadata write fails', async () => {
-      const settingsPath = '.claudian/claudian-settings.json';
-      const pendingGeneration = 7;
-      const deferredMetadata = {
-        id: 'failed-write-session',
-        providerId: 'claude' as const,
-        title: 'Failed write session',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'failed-write-session-id',
-        providerState: { providerSessionId: 'failed-write-provider-session-id' },
-      };
-      const files = installVaultFiles({
-        [settingsPath]: JSON.stringify({
-          pendingProviderSessionInvalidations: { claude: pendingGeneration },
-          providerConfigs: {
-            claude: {
-              environmentHash: 'ANTHROPIC_BASE_URL=https://same.example.com',
-              environmentVariables: 'ANTHROPIC_BASE_URL=https://same.example.com',
-            },
-          },
-        }),
-      });
-
-      await plugin.onload();
-      const listSpy = jest.spyOn(SessionStorage.prototype, 'scan')
-        .mockImplementation(async (options) => {
-          options?.onBatch?.(deviceMetadataRecords(deferredMetadata));
-          return {
-            records: deviceMetadataRecords(deferredMetadata),
-            complete: true,
-            invalidMetadataCount: 0,
-          };
-        });
-      const loadSourceSpy = mockMetadataSources(deferredMetadata);
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata')
-        .mockRejectedValueOnce(new Error('metadata write failed'));
-      (plugin as any).sessionMetadata.pendingScan = false;
-
-      let loadError: unknown;
-      try {
-        await (plugin as any).sessionMetadata.loadRemaining();
-      } catch (error) {
-        loadError = error;
-      }
-      listSpy.mockRestore();
-      loadSourceSpy.mockRestore();
-      saveMetadataSpy.mockRestore();
-
-      expect(loadError).toEqual(new Error('metadata write failed'));
-      const persistedSettings = JSON.parse(files.get(settingsPath) ?? '{}');
-      expect(persistedSettings.pendingProviderSessionInvalidations?.claude)
-        .toBe(pendingGeneration);
-
-      await plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://next.example.com',
-      );
-
-      const settingsAfterEnvironmentChange = JSON.parse(files.get(settingsPath) ?? '{}');
-      expect(settingsAfterEnvironmentChange.pendingProviderSessionInvalidations?.claude)
-        .toEqual(expect.any(Number));
     });
 
   });
@@ -1642,7 +1141,7 @@ describe('ClaudianPlugin', () => {
       mockApp.vault.adapter.read.mockImplementation(async (path: string) => {
         if (path === '.claudian/claudian-settings.json') {
           return JSON.stringify({
-            environmentVariables: 'ANTHROPIC_MODEL=custom-model',
+            environmentVariables: 'KIRO_CUSTOM_ENV=changed',
             lastEnvHash: '',
           });
         }
@@ -1680,7 +1179,7 @@ describe('ClaudianPlugin', () => {
       expect(writeCall).toBeDefined();
       const content = JSON.parse(writeCall[1]);
       expect(content).not.toHaveProperty('activeConversationId');
-      expect(content).toHaveProperty('providerConfigs.claude.environmentHash');
+      expect(content).toHaveProperty('providerConfigs.kiro.environmentHash');
       expect(content).not.toHaveProperty('enableBlocklist');
       expect(content).not.toHaveProperty('blockedCommands');
       // Permissions are now in .claude/settings.json (CC format), not claudian-settings.json
@@ -1701,7 +1200,7 @@ describe('ClaudianPlugin', () => {
         refreshModelSelector: jest.fn(() => events.push('refresh')),
       } as any]);
 
-      chatHostOf(plugin).notifyProviderChatOptionsChanged('claude');
+      chatHostOf(plugin).notifyProviderChatOptionsChanged('kiro');
       await (plugin as any).providerChatOptions.tail;
 
       expect(events).toEqual(['reconcile', 'refresh']);
@@ -1717,7 +1216,7 @@ describe('ClaudianPlugin', () => {
         refreshModelSelector,
       } as any]);
 
-      chatHostOf(plugin).notifyProviderChatOptionsChanged('claude');
+      chatHostOf(plugin).notifyProviderChatOptionsChanged('kiro');
       await (plugin as any).providerChatOptions.tail;
 
       expect(refreshModelSelector).not.toHaveBeenCalled();
@@ -1728,7 +1227,7 @@ describe('ClaudianPlugin', () => {
     it('holds the execution lifecycle transition across the environment settings commit', async () => {
       await plugin.onload();
       const events: string[] = [];
-      const unregister = plugin.executionLifecycleRegistry.registerTransitionHook('claude', {
+      const unregister = plugin.executionLifecycleRegistry.registerTransitionHook('kiro', {
         beforeTransition: () => {
           events.push('before');
         },
@@ -1740,10 +1239,10 @@ describe('ClaudianPlugin', () => {
         events.push('write');
       });
 
-      await plugin.providerHost.applyEnvironmentVariables('provider:claude', 'ANTHROPIC_PROFILE=new');
+      await plugin.providerHost.applyEnvironmentVariables('provider:kiro', 'KIRO_PROFILE=new');
 
       expect(events).toEqual(['before', 'write', 'after']);
-      expect(plugin.providerHost.getEnvironmentVariablesForScope('provider:claude')).toBe('ANTHROPIC_PROFILE=new');
+      expect(plugin.providerHost.getEnvironmentVariablesForScope('provider:kiro')).toBe('KIRO_PROFILE=new');
       unregister();
     });
 
@@ -1761,12 +1260,12 @@ describe('ClaudianPlugin', () => {
       } as any]);
 
       await plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_MODEL=claude-sonnet-enterprise',
+        'provider:kiro',
+        'KIRO_CUSTOM_ENV=enterprise',
       );
 
       expect(events).toEqual(['invalidate', 'reconcile', 'refresh']);
-      expect(repository.reconcileSelectedModels).toHaveBeenCalledWith('claude');
+      expect(repository.reconcileSelectedModels).toHaveBeenCalledWith('kiro');
     });
 
     it('lets an initialized transition owner resolve CLI without reinitializing services', async () => {
@@ -1775,9 +1274,9 @@ describe('ClaudianPlugin', () => {
         reset: jest.fn(),
         resolveFromSettings: jest.fn().mockReturnValue('/owned/claude'),
       };
-      ProviderWorkspaceRegistry.setServices('claude', { cliResolver });
+      ProviderWorkspaceRegistry.setServices('kiro', { cliResolver });
 
-      await expect(plugin.providerHost.getResolvedProviderCliPath('claude', {
+      await expect(plugin.providerHost.getResolvedProviderCliPath('kiro', {
         providerTransitionOwner: true,
       })).resolves.toBe('/owned/claude');
       expect(cliResolver.resolveFromSettings).toHaveBeenCalledWith(
@@ -1788,16 +1287,16 @@ describe('ClaudianPlugin', () => {
 
     it('does not initialize a cold provider for transition-owner CLI resolution', async () => {
       await plugin.onload();
-      ProviderWorkspaceRegistry.setServices('claude', undefined);
+      ProviderWorkspaceRegistry.setServices('kiro', undefined);
       const initialize = jest.fn(async () => ({
         cliResolver: {
           reset: jest.fn(),
           resolveFromSettings: jest.fn().mockReturnValue('/cold/claude'),
         },
       }));
-      ProviderWorkspaceRegistry.register('claude', { initialize });
+      ProviderWorkspaceRegistry.register('kiro', { initialize });
 
-      await expect(plugin.providerHost.getResolvedProviderCliPath('claude', {
+      await expect(plugin.providerHost.getResolvedProviderCliPath('kiro', {
         providerTransitionOwner: true,
       })).rejects.toThrow('requires initialized workspace services');
       expect(initialize).not.toHaveBeenCalled();
@@ -1813,10 +1312,10 @@ describe('ClaudianPlugin', () => {
         throw publicationError;
       });
       const markStale = jest.fn();
-      const unregister = plugin.executionLifecycleRegistry.registerTransitionHook('claude', {
+      const unregister = plugin.executionLifecycleRegistry.registerTransitionHook('kiro', {
         beforeTransition: () => markStale(),
       });
-      ProviderWorkspaceRegistry.setServices('claude', {
+      ProviderWorkspaceRegistry.setServices('kiro', {
         modelCatalog: { markStale } as any,
       });
       const invalidateProviderCommandCaches = jest.fn();
@@ -1826,310 +1325,36 @@ describe('ClaudianPlugin', () => {
         refreshModelSelector,
       } as any]);
       const initialGeneration = plugin.executionLifecycleRegistry
-        .getProviderGeneration('claude');
+        .getProviderGeneration('kiro');
 
       try {
         const firstError = await plugin.providerHost.applyEnvironmentVariables(
-          'provider:claude',
-          'ANTHROPIC_PROFILE=committed',
+          'provider:kiro',
+          'KIRO_PROFILE=committed',
         ).catch(error => error);
 
-        expect(plugin.providerHost.getEnvironmentVariablesForScope('provider:claude'))
-          .toBe('ANTHROPIC_PROFILE=committed');
+        expect(plugin.providerHost.getEnvironmentVariablesForScope('provider:kiro'))
+          .toBe('KIRO_PROFILE=committed');
         expect(markStale).toHaveBeenCalledTimes(1);
         expect(markStale).toHaveBeenCalledWith();
-        expect(invalidateProviderCommandCaches).toHaveBeenCalledWith(['claude']);
+        expect(invalidateProviderCommandCaches).toHaveBeenCalledWith(['kiro']);
         expect(refreshModelSelector).toHaveBeenCalledTimes(1);
-        expect(plugin.executionLifecycleRegistry.getProviderGeneration('claude'))
+        expect(plugin.executionLifecycleRegistry.getProviderGeneration('kiro'))
           .toBe(initialGeneration + 1);
         expect(invalidateSpy).toHaveBeenCalledTimes(1);
         expect(firstError).toBe(publicationError);
 
-        await plugin.providerHost.applyEnvironmentVariables('provider:claude', 'ANTHROPIC_PROFILE=next');
+        await plugin.providerHost.applyEnvironmentVariables('provider:kiro', 'KIRO_PROFILE=next');
 
-        expect(plugin.providerHost.getEnvironmentVariablesForScope('provider:claude')).toBe('ANTHROPIC_PROFILE=next');
+        expect(plugin.providerHost.getEnvironmentVariablesForScope('provider:kiro')).toBe('KIRO_PROFILE=next');
         expect(markStale).toHaveBeenCalledTimes(2);
-        expect(plugin.executionLifecycleRegistry.getProviderGeneration('claude'))
+        expect(plugin.executionLifecycleRegistry.getProviderGeneration('kiro'))
           .toBe(initialGeneration + 2);
         expect(invalidateSpy).toHaveBeenCalledTimes(2);
       } finally {
         unregister();
         invalidateSpy.mockRestore();
       }
-    });
-
-    it('retains a committed invalidation generation when publication fails before invalidation', async () => {
-      await plugin.onload();
-      (plugin as any).sessionMetadata.loadedAll = true;
-      const conversation = await chatHostOf(plugin).createConversation({
-        providerId: 'claude',
-        sessionId: 'pre-invalidation-session',
-      });
-      const publicationError = new Error('invalidation publication failed');
-      const invalidateSpy = jest.spyOn(
-        ProviderSettingsCoordinator,
-        'invalidateConversationSessions',
-      ).mockImplementationOnce(() => {
-        throw publicationError;
-      });
-      const initialGeneration = plugin.executionLifecycleRegistry
-        .getProviderGeneration('claude');
-
-      try {
-        await expect(plugin.providerHost.applyEnvironmentVariables(
-          'provider:claude',
-          'ANTHROPIC_BASE_URL=https://publication-failed.example.com',
-        )).rejects.toBe(publicationError);
-
-        const generation = plugin.settings.pendingProviderSessionInvalidations.claude;
-        expect(generation).toEqual(expect.any(Number));
-        expect(runtimeSettingsOf(plugin).pendingEnvironmentInvalidationGenerations.get('claude'))
-          .toBe(generation);
-        expect(runtimeSettingsOf(plugin).blockedEnvironmentInvalidationGenerations.get('claude'))
-          .toBe(generation);
-        expect(chatHostOf(plugin).getConversationSync(conversation.id)!.sessionId).toBe('pre-invalidation-session');
-        const persistedFailureSettings = JSON.parse(
-          [...mockApp.vault.adapter.write.mock.calls]
-            .reverse()
-            .find(([path]: [string]) => path === '.claudian/claudian-settings.json')?.[1]
-            ?? '{}',
-        );
-        expect(persistedFailureSettings.pendingProviderSessionInvalidations?.claude)
-          .toBe(generation);
-        expect(plugin.executionLifecycleRegistry.getProviderGeneration('claude'))
-          .toBe(initialGeneration + 1);
-
-        await plugin.providerHost.applyEnvironmentVariables(
-          'provider:claude',
-          'ANTHROPIC_BASE_URL=https://publication-retry.example.com',
-        );
-
-        expect(chatHostOf(plugin).getConversationSync(conversation.id)!.sessionId).toBeNull();
-        expect(plugin.settings.pendingProviderSessionInvalidations.claude).toBeUndefined();
-        expect(runtimeSettingsOf(plugin).pendingEnvironmentInvalidationGenerations.has('claude')).toBe(false);
-        expect(runtimeSettingsOf(plugin).blockedEnvironmentInvalidationGenerations.has('claude')).toBe(false);
-        expect(invalidateSpy).toHaveBeenCalledTimes(2);
-        expect(plugin.executionLifecycleRegistry.getProviderGeneration('claude'))
-          .toBe(initialGeneration + 2);
-      } finally {
-        invalidateSpy.mockRestore();
-      }
-    });
-
-    it('keeps invalidation pending until every invalidated metadata write succeeds', async () => {
-      await plugin.onload();
-      (plugin as any).sessionMetadata.loadedAll = true;
-      const first = await chatHostOf(plugin).createConversation({
-        providerId: 'claude',
-        sessionId: 'partial-write-first',
-      });
-      const second = await chatHostOf(plugin).createConversation({
-        providerId: 'claude',
-        sessionId: 'partial-write-second',
-      });
-      const metadataError = new Error('partial invalidation metadata write failed');
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata')
-        .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(metadataError);
-
-      try {
-        await expect(plugin.providerHost.applyEnvironmentVariables(
-          'provider:claude',
-          'ANTHROPIC_BASE_URL=https://partial-write.example.com',
-        )).rejects.toBe(metadataError);
-
-        const generation = plugin.settings.pendingProviderSessionInvalidations.claude;
-        expect(chatHostOf(plugin).getConversationSync(first.id)!.sessionId).toBeNull();
-        expect(chatHostOf(plugin).getConversationSync(second.id)!.sessionId).toBeNull();
-        expect(generation).toEqual(expect.any(Number));
-        expect(runtimeSettingsOf(plugin).pendingEnvironmentInvalidationGenerations.get('claude'))
-          .toBe(generation);
-        expect(runtimeSettingsOf(plugin).blockedEnvironmentInvalidationGenerations.get('claude'))
-          .toBe(generation);
-        const persistedFailureSettings = JSON.parse(
-          [...mockApp.vault.adapter.write.mock.calls]
-            .reverse()
-            .find(([path]: [string]) => path === '.claudian/claudian-settings.json')?.[1]
-            ?? '{}',
-        );
-        expect(persistedFailureSettings.pendingProviderSessionInvalidations?.claude)
-          .toBe(generation);
-
-        await plugin.providerHost.applyEnvironmentVariables(
-          'provider:claude',
-          'ANTHROPIC_BASE_URL=https://partial-write-retry.example.com',
-        );
-
-        const retriedMetadata = saveMetadataSpy.mock.calls.slice(2).map(([metadata]) => metadata);
-        expect(retriedMetadata).toEqual(expect.arrayContaining([
-          expect.objectContaining({ id: first.id, sessionId: null }),
-          expect.objectContaining({ id: second.id, sessionId: null }),
-        ]));
-        expect(plugin.settings.pendingProviderSessionInvalidations.claude).toBeUndefined();
-        expect(runtimeSettingsOf(plugin).pendingEnvironmentInvalidationGenerations.has('claude')).toBe(false);
-        expect(runtimeSettingsOf(plugin).blockedEnvironmentInvalidationGenerations.has('claude')).toBe(false);
-      } finally {
-        saveMetadataSpy.mockRestore();
-      }
-    });
-
-    it('does not leak failed Claude invalidation into live or deferred conversations', async () => {
-      await plugin.onload();
-      // onload persists the default-provider (kiro) migration once; isolate the
-      // action's settings-write count from that provider-neutral startup write.
-      (mockApp.vault.adapter.write as jest.Mock).mockClear();
-      const live = await chatHostOf(plugin).createConversation({
-        providerId: 'claude',
-        sessionId: 'live-session',
-      });
-      live.providerState = {
-        providerSessionId: 'live-provider-session',
-        previousProviderSessionIds: ['live-previous-session'],
-      };
-      live.resumeAtMessageId = 'live-resume-message';
-      await chatHostOf(plugin).updateConversation(live.id, { providerState: live.providerState, resumeAtMessageId: live.resumeAtMessageId });
-      const deferredMetadata = {
-        id: 'deferred-failed-environment',
-        providerId: 'claude' as const,
-        title: 'Deferred failed environment',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'deferred-session',
-        providerState: {
-          providerSessionId: 'deferred-provider-session',
-          previousProviderSessionIds: ['deferred-previous-session'],
-        },
-        resumeAtMessageId: 'deferred-resume-message',
-      };
-      let markBatchPublished!: () => void;
-      const batchPublished = new Promise<void>(resolve => { markBatchPublished = resolve; });
-      let finishScan!: () => void;
-      const scanRelease = new Promise<void>(resolve => { finishScan = resolve; });
-      const scanSpy = jest.spyOn(storageOf(plugin).sessions, 'scan')
-        .mockImplementation(async (options) => {
-          options?.onBatch?.(deviceMetadataRecords(deferredMetadata));
-          markBatchPublished();
-          await scanRelease;
-          return {
-            complete: false,
-            invalidMetadataCount: 0,
-            records: deviceMetadataRecords(deferredMetadata),
-          };
-        });
-      const loadSourceSpy = mockMetadataSources(deferredMetadata);
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata');
-      let markWriteStarted!: () => void;
-      const writeStarted = new Promise<void>(resolve => { markWriteStarted = resolve; });
-      let rejectWrite!: (error: Error) => void;
-      const failedWrite = new Promise<void>((_resolve, reject) => { rejectWrite = reject; });
-      let shouldFailSettingsWrite = true;
-      mockApp.vault.adapter.write.mockImplementation(async (path: string) => {
-        if (path === '.claudian/claudian-settings.json' && shouldFailSettingsWrite) {
-          shouldFailSettingsWrite = false;
-          markWriteStarted();
-          await failedWrite;
-        }
-      });
-      let stateAtRelease: {
-        blocked: boolean;
-        deferredSessionId: string | null | undefined;
-        liveSessionId: string | null;
-        pending: unknown;
-      } | null = null;
-      const afterTransition = jest.fn(() => {
-        stateAtRelease = {
-          blocked: runtimeSettingsOf(plugin).blockedEnvironmentInvalidationGenerations.has('claude'),
-          deferredSessionId: chatHostOf(plugin).getCachedConversation(deferredMetadata.id)?.sessionId,
-          liveSessionId: chatHostOf(plugin).getConversationSync(live.id)!.sessionId,
-          pending: plugin.settings.pendingProviderSessionInvalidations.claude,
-        };
-      });
-      const unregister = plugin.executionLifecycleRegistry.registerTransitionHook('claude', {
-        afterTransition,
-      });
-
-      const writeError = new Error('environment settings write failed');
-      const apply = plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://failed.example.com',
-      ).catch(error => error);
-      await writeStarted;
-      const scan = (plugin as any).sessionMetadata.loadRemaining();
-      await batchPublished;
-      rejectWrite(writeError);
-      expect(await apply).toBe(writeError);
-      finishScan();
-      await scan;
-
-      const deferred = chatHostOf(plugin).getCachedConversation(deferredMetadata.id);
-      expect(afterTransition).toHaveBeenCalledTimes(1);
-      expect(stateAtRelease).toEqual({
-        blocked: false,
-        deferredSessionId: 'deferred-session',
-        liveSessionId: 'live-session',
-        pending: undefined,
-      });
-      expect(chatHostOf(plugin).getConversationSync(live.id)).toEqual(expect.objectContaining({
-        sessionId: 'live-session',
-        providerState: {
-          providerSessionId: 'live-provider-session',
-          previousProviderSessionIds: ['live-previous-session'],
-        },
-        resumeAtMessageId: 'live-resume-message',
-      }));
-      expect(deferred).toEqual(expect.objectContaining({
-        sessionId: 'deferred-session',
-        providerState: deferredMetadata.providerState,
-        resumeAtMessageId: 'deferred-resume-message',
-      }));
-      expect(plugin.settings.pendingProviderSessionInvalidations.claude).toBeUndefined();
-      expect(runtimeSettingsOf(plugin).pendingEnvironmentInvalidationGenerations.has('claude')).toBe(false);
-      expect(runtimeSettingsOf(plugin).blockedEnvironmentInvalidationGenerations.has('claude')).toBe(false);
-      expect(saveMetadataSpy).not.toHaveBeenCalledWith(expect.objectContaining({
-        id: deferredMetadata.id,
-        sessionId: null,
-      }));
-      expect(mockApp.vault.adapter.write.mock.calls.filter(
-        ([path]: [string]) => path === '.claudian/claudian-settings.json',
-      )).toHaveLength(1);
-
-      const invalidateSpy = jest.spyOn(
-        ProviderSettingsCoordinator,
-        'invalidateConversationSessions',
-      );
-      saveMetadataSpy.mockClear();
-      await plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://retry.example.com',
-      );
-
-      expect(invalidateSpy).toHaveBeenCalledTimes(1);
-      expect(chatHostOf(plugin).getConversationSync(live.id)?.sessionId).toBeNull();
-      expect(chatHostOf(plugin).getConversationSync(live.id)?.providerState).toEqual({
-        previousProviderSessionIds: [
-          'live-previous-session',
-          'live-provider-session',
-        ],
-      });
-      expect(live.resumeAtMessageId).toBe('live-resume-message');
-      expect(chatHostOf(plugin).getConversationSync(deferredMetadata.id)?.sessionId).toBeNull();
-      expect(chatHostOf(plugin).getConversationSync(deferredMetadata.id)?.providerState).toEqual({
-        previousProviderSessionIds: [
-          'deferred-previous-session',
-          'deferred-provider-session',
-        ],
-      });
-      expect(deferred?.resumeAtMessageId).toBe('deferred-resume-message');
-      expect(saveMetadataSpy.mock.calls.map(([metadata]) => metadata.id).sort()).toEqual([
-        deferredMetadata.id,
-        live.id,
-      ].sort());
-
-      invalidateSpy.mockRestore();
-      saveMetadataSpy.mockRestore();
-      scanSpy.mockRestore();
-      loadSourceSpy.mockRestore();
-      unregister();
     });
 
     it('updates runtime env vars when changed', async () => {
@@ -2147,100 +1372,10 @@ describe('ClaudianPlugin', () => {
       expect(plugin.providerHost.getEnvironmentVariablesForScope('shared')).toBe(currentEnv);
     });
 
-    it('invalidates sessions when env hash changes', async () => {
-      await plugin.onload();
-
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'session-123' });
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata');
-      saveMetadataSpy.mockClear();
-
-      await plugin.providerHost.applyEnvironmentVariables('provider:claude', 'ANTHROPIC_MODEL=claude-sonnet-4-5');
-
-      const updated = await chatHostOf(plugin).getConversationById(conv.id);
-      expect(updated?.sessionId).toBeNull();
-      expect(saveMetadataSpy).toHaveBeenCalled();
-    });
-
-    it('serializes overlapping environment invalidation writes', async () => {
-      await plugin.onload();
-      (plugin as any).sessionMetadata.loadedAll = true;
-      await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'overlapping-session' });
-      let finishFirstWrite!: () => void;
-      const firstWriteRelease = new Promise<void>((resolve) => {
-        finishFirstWrite = resolve;
-      });
-      let markFirstWriteStarted!: () => void;
-      const firstWriteStarted = new Promise<void>((resolve) => {
-        markFirstWriteStarted = resolve;
-      });
-      let blockedFirstWrite = false;
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata')
-        .mockImplementation(async () => {
-          if (!blockedFirstWrite) {
-            blockedFirstWrite = true;
-            markFirstWriteStarted();
-            await firstWriteRelease;
-          }
-        });
-
-      const firstUpdate = plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://first-overlap.example.com',
-      );
-      await firstWriteStarted;
-      let secondUpdateSettled = false;
-      const secondUpdate = plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://second-overlap.example.com',
-      ).finally(() => {
-        secondUpdateSettled = true;
-      });
-      await new Promise(resolve => setTimeout(resolve, 1));
-      const markerWhileFirstWritePending =
-        plugin.settings.pendingProviderSessionInvalidations.claude;
-      const secondSettledWhileFirstWritePending = secondUpdateSettled;
-
-      finishFirstWrite();
-      await Promise.all([firstUpdate, secondUpdate]);
-      saveMetadataSpy.mockRestore();
-
-      expect(markerWhileFirstWritePending).toEqual(expect.any(Number));
-      expect(secondSettledWhileFirstWritePending).toBe(false);
-      expect(plugin.settings.pendingProviderSessionInvalidations.claude)
-        .toBeUndefined();
-    });
-
-    it('flushes already-invalidated sessions after an earlier environment write fails', async () => {
-      await plugin.onload();
-      (plugin as any).sessionMetadata.loadedAll = true;
-      await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'failed-overlap-session' });
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata')
-        .mockRejectedValueOnce(new Error('metadata write failed'));
-
-      await expect(plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://failed-write.example.com',
-      )).rejects.toThrow('metadata write failed');
-      await plugin.providerHost.applyEnvironmentVariables(
-        'provider:claude',
-        'ANTHROPIC_BASE_URL=https://retry-write.example.com',
-      );
-      const saveCallCount = saveMetadataSpy.mock.calls.length;
-      const retriedMetadata = saveMetadataSpy.mock.calls[1]?.[0];
-      saveMetadataSpy.mockRestore();
-
-      expect(saveCallCount).toBe(2);
-      expect(retriedMetadata).toEqual(expect.objectContaining({
-        sessionId: null,
-      }));
-      expect(plugin.settings.pendingProviderSessionInvalidations.claude)
-        .toBeUndefined();
-    });
-
     it('invalidates provider executions through the lifecycle registry when env changes', async () => {
       await plugin.onload();
       const initialGeneration = plugin.executionLifecycleRegistry
-        .getProviderGeneration('claude');
+        .getProviderGeneration('kiro');
 
       const mockView = {
         getTabManager: jest.fn(),
@@ -2252,7 +1387,7 @@ describe('ClaudianPlugin', () => {
       // Change env but not in a way that affects model
       await plugin.providerHost.applyEnvironmentVariables('shared', 'SOME_VAR=value');
 
-      expect(plugin.executionLifecycleRegistry.getProviderGeneration('claude'))
+      expect(plugin.executionLifecycleRegistry.getProviderGeneration('kiro'))
         .toBe(initialGeneration + 1);
       expect(mockView.getTabManager).not.toHaveBeenCalled();
     });
@@ -2282,36 +1417,6 @@ describe('ClaudianPlugin', () => {
 
       expect(first.getTabManager).not.toHaveBeenCalled();
       expect(second.getTabManager).not.toHaveBeenCalled();
-    });
-
-    it('invalidates Claude conversation metadata without inspecting tab execution state', async () => {
-      await plugin.onload();
-
-      const conversation = await chatHostOf(plugin).createConversation({
-        providerId: 'claude',
-        sessionId: 'session-123',
-      });
-      await chatHostOf(plugin).updateConversation(conversation.id, {
-        messages: [{
-          content: 'hi',
-          id: 'msg-1',
-          role: 'user',
-          timestamp: Date.now(),
-          userMessageId: 'msg-1',
-        }],
-      });
-
-      const mockView = {
-        getTabManager: jest.fn(),
-        invalidateProviderCommandCaches: jest.fn(),
-        refreshModelSelector: jest.fn(),
-      };
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([mockView as any]);
-
-      await plugin.providerHost.applyEnvironmentVariables('provider:claude', 'ANTHROPIC_MODEL=claude-sonnet-4-5');
-
-      expect(chatHostOf(plugin).getConversationSync(conversation.id)?.sessionId).toBeNull();
-      expect(mockView.getTabManager).not.toHaveBeenCalled();
     });
 
     it('does not touch an initialized blank Kiro tab during an environment transition', async () => {
@@ -2361,97 +1466,6 @@ describe('ClaudianPlugin', () => {
   });
 
   describe('applyProviderRuntimeSettings', () => {
-    it('persists a CLI fingerprint and restart-safe session invalidation atomically', async () => {
-      const settingsPath = '.claudian/claudian-settings.json';
-      const deferredMetadata = {
-        id: 'runtime-settings-restart-session',
-        providerId: 'claude' as const,
-        title: 'Runtime settings restart session',
-        createdAt: 1,
-        lastActivityAt: 2,
-        sessionId: 'claude-session-id',
-        providerState: { providerSessionId: 'claude-session-id' },
-      };
-      const files = installVaultFiles({
-        [settingsPath]: JSON.stringify({
-          model: '',
-          providerConfigs: {
-            claude: {
-              enabled: true,
-              environmentHash: '',
-              environmentVariables: '',
-            },
-          },
-          settingsProvider: 'claude',
-        }),
-      });
-
-      await plugin.onload();
-      (plugin as any).sessionMetadata.loadedAll = false;
-      const hostnameKey = getHostnameKey();
-      await plugin.providerHost.applyProviderRuntimeSettings(['claude'], (settings) => {
-        updateClaudeProviderSettings(settings, {
-          cliPathsByHost: { [hostnameKey]: '/custom/claude' },
-        });
-      });
-
-      const firstRunSettings = JSON.parse(files.get(settingsPath) ?? '{}');
-      const fingerprint = firstRunSettings.providerConfigs.claude.environmentHash;
-      expect(firstRunSettings.providerConfigs.claude.cliPathsByHost).toEqual({
-        [hostnameKey]: '/custom/claude',
-      });
-      expect(isVersionedRuntimeInputFingerprint(fingerprint)).toBe(true);
-      expect(firstRunSettings.pendingProviderSessionInvalidations?.claude)
-        .toEqual(expect.any(Number));
-
-      plugin.onunload();
-      const restartedPlugin = createPlugin();
-      (restartedPlugin.loadData as jest.Mock).mockResolvedValue({});
-      const saveMetadataSpy = jest.spyOn(
-        ConversationPersistenceStore.prototype,
-        'saveMetadata',
-      );
-      const listSpy = jest.spyOn(SessionStorage.prototype, 'scan')
-        .mockImplementation(async (options) => {
-          options?.onBatch?.(deviceMetadataRecords(deferredMetadata));
-          return {
-            records: deviceMetadataRecords(deferredMetadata),
-            complete: true,
-            invalidMetadataCount: 0,
-          };
-        });
-      const loadSourceSpy = mockMetadataSources(deferredMetadata);
-
-      await restartedPlugin.onload();
-      await (restartedPlugin as any).sessionMetadata.loadRemaining();
-
-      const restartedConversation = chatHostOf(restartedPlugin).getCachedConversation(deferredMetadata.id);
-      const persistedMetadata = JSON.parse(
-        files.get(
-          `${getDeviceSessionsPath(getHostnameKey())}/runtime-settings-restart-session.meta.json`,
-        ) ?? '{}',
-      );
-      const restartedSettings = JSON.parse(files.get(settingsPath) ?? '{}');
-      const invalidationWrites = saveMetadataSpy.mock.calls.filter(
-        ([metadata]) => metadata.id === deferredMetadata.id,
-      );
-      listSpy.mockRestore();
-      loadSourceSpy.mockRestore();
-      saveMetadataSpy.mockRestore();
-
-      expect(restartedConversation).toEqual(expect.objectContaining({
-        sessionId: null,
-        providerState: { previousProviderSessionIds: ['claude-session-id'] },
-      }));
-      expect(persistedMetadata).toEqual(expect.objectContaining({
-        sessionId: null,
-        providerState: { previousProviderSessionIds: ['claude-session-id'] },
-      }));
-      expect(restartedSettings.providerConfigs.claude.environmentHash).toBe(fingerprint);
-      expect(restartedSettings.pendingProviderSessionInvalidations?.claude).toBeUndefined();
-      expect(invalidationWrites).toHaveLength(1);
-    });
-
     it('advances the Kiro fingerprint while preserving reload-policy sessions', async () => {
       await plugin.onload();
       const conversation = await chatHostOf(plugin).createConversation({
@@ -2483,43 +1497,6 @@ describe('ClaudianPlugin', () => {
       ).changed).toBe(false);
     });
 
-    it('finishes durable invalidation when a post-commit apply hook fails', async () => {
-      await plugin.onload();
-      (plugin as any).sessionMetadata.loadedAll = true;
-      const conversation = await chatHostOf(plugin).createConversation({
-        providerId: 'claude',
-        sessionId: 'post-commit-thread',
-      });
-      await chatHostOf(plugin).updateConversation(conversation.id, {
-        providerState: { providerSessionId: 'post-commit-thread' },
-      });
-      const hostnameKey = getHostnameKey();
-
-      await expect(plugin.providerHost.applyProviderRuntimeSettings(
-        ['claude'],
-        (settings) => {
-          updateClaudeProviderSettings(settings, {
-            cliPathsByHost: { [hostnameKey]: '/custom/post-commit-claude' },
-          });
-        },
-        () => {
-          throw new Error('resolver reset failed');
-        },
-      )).rejects.toThrow('resolver reset failed');
-
-      const claudeSettings = getClaudeProviderSettings(plugin.settings);
-      expect(claudeSettings.cliPathsByHost).toEqual({
-        [hostnameKey]: '/custom/post-commit-claude',
-      });
-      expect(isVersionedRuntimeInputFingerprint(
-        claudeSettings.environmentHash,
-      )).toBe(true);
-      expect(chatHostOf(plugin).getConversationSync(conversation.id)).toEqual(expect.objectContaining({
-        sessionId: null,
-        providerState: { previousProviderSessionIds: ['post-commit-thread'] },
-      }));
-      expect(plugin.settings.pendingProviderSessionInvalidations.kiro).toBeUndefined();
-    });
   });
 
   describe('ribbon icon callback', () => {
@@ -2773,21 +1750,23 @@ describe('ClaudianPlugin', () => {
 
     it('should store the selected model in conversation metadata', async () => {
       await plugin.onload();
+      seedKiroModel(plugin, 'sonnet');
 
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude', selectedModel: 'opus' });
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'kiro', selectedModel: 'kiro/sonnet' });
       const fetched = await chatHostOf(plugin).getConversationById(conv.id);
 
-      expect(conv.selectedModel).toBe('opus');
-      expect(fetched?.selectedModel).toBe('opus');
+      expect(conv.selectedModel).toBe('kiro/sonnet');
+      expect(fetched?.selectedModel).toBe('kiro/sonnet');
     });
 
     it('should lazily migrate missing selected model from usage metadata', async () => {
       await plugin.onload();
+      seedKiroModel(plugin, 'opus');
 
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'kiro' });
       delete (conv as { selectedModel?: string }).selectedModel;
       conv.usage = {
-        model: 'opus',
+        model: 'kiro/opus',
         inputTokens: 1,
         contextTokens: 1,
         contextWindow: 200000,
@@ -2799,9 +1778,9 @@ describe('ClaudianPlugin', () => {
 
       const fetched = await chatHostOf(plugin).getConversationById(conv.id);
 
-      expect(fetched?.selectedModel).toBe('opus');
+      expect(fetched?.selectedModel).toBe('kiro/opus');
       expect(saveMetadataSpy).toHaveBeenCalledWith(expect.objectContaining({
-        selectedModel: 'opus',
+        selectedModel: 'kiro/opus',
       }));
     });
 
@@ -2844,80 +1823,6 @@ describe('ClaudianPlugin', () => {
 
       expect(result).toBeNull();
     });
-
-    it('should preserve a conversation when local Claude history is missing', async () => {
-      await plugin.onload();
-      const conversation = await chatHostOf(plugin).createConversation({
-        providerId: 'claude',
-        sessionId: 'session-removed-after-startup',
-      });
-      const availabilitySpy = jest.mocked(sdkSession.locateSDKSession)
-        .mockResolvedValue({ availability: 'missing' });
-
-      const result = await chatHostOf(plugin).switchConversation(conversation.id);
-
-      expect(result?.id).toBe(conversation.id);
-      expect(chatHostOf(plugin).getConversationList()).toHaveLength(1);
-      expect(mockApp.vault.adapter.remove).not.toHaveBeenCalledWith(
-        '.claudian/sessions/session-removed-after-startup.meta.json',
-      );
-      availabilitySpy.mockRestore();
-    });
-
-    it('should preserve a conversation whose Claude session belongs to a previous vault path', async () => {
-      await plugin.onload();
-      const conversation = await chatHostOf(plugin).createConversation({
-        providerId: 'claude',
-        sessionId: 'session-from-previous-vault-path',
-      });
-      const availabilitySpy = jest.mocked(sdkSession.locateSDKSession)
-        .mockResolvedValue({
-          availability: 'relocated',
-          sessionPath: '/old-project/session-from-previous-vault-path.jsonl',
-        });
-      const loadSpy = jest.spyOn(sdkSession, 'loadSDKSessionMessages')
-        .mockResolvedValue({ messages: [], skippedLines: 0 });
-
-      const result = await chatHostOf(plugin).switchConversation(conversation.id);
-
-      expect(result?.id).toBe(conversation.id);
-      expect(chatHostOf(plugin).getConversationList()).toHaveLength(1);
-      expect(result?.sessionId).toBeNull();
-      expect(result?.providerState).toEqual(expect.objectContaining({
-        previousProviderSessionIds: ['session-from-previous-vault-path'],
-      }));
-      expect(mockApp.vault.adapter.remove).not.toHaveBeenCalledWith(
-        '.claudian/sessions/session-from-previous-vault-path.meta.json',
-      );
-      availabilitySpy.mockRestore();
-      loadSpy.mockRestore();
-    });
-
-    it('should restore resume metadata when relocated-state persistence fails', async () => {
-      await plugin.onload();
-      const conversation = await chatHostOf(plugin).createConversation({
-        providerId: 'claude',
-        sessionId: 'session-relocation-save-failure',
-      });
-      const availabilitySpy = jest.mocked(sdkSession.locateSDKSession)
-        .mockResolvedValue({
-          availability: 'relocated',
-          sessionPath: '/old-project/session-relocation-save-failure.jsonl',
-        });
-      const loadSpy = jest.spyOn(sdkSession, 'loadSDKSessionMessages')
-        .mockResolvedValue({ messages: [], skippedLines: 0 });
-      const saveSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata')
-        .mockRejectedValueOnce(new Error('Write failed'));
-
-      const result = await chatHostOf(plugin).switchConversation(conversation.id);
-
-      expect(result?.sessionId).toBe('session-relocation-save-failure');
-      expect(result?.providerState).toBeUndefined();
-
-      availabilitySpy.mockRestore();
-      loadSpy.mockRestore();
-      saveSpy.mockRestore();
-    });
   });
 
   describe('deleteConversation', () => {
@@ -2952,7 +1857,6 @@ describe('ClaudianPlugin', () => {
 
       await chatHostOf(plugin).deleteConversation(conv.id);
 
-      expect('deleteSDKSession' in sdkSession).toBe(false);
       expect(chatHostOf(plugin).getConversationList().find(item => item.id === conv.id)).toBeUndefined();
     });
 
@@ -3000,57 +1904,6 @@ describe('ClaudianPlugin', () => {
       expect(chatHostOf(plugin).getConversationSync(conv.id)).toEqual(conv);
     });
 
-    it('removes the record when every provider transcript segment is missing', async () => {
-      await plugin.onload();
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'missing-current' });
-      jest.mocked(sdkSession.locateSDKSessions).mockResolvedValue(new Map([
-        ['missing-current', { availability: 'missing' }],
-      ]));
-
-      await expect(chatHostOf(plugin).handleMissingProviderSession(
-        conv.id,
-        'missing-current',
-      )).resolves.toBe('deleted');
-      expect(chatHostOf(plugin).getConversationList().find(item => item.id === conv.id)).toBeUndefined();
-    });
-
-    it('preserves the record and clears resume state when older history is inaccessible', async () => {
-      await plugin.onload();
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'missing-current' });
-      await chatHostOf(plugin).updateConversation(conv.id, {
-        providerState: {
-          providerSessionId: 'missing-current',
-          previousProviderSessionIds: ['temporarily-inaccessible'],
-        },
-      });
-      jest.mocked(sdkSession.locateSDKSessions).mockResolvedValue(new Map([
-        ['temporarily-inaccessible', { availability: 'unknown' }],
-        ['missing-current', { availability: 'missing' }],
-      ]));
-
-      await expect(chatHostOf(plugin).handleMissingProviderSession(
-        conv.id,
-        'missing-current',
-      )).resolves.toBe('reset');
-
-      const preserved = chatHostOf(plugin).getConversationSync(conv.id);
-      expect(preserved?.sessionId).toBeNull();
-      expect(preserved?.providerState).toEqual({
-        previousProviderSessionIds: ['temporarily-inaccessible'],
-      });
-    });
-
-    it('preserves metadata when the missing-session disposition cannot be read', async () => {
-      await plugin.onload();
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'missing-current' });
-      jest.mocked(sdkSession.locateSDKSessions).mockRejectedValueOnce(new Error('EACCES'));
-
-      await expect(chatHostOf(plugin).handleMissingProviderSession(
-        conv.id,
-        'missing-current',
-      )).resolves.toBe('preserved');
-      expect(chatHostOf(plugin).getConversationSync(conv.id)?.sessionId).toBe('missing-current');
-    });
   });
 
   describe('renameConversation', () => {
@@ -3145,7 +1998,7 @@ describe('ClaudianPlugin', () => {
     it('does not initialize providers without native session archive', async () => {
       await plugin.onload();
       const ensureInitialized = jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized');
-      const conversation = await chatHostOf(plugin).createConversation({ providerId: 'claude', sessionId: 'session-1' });
+      const conversation = await chatHostOf(plugin).createConversation({ providerId: 'kiro', sessionId: 'session-1' });
       ensureInitialized.mockClear();
 
       await chatHostOf(plugin).conversationLifecycle.setArchived(conversation.id, true);
@@ -3373,7 +2226,7 @@ describe('ClaudianPlugin', () => {
     it('should update conversation sessionId', async () => {
       await plugin.onload();
 
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
+      const conv = await chatHostOf(plugin).createConversation({ providerId: 'kiro' });
 
       await chatHostOf(plugin).updateConversation(conv.id, { sessionId: 'new-session-id' });
 
@@ -3424,7 +2277,7 @@ describe('ClaudianPlugin', () => {
       const timestamp = Date.now();
       const saved = {
         id: 'conv-saved-1',
-        providerId: 'claude' as const,
+        providerId: 'kiro' as const,
         title: 'Saved Chat',
         createdAt: timestamp,
         lastActivityAt: timestamp,
@@ -3469,10 +2322,10 @@ describe('ClaudianPlugin', () => {
     const clock = testClock();
     const inactiveFor = (days: number): number => clock().getTime() - days * 86_400_000;
     const sessions = [
-      { id: 'stale-session', providerId: 'claude' as const, title: 'Stale', createdAt: inactiveFor(21), lastActivityAt: inactiveFor(20) },
-      { id: 'recent-session', providerId: 'claude' as const, title: 'Recent', createdAt: inactiveFor(3), lastActivityAt: inactiveFor(2) },
-      { id: 'pinned-stale-session', providerId: 'claude' as const, title: 'Pinned', createdAt: inactiveFor(21), lastActivityAt: inactiveFor(20), isPinned: true },
-      { id: 'second-stale-session', providerId: 'claude' as const, title: 'Second stale', createdAt: inactiveFor(31), lastActivityAt: inactiveFor(30) },
+      { id: 'stale-session', providerId: 'kiro' as const, title: 'Stale', createdAt: inactiveFor(21), lastActivityAt: inactiveFor(20) },
+      { id: 'recent-session', providerId: 'kiro' as const, title: 'Recent', createdAt: inactiveFor(3), lastActivityAt: inactiveFor(2) },
+      { id: 'pinned-stale-session', providerId: 'kiro' as const, title: 'Pinned', createdAt: inactiveFor(21), lastActivityAt: inactiveFor(20), isPinned: true },
+      { id: 'second-stale-session', providerId: 'kiro' as const, title: 'Second stale', createdAt: inactiveFor(31), lastActivityAt: inactiveFor(30) },
     ];
 
     async function loadAllSessions(settings: Record<string, unknown>): Promise<Map<string, string>> {
@@ -3577,7 +2430,7 @@ describe('ClaudianPlugin', () => {
       const saved = {
         type: 'meta',
         id: 'conv-multi-session',
-        providerId: 'claude' as const,
+        providerId: 'kiro' as const,
         title: 'Multi Session Chat',
         createdAt: timestamp,
         lastActivityAt: timestamp,
@@ -3646,755 +2499,5 @@ describe('ClaudianPlugin', () => {
     });
   });
 
-  describe('loadSdkMessagesForConversation - fork branch', () => {
-    it('should repair blank image data from Claude SDK history during hydration', async () => {
-      await plugin.onload();
-
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
-      await chatHostOf(plugin).updateConversation(conv.id, {
-        providerState: {
-          providerSessionId: 'session-with-image',
-        },
-        messages: [
-          {
-            id: 'user-with-image',
-            role: 'user',
-            content: 'See attached image',
-            timestamp: 1000,
-            images: [{
-              id: 'img-blank',
-              name: 'pasted.png',
-              mediaType: 'image/png',
-              data: '',
-              size: 0,
-              source: 'paste',
-            }],
-          },
-        ],
-      });
-
-      const loadSpy = jest.spyOn(sdkSession, 'loadSDKSessionMessages').mockResolvedValue({
-        messages: [
-          {
-            id: 'user-with-image',
-            role: 'user',
-            content: 'See attached image',
-            timestamp: 1000,
-            images: [{
-              id: 'sdk-img-user-with-image-0',
-              name: 'image-1',
-              mediaType: 'image/png',
-              data: 'aGVsbG8=',
-              size: 5,
-              source: 'paste',
-            }],
-          },
-        ],
-        skippedLines: 0,
-      });
-
-      const loaded = await chatHostOf(plugin).getConversationById(conv.id);
-
-      expect(loadSpy).toHaveBeenCalledWith(
-        expect.any(String),
-        'session-with-image',
-        undefined,
-        undefined,
-        expect.any(Object),
-      );
-      expect(loaded?.messages[0].images?.[0]).toMatchObject({
-        id: 'img-blank',
-        data: 'aGVsbG8=',
-        mediaType: 'image/png',
-        size: 5,
-      });
-
-      loadSpy.mockRestore();
-    });
-
-    it('should load from forkSource.sessionId and truncate at forkSource.resumeAt for pending fork', async () => {
-      await plugin.onload();
-
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
-      await chatHostOf(plugin).updateConversation(conv.id, {
-        providerState: {
-          forkSource: { sessionId: 'source-session-abc', resumeAt: 'asst-uuid-cutoff' },
-          // No providerSessionId → isPendingFork returns true
-          providerSessionId: undefined,
-        },
-        sessionId: null,
-      });
-
-      const loadSpy = jest.spyOn(sdkSession, 'loadSDKSessionMessages').mockResolvedValue({
-        messages: [
-          { id: 'sdk-msg-1', role: 'user', content: 'Hello', timestamp: 1000 },
-          { id: 'sdk-msg-2', role: 'assistant', content: 'Hi', timestamp: 1001 },
-        ],
-        skippedLines: 0,
-      });
-
-      // Trigger loadSdkMessagesForConversation via public API
-      const loaded = await chatHostOf(plugin).getConversationById(conv.id);
-
-      // Should check existence of source session, not the conversation's own session
-      expect(sdkSession.locateSDKSession).toHaveBeenCalledWith(
-        expect.any(String),
-        'source-session-abc',
-        expect.any(Object),
-      );
-
-      // Should load from forkSource.sessionId with forkSource.resumeAt as truncation point
-      expect(loadSpy).toHaveBeenCalledWith(
-        expect.any(String),
-        'source-session-abc',
-        'asst-uuid-cutoff',
-        undefined,
-        expect.any(Object),
-      );
-
-      // Messages should be loaded
-      expect(loaded?.messages).toBeDefined();
-
-      loadSpy.mockRestore();
-    });
-
-    it('should NOT use fork path when conversation has its own providerSessionId', async () => {
-      await plugin.onload();
-
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
-      await chatHostOf(plugin).updateConversation(conv.id, {
-        providerState: {
-          forkSource: { sessionId: 'source-session', resumeAt: 'asst-uuid' },
-          providerSessionId: 'own-session-id',
-        },
-      });
-
-      const loadSpy = jest.spyOn(sdkSession, 'loadSDKSessionMessages').mockResolvedValue({
-        messages: [],
-        skippedLines: 0,
-      });
-
-      await chatHostOf(plugin).getConversationById(conv.id);
-
-      // Should load from own session, not forkSource session
-      expect(sdkSession.locateSDKSession).toHaveBeenCalledWith(
-        expect.any(String),
-        'own-session-id',
-        expect.any(Object),
-      );
-
-      loadSpy.mockRestore();
-    });
-  });
-
-  describe('loadSdkMessagesForConversation - subagent recovery', () => {
-    it('restores subagent data when Agent tool exists but subagent content block is missing', async () => {
-      await plugin.onload();
-
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
-      await chatHostOf(plugin).updateConversation(conv.id, {
-        providerState: {
-          providerSessionId: 'session-subagent-recovery',
-          subagentData: {
-            'task-1': {
-              id: 'task-1',
-              description: 'Recovered subagent',
-              status: 'completed',
-              result: 'Recovered result',
-              toolCalls: [
-                {
-                  id: 'sub-tool-1',
-                  name: 'Read',
-                  input: { file_path: 'README.md' },
-                  status: 'completed',
-                  result: 'content',
-                } as any,
-              ],
-              isExpanded: false,
-            } as any,
-          },
-        },
-        messages: [
-          {
-            id: 'assistant-1',
-            role: 'assistant',
-            content: '',
-            timestamp: 1000,
-            toolCalls: [
-              {
-                id: 'task-1',
-                name: 'Agent',
-                input: { description: 'Do sub task' },
-                status: 'completed',
-                result: 'Task completed',
-              } as any,
-            ],
-            // Simulate partial persisted blocks that lost the task tool block.
-            contentBlocks: [{ type: 'text', content: 'Done' }] as any,
-          } as any,
-        ],
-      });
-
-      const loadSpy = jest.spyOn(sdkSession, 'loadSDKSessionMessages').mockResolvedValue({
-        messages: [],
-        skippedLines: 0,
-      });
-
-      const loaded = await chatHostOf(plugin).getConversationById(conv.id);
-      expect(loadSpy).toHaveBeenCalledWith(
-        expect.any(String),
-        'session-subagent-recovery',
-        undefined,
-        undefined,
-        expect.any(Object),
-      );
-      expect(loaded?.messages[0].toolCalls?.find(tc => tc.id === 'task-1')).toEqual(
-        expect.objectContaining({
-          subagent: expect.objectContaining({
-            id: 'task-1',
-            description: 'Recovered subagent',
-            result: 'Recovered result',
-          }),
-        })
-      );
-      expect(loaded?.messages[0].contentBlocks).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({ type: 'subagent', subagentId: 'task-1' }),
-        ])
-      );
-
-      loadSpy.mockRestore();
-    });
-
-    it('prefers richer SDK task result over stale cached subagent result', async () => {
-      await plugin.onload();
-
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
-      await chatHostOf(plugin).updateConversation(conv.id, {
-        providerState: {
-          providerSessionId: 'session-subagent-merge',
-          subagentData: {
-            'task-merge-1': {
-              id: 'task-merge-1',
-              description: 'Recovered subagent',
-              mode: 'async',
-              asyncStatus: 'completed',
-              status: 'completed',
-              result: 'Short stale result',
-              toolCalls: [],
-              isExpanded: false,
-            } as any,
-          },
-        },
-        messages: [
-          {
-            id: 'assistant-merge',
-            role: 'assistant',
-            content: '',
-            timestamp: 1000,
-            toolCalls: [
-              {
-                id: 'task-merge-1',
-                name: 'Agent',
-                input: { description: 'Do sub task', run_in_background: true },
-                status: 'completed',
-                result: 'Full SDK result from queue-operation',
-              } as any,
-            ],
-            contentBlocks: [{ type: 'subagent', subagentId: 'task-merge-1', mode: 'async' }] as any,
-          } as any,
-        ],
-      });
-
-      const loadSpy = jest.spyOn(sdkSession, 'loadSDKSessionMessages').mockResolvedValue({
-        messages: [],
-        skippedLines: 0,
-      });
-
-      const loaded = await chatHostOf(plugin).getConversationById(conv.id);
-      const taskTool = loaded?.messages[0].toolCalls?.find(tc => tc.id === 'task-merge-1');
-
-      expect(loadSpy).toHaveBeenCalledWith(
-        expect.any(String),
-        'session-subagent-merge',
-        undefined,
-        undefined,
-        expect.any(Object),
-      );
-      expect(taskTool?.result).toBe('Full SDK result from queue-operation');
-      expect(taskTool?.subagent?.result).toBe('Full SDK result from queue-operation');
-
-      loadSpy.mockRestore();
-    });
-
-    it('keeps the richer cached async result when both SDK and cache are terminal', async () => {
-      await plugin.onload();
-
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
-      await chatHostOf(plugin).updateConversation(conv.id, {
-        providerState: {
-          providerSessionId: 'session-subagent-cache-richer',
-          subagentData: {
-            'task-merge-2': {
-              id: 'task-merge-2',
-              description: 'Recovered subagent',
-              mode: 'async',
-              asyncStatus: 'completed',
-              status: 'completed',
-              result: 'Recovered final result with full details',
-              toolCalls: [],
-              isExpanded: false,
-              agentId: 'agent-cache-richer',
-            } as any,
-          },
-        },
-        messages: [],
-      });
-
-      const loadSpy = jest.spyOn(sdkSession, 'loadSDKSessionMessages').mockResolvedValue({
-        messages: [
-          {
-            id: 'assistant-cache-richer',
-            role: 'assistant',
-            content: '',
-            timestamp: 1000,
-            toolCalls: [
-              {
-                id: 'task-merge-2',
-                name: 'Agent',
-                input: { description: 'SDK async subagent', run_in_background: true },
-                status: 'completed',
-                result: 'Short SDK result',
-                subagent: {
-                  id: 'task-merge-2',
-                  description: 'SDK async subagent',
-                  mode: 'async',
-                  asyncStatus: 'completed',
-                  status: 'completed',
-                  result: 'Short SDK result',
-                  toolCalls: [],
-                  isExpanded: false,
-                  agentId: 'agent-cache-richer',
-                },
-              } as any,
-            ],
-            contentBlocks: [{ type: 'subagent', subagentId: 'task-merge-2', mode: 'async' }] as any,
-          } as any,
-        ],
-        skippedLines: 0,
-      });
-
-      const loaded = await chatHostOf(plugin).getConversationById(conv.id);
-      const taskTool = loaded?.messages[0].toolCalls?.find(tc => tc.id === 'task-merge-2');
-
-      expect(taskTool?.status).toBe('completed');
-      expect(taskTool?.result).toBe('Recovered final result with full details');
-      expect(taskTool?.subagent?.result).toBe('Recovered final result with full details');
-
-      loadSpy.mockRestore();
-    });
-
-    it('drops stale asyncStatus from cached sync subagents during recovery', async () => {
-      await plugin.onload();
-
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
-      await chatHostOf(plugin).updateConversation(conv.id, {
-        providerState: {
-          providerSessionId: 'session-sync-subagent-cleanup',
-          subagentData: {
-            'task-sync-1': {
-              id: 'task-sync-1',
-              description: 'Recovered sync subagent',
-              mode: 'sync',
-              asyncStatus: 'completed',
-              status: 'completed',
-              result: 'Recovered sync result',
-              toolCalls: [],
-              isExpanded: false,
-            } as any,
-          },
-        },
-        messages: [
-          {
-            id: 'assistant-sync',
-            role: 'assistant',
-            content: '',
-            timestamp: 1000,
-            toolCalls: [
-              {
-                id: 'task-sync-1',
-                name: 'Agent',
-                input: { description: 'Do sync task' },
-                status: 'completed',
-                result: 'Sync result',
-              } as any,
-            ],
-            contentBlocks: [{ type: 'subagent', subagentId: 'task-sync-1', mode: 'sync' }] as any,
-          } as any,
-        ],
-      });
-
-      const loadSpy = jest.spyOn(sdkSession, 'loadSDKSessionMessages').mockResolvedValue({
-        messages: [],
-        skippedLines: 0,
-      });
-
-      const loaded = await chatHostOf(plugin).getConversationById(conv.id);
-      const taskTool = loaded?.messages[0].toolCalls?.find(tc => tc.id === 'task-sync-1');
-
-      expect(taskTool?.subagent?.mode).toBe('sync');
-      expect(taskTool?.subagent?.asyncStatus).toBeUndefined();
-
-      loadSpy.mockRestore();
-    });
-
-    it('prefers terminal SDK async status over stale cached running state', async () => {
-      await plugin.onload();
-
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
-      await chatHostOf(plugin).updateConversation(conv.id, {
-        providerState: {
-          providerSessionId: 'session-async-sdk-terminal',
-          subagentData: {
-            'task-async-sdk-terminal': {
-              id: 'task-async-sdk-terminal',
-              description: 'Cached async subagent',
-              mode: 'async',
-              asyncStatus: 'running',
-              status: 'running',
-              result: 'Still running',
-              toolCalls: [],
-              isExpanded: false,
-            } as any,
-          },
-        },
-        messages: [],
-      });
-
-      const loadSpy = jest.spyOn(sdkSession, 'loadSDKSessionMessages').mockResolvedValue({
-        messages: [
-          {
-            id: 'assistant-sdk-terminal',
-            role: 'assistant',
-            content: '',
-            timestamp: 1000,
-            toolCalls: [
-              {
-                id: 'task-async-sdk-terminal',
-                name: 'Agent',
-                input: { description: 'SDK async subagent', run_in_background: true },
-                status: 'completed',
-                result: 'Full SDK final result',
-                subagent: {
-                  id: 'task-async-sdk-terminal',
-                  description: 'SDK async subagent',
-                  mode: 'async',
-                  asyncStatus: 'completed',
-                  status: 'completed',
-                  result: 'Full SDK final result',
-                  toolCalls: [],
-                  isExpanded: false,
-                  agentId: 'agent-sdk-terminal',
-                },
-              } as any,
-            ],
-            contentBlocks: [{ type: 'subagent', subagentId: 'task-async-sdk-terminal', mode: 'async' }] as any,
-          } as any,
-        ],
-        skippedLines: 0,
-      });
-
-      const loaded = await chatHostOf(plugin).getConversationById(conv.id);
-      const taskTool = loaded?.messages[0].toolCalls?.find(tc => tc.id === 'task-async-sdk-terminal');
-
-      expect(taskTool?.status).toBe('completed');
-      expect(taskTool?.result).toBe('Full SDK final result');
-      expect(taskTool?.subagent?.status).toBe('completed');
-      expect(taskTool?.subagent?.asyncStatus).toBe('completed');
-      expect(taskTool?.subagent?.result).toBe('Full SDK final result');
-
-      loadSpy.mockRestore();
-    });
-
-    it('prefers cached terminal async status over SDK launch-only running state', async () => {
-      await plugin.onload();
-
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
-      await chatHostOf(plugin).updateConversation(conv.id, {
-        providerState: {
-          providerSessionId: 'session-async-cache-terminal',
-          subagentData: {
-            'task-async-cache-terminal': {
-              id: 'task-async-cache-terminal',
-              description: 'Cached async subagent',
-              mode: 'async',
-              asyncStatus: 'completed',
-              status: 'completed',
-              result: 'Recovered final result',
-              toolCalls: [],
-              isExpanded: false,
-              agentId: 'agent-cache-terminal',
-            } as any,
-          },
-        },
-        messages: [],
-      });
-
-      const loadSpy = jest.spyOn(sdkSession, 'loadSDKSessionMessages').mockResolvedValue({
-        messages: [
-          {
-            id: 'assistant-sdk-running',
-            role: 'assistant',
-            content: '',
-            timestamp: 1000,
-            toolCalls: [
-              {
-                id: 'task-async-cache-terminal',
-                name: 'Agent',
-                input: { description: 'SDK async subagent', run_in_background: true },
-                status: 'running',
-                result: 'Task launched in background.',
-                subagent: {
-                  id: 'task-async-cache-terminal',
-                  description: 'SDK async subagent',
-                  mode: 'async',
-                  asyncStatus: 'running',
-                  status: 'running',
-                  result: 'Task launched in background.',
-                  toolCalls: [],
-                  isExpanded: false,
-                  agentId: 'agent-cache-terminal',
-                },
-              } as any,
-            ],
-            contentBlocks: [{ type: 'subagent', subagentId: 'task-async-cache-terminal', mode: 'async' }] as any,
-          } as any,
-        ],
-        skippedLines: 0,
-      });
-
-      const loaded = await chatHostOf(plugin).getConversationById(conv.id);
-      const taskTool = loaded?.messages[0].toolCalls?.find(tc => tc.id === 'task-async-cache-terminal');
-
-      expect(taskTool?.status).toBe('completed');
-      expect(taskTool?.result).toBe('Recovered final result');
-      expect(taskTool?.subagent?.status).toBe('completed');
-      expect(taskTool?.subagent?.asyncStatus).toBe('completed');
-      expect(taskTool?.subagent?.result).toBe('Recovered final result');
-
-      loadSpy.mockRestore();
-    });
-
-    it('restores async subagent data and mode when Agent tool exists but async block is missing', async () => {
-      await plugin.onload();
-
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
-      await chatHostOf(plugin).updateConversation(conv.id, {
-        providerState: {
-          providerSessionId: 'session-async-subagent-recovery',
-          subagentData: {
-            'task-async-1': {
-              id: 'task-async-1',
-              description: 'Recovered async subagent',
-              mode: 'async',
-              asyncStatus: 'completed',
-              status: 'completed',
-              result: 'Recovered async result',
-              toolCalls: [],
-              isExpanded: false,
-            } as any,
-          },
-        },
-        messages: [
-          {
-            id: 'assistant-1',
-            role: 'assistant',
-            content: '',
-            timestamp: 1000,
-            toolCalls: [
-              {
-                id: 'task-async-1',
-                name: 'Agent',
-                input: { description: 'Do background task', run_in_background: true },
-                status: 'completed',
-                result: 'Task started',
-              } as any,
-            ],
-            contentBlocks: [{ type: 'text', content: 'Started' }] as any,
-          } as any,
-        ],
-      });
-
-      const loadSpy = jest.spyOn(sdkSession, 'loadSDKSessionMessages').mockResolvedValue({
-        messages: [],
-        skippedLines: 0,
-      });
-
-      const loaded = await chatHostOf(plugin).getConversationById(conv.id);
-      const block = loaded?.messages[0].contentBlocks?.find(
-        (b: any) => b.type === 'subagent' && b.subagentId === 'task-async-1'
-      ) as any;
-
-      expect(loaded?.messages[0].toolCalls?.find(tc => tc.id === 'task-async-1')).toEqual(
-        expect.objectContaining({
-          id: 'task-async-1',
-          subagent: expect.objectContaining({
-            id: 'task-async-1',
-            mode: 'async',
-            asyncStatus: 'completed',
-          }),
-        })
-      );
-      expect(block).toEqual(
-        expect.objectContaining({ type: 'subagent', subagentId: 'task-async-1', mode: 'async' })
-      );
-
-      loadSpy.mockRestore();
-    });
-
-    it('hydrates async subagent tool calls from SDK subagent files on reload', async () => {
-      await plugin.onload();
-
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
-      await chatHostOf(plugin).updateConversation(conv.id, {
-        providerState: {
-          providerSessionId: 'session-async-subagent-tools',
-          subagentData: {
-            'task-async-tools': {
-              id: 'task-async-tools',
-              description: 'Recovered async subagent',
-              mode: 'async',
-              asyncStatus: 'completed',
-              status: 'completed',
-              result: 'Recovered async result',
-              agentId: 'agent-a123',
-              toolCalls: [],
-              isExpanded: false,
-            } as any,
-          },
-        },
-        messages: [
-          {
-            id: 'assistant-1',
-            role: 'assistant',
-            content: '',
-            timestamp: 1000,
-            toolCalls: [
-              {
-                id: 'task-async-tools',
-                name: 'Agent',
-                input: { description: 'Do background task', run_in_background: true },
-                status: 'completed',
-                result: 'Task started',
-              } as any,
-            ],
-            contentBlocks: [{ type: 'subagent', subagentId: 'task-async-tools', mode: 'async' }] as any,
-          } as any,
-        ],
-      });
-
-      const loadSpy = jest.spyOn(sdkSession, 'loadSDKSessionMessages').mockResolvedValue({
-        messages: [],
-        skippedLines: 0,
-      });
-      const loadSubagentToolsSpy = jest.spyOn(sdkSession, 'loadSubagentToolCalls').mockResolvedValue([
-        {
-          id: 'sub-tool-1',
-          name: 'Bash',
-          input: { command: 'ls' },
-          status: 'completed',
-          result: 'ok',
-          isExpanded: false,
-        } as any,
-      ]);
-
-      const loaded = await chatHostOf(plugin).getConversationById(conv.id);
-      const taskTool = loaded?.messages[0].toolCalls?.find(tc => tc.id === 'task-async-tools');
-
-      expect(loadSubagentToolsSpy).toHaveBeenCalledWith(
-        expect.any(String),
-        'session-async-subagent-tools',
-        'agent-a123',
-        undefined,
-        expect.any(Object),
-      );
-      expect(taskTool?.subagent?.toolCalls).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            id: 'sub-tool-1',
-            name: 'Bash',
-            result: 'ok',
-          }),
-        ])
-      );
-
-      loadSpy.mockRestore();
-      loadSubagentToolsSpy.mockRestore();
-    });
-
-    it('keeps async subagent renderer visible when task block and task tool call are both missing', async () => {
-      await plugin.onload();
-
-      const conv = await chatHostOf(plugin).createConversation({ providerId: 'claude' });
-      await chatHostOf(plugin).updateConversation(conv.id, {
-        providerState: {
-          providerSessionId: 'session-async-subagent-fallback',
-          subagentData: {
-            'task-async-orphan': {
-              id: 'task-async-orphan',
-              description: 'Recovered async orphan subagent',
-              mode: 'async',
-              asyncStatus: 'running',
-              status: 'running',
-              result: 'Running in background',
-              toolCalls: [],
-              isExpanded: false,
-            } as any,
-          },
-        },
-        messages: [
-          {
-            id: 'assistant-1',
-            role: 'assistant',
-            content: 'Background work started',
-            timestamp: 1000,
-            contentBlocks: [{ type: 'text', content: 'Background work started' }] as any,
-          } as any,
-        ],
-      });
-
-      const loadSpy = jest.spyOn(sdkSession, 'loadSDKSessionMessages').mockResolvedValue({
-        messages: [],
-        skippedLines: 0,
-      });
-
-      const loaded = await chatHostOf(plugin).getConversationById(conv.id);
-      const assistant = loaded?.messages.find(m => m.id === 'assistant-1');
-      const block = assistant?.contentBlocks?.find(
-        (b: any) => b.type === 'subagent' && b.subagentId === 'task-async-orphan'
-      ) as any;
-
-      expect(assistant?.toolCalls?.find((tc: any) => tc.id === 'task-async-orphan')).toEqual(
-        expect.objectContaining({
-          id: 'task-async-orphan',
-          name: TOOL_SUBAGENT,
-          subagent: expect.objectContaining({
-            id: 'task-async-orphan',
-            mode: 'async',
-            asyncStatus: 'running',
-          }),
-        })
-      );
-      expect(block).toEqual(
-        expect.objectContaining({
-          type: 'subagent',
-          subagentId: 'task-async-orphan',
-          mode: 'async',
-        })
-      );
-
-      loadSpy.mockRestore();
-    });
-  });
 
 });

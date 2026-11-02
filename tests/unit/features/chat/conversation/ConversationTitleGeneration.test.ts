@@ -1,6 +1,5 @@
 import '@/providers';
 
-import { claudeCatalogFixture } from '@test/helpers/claudeModels';
 import { Notice } from 'obsidian';
 
 import type { TitleGenerationService } from '@/core/providers/types';
@@ -8,6 +7,32 @@ import {
   ConversationTitleGeneration,
   fallbackConversationTitle,
 } from '@/features/chat/conversation/ConversationTitleGeneration';
+import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
+
+// Kiro resolves the title model through its own catalog: the selection carries
+// the `kiro/` prefix and availability comes from the host catalog plus the
+// provider's visibleModels. A bare id or providerConfigs entry does not satisfy
+// resolveTitleGenerationSelection.
+function kiroTitleSettings(): Record<string, unknown> {
+  const settings: Record<string, unknown> = {
+    enableAutoTitleGeneration: true,
+    titleGenerationModel: 'kiro/haiku',
+  };
+  updateCurrentKiroCatalog(settings, {
+    defaultModelId: null,
+    fingerprint: 'test-fingerprint',
+    refreshedAt: 0,
+    models: [{
+      rawId: 'haiku',
+      displayName: 'Haiku',
+      description: 'Title model',
+      reasoningEfforts: [],
+      supportsReasoning: false,
+    }],
+  });
+  updateKiroProviderSettings(settings, { enabled: true, visibleModels: ['haiku'] });
+  return settings;
+}
 
 describe('fallbackConversationTitle', () => {
   it('uses the first sentence', () => {
@@ -43,11 +68,7 @@ describe('ConversationTitleGeneration.regenerate', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     host = {
-      settings: {
-        enableAutoTitleGeneration: true,
-        titleGenerationModel: 'haiku',
-        providerConfigs: { claude: claudeCatalogFixture(['haiku']) },
-      },
+      settings: kiroTitleSettings(),
       getConversationById: jest.fn().mockResolvedValue(null),
       renameConversation: jest.fn().mockResolvedValue(undefined),
       updateConversation: jest.fn().mockResolvedValue(undefined),

@@ -4,10 +4,15 @@ import { createMockEl } from '@test/helpers/MockElement';
 import { Component, Menu } from 'obsidian';
 
 import {
-  TOOL_AGENT_OUTPUT,
   TOOL_APPLY_PATCH,
-  TOOL_SUBAGENT,
 } from '@/core/tools/toolNames';
+
+// Kiro lifecycle subagent tool names (the only provider registered after the
+// claude managed-agent protocol was removed). Spawn tool is `task`; its
+// output/wait sibling is `task_output`. See
+// src/providers/kiro/normalization/kiroLifecycleToolNames.ts.
+const KIRO_SPAWN_TOOL = 'task';
+const KIRO_OUTPUT_TOOL = 'task_output';
 import type { ChatMessage, ImageAttachment } from '@/core/types';
 import { renderCitationGroup } from '@/features/chat/rendering/CitationRenderer';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
@@ -44,11 +49,11 @@ function createMockComponent() {
   return new Component();
 }
 
-function mockCapabilities(providerId: 'claude' | 'kiro' = 'claude') {
+function mockCapabilities(providerId: 'kiro' = 'kiro') {
   return () => ({
     providerId,
     supportsEphemeralSessions: false,
-    supportsNativeHistory: providerId === 'claude',
+    supportsNativeHistory: false,
     supportsRewind: true,
     supportsFork: true,
     supportsProviderCommands: true,
@@ -59,7 +64,7 @@ function mockCapabilities(providerId: 'claude' | 'kiro' = 'claude') {
 
 function createRenderer(
   messagesEl?: any,
-  providerId: 'claude' | 'kiro' = 'claude',
+  providerId: 'kiro' = 'kiro',
   settings: Record<string, unknown> = {},
 ) {
   const el = messagesEl ?? createMockEl();
@@ -183,7 +188,7 @@ describe('MessageRenderer', () => {
 
   it('renders timestamps when the setting is enabled', () => {
     const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'claude', { showMessageTimestamps: true });
+    const { renderer } = createRenderer(messagesEl, 'kiro', { showMessageTimestamps: true });
     const timestamp = new Date('2026-08-12T10:30:00Z').getTime();
 
     renderer.renderStoredMessage({
@@ -206,7 +211,7 @@ describe('MessageRenderer', () => {
 
   it('does not render timestamps when the setting is disabled', () => {
     const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'claude', { showMessageTimestamps: false });
+    const { renderer } = createRenderer(messagesEl, 'kiro', { showMessageTimestamps: false });
 
     renderer.renderStoredMessage({
       id: 'untimed-user',
@@ -529,7 +534,7 @@ describe('MessageRenderer', () => {
     const messagesEl = createMockEl();
     const mockComponent = createMockComponent();
     const renderer = new MessageRenderer(
-      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities('claude'),
+      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities(),
     );
     const renderContentSpy = jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
@@ -542,19 +547,28 @@ describe('MessageRenderer', () => {
         { id: 'todo', name: 'TodoWrite', input: { items: [] } } as any,
         { id: 'edit', name: 'Edit', input: { file_path: 'notes/test.md' } } as any,
         { id: 'read', name: 'Read', input: { file_path: 'notes/test.md' } } as any,
+        // Async kiro subagent: background spawn carrying a task_id, resolved by a
+        // matching task_output sibling.
         {
           id: 'sub-1',
-          name: TOOL_SUBAGENT,
-          input: { description: 'Async subagent' },
-          status: 'running',
-          subagent: { id: 'sub-1', mode: 'async', status: 'running', toolCalls: [], isExpanded: false },
+          name: KIRO_SPAWN_TOOL,
+          input: { description: 'Async subagent', task_id: 'task-async', run_in_background: true },
+          status: 'completed',
         } as any,
         {
+          id: 'sub-1-out',
+          name: KIRO_OUTPUT_TOOL,
+          input: { task_id: 'task-async' },
+          status: 'completed',
+          result: '{"task_id":"task-async","status":"completed","output":"Async done"}',
+        } as any,
+        // Sync kiro subagent: foreground spawn completes in place.
+        {
           id: 'sub-2',
-          name: TOOL_SUBAGENT,
+          name: KIRO_SPAWN_TOOL,
           input: { description: 'Sync subagent' },
-          status: 'running',
-          subagent: { id: 'sub-2', mode: 'sync', status: 'running', toolCalls: [], isExpanded: false },
+          status: 'completed',
+          result: 'Sync done',
         } as any,
       ],
       contentBlocks: [
@@ -563,8 +577,9 @@ describe('MessageRenderer', () => {
         { type: 'tool_use', toolId: 'todo' } as any,
         { type: 'tool_use', toolId: 'edit' } as any,
         { type: 'tool_use', toolId: 'read' } as any,
-        { type: 'subagent', subagentId: 'sub-1', mode: 'async' } as any,
-        { type: 'subagent', subagentId: 'sub-2' } as any,
+        { type: 'tool_use', toolId: 'sub-1' } as any,
+        { type: 'tool_use', toolId: 'sub-1-out' } as any,
+        { type: 'tool_use', toolId: 'sub-2' } as any,
       ],
     };
 
@@ -611,7 +626,7 @@ describe('MessageRenderer', () => {
 
   it('passes expanded file-edit default to stored Write/Edit renderer', () => {
     const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl, 'claude', { expandFileEditsByDefault: true });
+    const { renderer } = createRenderer(messagesEl, 'kiro', { expandFileEditsByDefault: true });
 
     const msg: ChatMessage = {
       id: 'm-write-expanded',
@@ -761,7 +776,7 @@ describe('MessageRenderer', () => {
       toolCalls: [
         {
           id: 'task-1',
-          name: TOOL_SUBAGENT,
+          name: KIRO_SPAWN_TOOL,
           input: { description: 'Run tests' },
           status: 'completed',
           result: 'All passed',
@@ -800,19 +815,9 @@ describe('MessageRenderer', () => {
       toolCalls: [
         {
           id: 'task-async-1',
-          name: TOOL_SUBAGENT,
-          input: { description: 'Background task', run_in_background: true },
+          name: KIRO_SPAWN_TOOL,
+          input: { description: 'Background task', task_id: 'bg-1', run_in_background: true },
           status: 'completed',
-          result: 'Task running',
-          subagent: {
-            id: 'task-async-1',
-            description: 'Background task',
-            mode: 'async',
-            asyncStatus: 'running',
-            status: 'running',
-            toolCalls: [],
-            isExpanded: false,
-          },
         } as any,
       ],
       contentBlocks: [
@@ -833,59 +838,20 @@ describe('MessageRenderer', () => {
     expect(renderStoredSubagent).not.toHaveBeenCalled();
   });
 
-  it('uses subagent block mode hint when linked subagent mode is missing', () => {
-    const messagesEl = createMockEl();
-    const { renderer } = createRenderer(messagesEl);
-
-    (renderStoredAsyncSubagent as jest.Mock).mockClear();
-    (renderStoredSubagent as jest.Mock).mockClear();
-
-    const msg: ChatMessage = {
-      id: 'm-task-mode-hint',
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      toolCalls: [
-        {
-          id: 'task-hint-1',
-          name: TOOL_SUBAGENT,
-          input: { description: 'Background task from block hint' },
-          status: 'running',
-          subagent: {
-            id: 'task-hint-1',
-            description: 'Background task from block hint',
-            status: 'running',
-            toolCalls: [],
-            isExpanded: false,
-          },
-        } as any,
-      ],
-      contentBlocks: [
-        { type: 'subagent', subagentId: 'task-hint-1', mode: 'async' } as any,
-      ],
-    };
-
-    renderer.renderStoredMessage(msg);
-
-    expect(renderStoredAsyncSubagent).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        id: 'task-hint-1',
-        mode: 'async',
-      })
-    );
-    expect(renderStoredSubagent).not.toHaveBeenCalled();
-  });
+  // Note: the claude "subagent" content-block mode-hint path is managed-agent
+  // specific and never fires under kiro's lifecycle protocol. Kiro derives async
+  // vs sync from the spawn tool's run_in_background input, covered by the async
+  // test above.
 
   // ============================================
-  // TaskOutput skipping
+  // Output-tool skipping (lifecycle wait/output tools)
   // ============================================
 
-  it('should skip TaskOutput tool calls (internal async subagent communication)', () => {
+  it('should skip subagent output tool calls (internal lifecycle communication)', () => {
     const messagesEl = createMockEl();
     const mockComponent = createMockComponent();
     const renderer = new MessageRenderer(
-      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities('claude'),
+      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities(),
     );
 
     (renderStoredToolCall as jest.Mock).mockClear();
@@ -896,7 +862,16 @@ describe('MessageRenderer', () => {
       content: '',
       timestamp: Date.now(),
       toolCalls: [
-        { id: 'agent-output-1', name: TOOL_AGENT_OUTPUT, input: { task_id: 'abc', block: true } } as any,
+        // The spawn sibling establishes ownership of task_id 'abc', so the
+        // output tool is folded into the subagent card and not rendered as a
+        // standalone tool call.
+        {
+          id: 'spawn-1',
+          name: KIRO_SPAWN_TOOL,
+          input: { description: 'Background task', task_id: 'abc', run_in_background: true },
+          status: 'completed',
+        } as any,
+        { id: 'agent-output-1', name: KIRO_OUTPUT_TOOL, input: { task_id: 'abc', block: true } } as any,
       ],
       contentBlocks: [
         { type: 'tool_use', toolId: 'agent-output-1' } as any,
@@ -912,7 +887,7 @@ describe('MessageRenderer', () => {
     const messagesEl = createMockEl();
     const mockComponent = createMockComponent();
     const renderer = new MessageRenderer(
-      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities('claude'),
+      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities(),
     );
 
     (renderStoredToolCall as jest.Mock).mockClear();
@@ -924,7 +899,13 @@ describe('MessageRenderer', () => {
       timestamp: Date.now(),
       toolCalls: [
         { id: 'read-1', name: 'Read', input: { file_path: 'test.md' }, status: 'completed' } as any,
-        { id: 'agent-output-1', name: TOOL_AGENT_OUTPUT, input: { task_id: 'abc' } } as any,
+        {
+          id: 'spawn-1',
+          name: KIRO_SPAWN_TOOL,
+          input: { description: 'Background task', task_id: 'abc', run_in_background: true },
+          status: 'completed',
+        } as any,
+        { id: 'agent-output-1', name: KIRO_OUTPUT_TOOL, input: { task_id: 'abc' } } as any,
         { id: 'grep-1', name: 'Grep', input: { pattern: 'test' }, status: 'completed' } as any,
       ],
       contentBlocks: [
@@ -1178,7 +1159,7 @@ describe('MessageRenderer', () => {
         toolCalls: [
           {
             id: 'task-err',
-            name: TOOL_SUBAGENT,
+            name: KIRO_SPAWN_TOOL,
             input: { description: 'Failing task' },
             status: 'error',
             result: 'Something went wrong',
@@ -1216,7 +1197,7 @@ describe('MessageRenderer', () => {
         toolCalls: [
           {
             id: 'task-run',
-            name: TOOL_SUBAGENT,
+            name: KIRO_SPAWN_TOOL,
             input: { description: 'Running task' },
             status: 'pending',
           } as any,
@@ -1252,7 +1233,7 @@ describe('MessageRenderer', () => {
         toolCalls: [
           {
             id: 'task-no-desc',
-            name: TOOL_SUBAGENT,
+            name: KIRO_SPAWN_TOOL,
             input: {},
             status: 'completed',
             result: 'Done',
@@ -1269,7 +1250,7 @@ describe('MessageRenderer', () => {
         expect.anything(),
         expect.objectContaining({
           id: 'task-no-desc',
-          description: 'Subagent task',
+          description: 'Kiro subagent',
           status: 'completed',
         })
       );
