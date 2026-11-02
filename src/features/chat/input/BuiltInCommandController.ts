@@ -3,8 +3,6 @@ import { Notice } from 'obsidian';
 import { type BuiltInCommand, isBuiltInCommandSupported } from '@/core/commands/builtInCommands';
 import type { ProviderCapabilities } from '@/core/providers/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
-import type { ConversationController } from '@/features/chat/conversation/ConversationController';
-import type { LinkedContentController } from '@/features/chat/linked-content';
 import type { SideChatController } from '@/features/chat/side-chat/SideChatController';
 import { t } from '@/i18n/i18n';
 import { ResumeSessionDropdown } from '@/shared/components/ResumeSessionDropdown';
@@ -12,18 +10,18 @@ import type { ComposerInputElement } from '@/shared/composer-dropdown/types';
 
 export interface BuiltInCommandControllerDeps {
   plugin: Pick<ChatFeatureHost, 'getConversationList'>;
-  conversationController: Pick<ConversationController, 'createNew' | 'switchTo'>;
-  getLinkedContentController: () => Pick<LinkedContentController, 'getSnapshot' | 'resetAutoDraft'>;
   getCurrentConversationId: () => string | null;
   getInputContainerEl: () => HTMLElement;
   getInputEl: () => ComposerInputElement;
   getSideChatController?: () => SideChatController | null;
-  openConversation?: (conversationId: string) => Promise<void>;
-  /** Lets the active layout replace in-place clear with its own New action. */
-  handleNewConversationCommand?: () => Promise<boolean>;
-  onForkAll?: () => Promise<void>;
+  /** Opens a picked session under the tab manager's layout policy, bound to this tab. */
+  openConversation: (conversationId: string) => Promise<void>;
+  /** Starts a new conversation under the tab manager's layout policy, bound to this tab. */
+  startNewConversation: () => Promise<void>;
   /** Toggles the active provider's fast service tier when available. */
   toggleFastMode?: () => Promise<boolean>;
+  /** Runs after the resume picker opens or closes. */
+  onResumeDropdownVisibilityChange?: () => void;
 }
 
 /** Runs main-chat built-in commands and owns the resume picker they open. */
@@ -40,34 +38,12 @@ export class BuiltInCommandController {
     }
 
     switch (command.action) {
-      case 'clear': {
-        const handledByLayout = await this.deps.handleNewConversationCommand?.() ?? false;
-        if (handledByLayout) {
-          const linkedContent = this.deps.getLinkedContentController();
-          const linkedContentMode = linkedContent.getSnapshot().mode;
-          if (linkedContentMode === 'auto-draft' || linkedContentMode === 'explicit-draft') {
-            linkedContent.resetAutoDraft();
-          }
-        } else {
-          await this.deps.conversationController.createNew();
-        }
+      case 'clear':
+        await this.deps.startNewConversation();
         break;
-      }
       case 'resume':
         this.#showResumeDropdown();
         break;
-      case 'fork': {
-        if (!capabilities.supportsFork) {
-          new Notice('Fork is not supported by this provider.');
-          return;
-        }
-        if (!this.deps.onForkAll) {
-          new Notice('Fork not available.');
-          return;
-        }
-        await this.deps.onForkAll();
-        break;
-      }
       case 'fast': {
         try {
           const toggled = await this.deps.toggleFastMode?.() ?? false;
@@ -116,6 +92,7 @@ export class BuiltInCommandController {
     if (this.activeResumeDropdown) {
       this.activeResumeDropdown.destroy();
       this.activeResumeDropdown = null;
+      this.deps.onResumeDropdownVisibilityChange?.();
     }
   }
 
@@ -129,9 +106,6 @@ export class BuiltInCommandController {
       return;
     }
 
-    const openConversation = this.deps.openConversation
-      ?? ((id: string) => this.deps.conversationController.switchTo(id));
-
     this.activeResumeDropdown = new ResumeSessionDropdown(
       this.deps.getInputContainerEl(),
       this.deps.getInputEl(),
@@ -140,7 +114,7 @@ export class BuiltInCommandController {
       {
         onSelect: (id) => {
           this.destroyResumeDropdown();
-          openConversation(id).catch((err: unknown) => {
+          this.deps.openConversation(id).catch((err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err);
             new Notice(`Failed to open conversation: ${msg}`);
           });
@@ -150,5 +124,6 @@ export class BuiltInCommandController {
         },
       }
     );
+    this.deps.onResumeDropdownVisibilityChange?.();
   }
 }

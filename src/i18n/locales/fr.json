@@ -8,7 +8,8 @@
     "clearAll": "Tout effacer",
     "error": "Erreur",
     "confirm": "Confirmer",
-    "refresh": "Actualiser"
+    "refresh": "Actualiser",
+    "inputSuggestions": "Suggestions de saisie"
   },
   "chat": {
     "promptSuggestionHint": "Tab pour accepter",
@@ -72,7 +73,8 @@
       "mainOnlyCommand": "/{command} n'est disponible que dans la conversation principale.",
       "startFailed": "Impossible de démarrer la conversation annexe : {error}",
       "queued": "Ajouté à la file de la discussion secondaire.",
-      "busySide": "La conversation annexe répond encore. Attends la fin."
+      "busySide": "La conversation annexe répond encore. Attends la fin.",
+      "fullHeight": "Pleine hauteur"
     },
     "zen": {
       "regionLabel": "Chat Claudian",

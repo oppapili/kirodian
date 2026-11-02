@@ -18,7 +18,7 @@ import { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
 import type { ChatMessage, Conversation, ProviderId } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { ChatExecutionCoordinator } from '@/features/chat/execution/ChatExecutionCoordinator';
-import { handleForkRequest } from '@/features/chat/tabs/forking/ForkSource';
+import { handleForkRequest } from '@/features/chat/sessions/SessionForkSource';
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 
 /** Real persistence/orchestration with only the Obsidian filesystem boundary supplied by the test. */
