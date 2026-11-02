@@ -12,7 +12,6 @@ function getProviderConfig(
 describe('built-in ProviderModule catalog', () => {
   it('is the single ordered source for chat, workspace, and settings composition', () => {
     expect(BUILT_IN_PROVIDER_MODULES.map(module => module.id)).toEqual([
-      'claude',
       'kiro',
     ]);
     for (const module of BUILT_IN_PROVIDER_MODULES) {
@@ -33,15 +32,7 @@ describe('built-in ProviderModule catalog', () => {
         },
       ])),
     };
-    Object.assign(getProviderConfig(malformedSettings, 'claude'), {
-      customModels: {},
-      defaultModel: {},
-      enableChrome: 'true',
-      loadUserSettings: 'false',
-    });
-
     const defaultEnabled: Record<string, boolean> = {
-      claude: true,
       // kiro is the only user-visible provider and defaults to enabled (#88);
       // a malformed scalar falls back to that default.
       kiro: true,
@@ -63,13 +54,6 @@ describe('built-in ProviderModule catalog', () => {
       expect(config.environmentHash).toEqual(expect.any(String));
       expect(config.environmentVariables).toEqual(expect.any(String));
     }
-
-    expect(getProviderConfig(normalizedSettings, 'claude')).not.toHaveProperty('defaultModel');
-    expect(getProviderConfig(normalizedSettings, 'claude')).toMatchObject({
-      discoveredModels: [],
-      enableChrome: false,
-      loadUserSettings: true,
-    });
   });
 
   it('does not report canonical provider defaults as changed', () => {
