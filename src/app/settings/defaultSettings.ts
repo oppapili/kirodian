@@ -1,5 +1,5 @@
-import { DEFAULT_CHAT_PROVIDER_ID } from '../../core/providers/types';
 import { DEFAULT_REASONING_VALUE } from '../../core/providers/reasoning';
+import { DEFAULT_CHAT_PROVIDER_ID } from '../../core/providers/types';
 import type { ClaudianSettings, ProviderConfigMap } from '../../core/types/settings';
 
 /**
