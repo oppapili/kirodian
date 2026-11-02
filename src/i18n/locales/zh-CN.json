@@ -401,7 +401,7 @@
         "shared": "其他服务商"
       },
       "claudeHelp": ".claude/skills/ 中的 Claude Code 技能和 .claude/commands/ 中的命令。",
-      "sharedHelp": ".agents/skills/ 中供 Codex CLI、OpenCode、Pi 和 Grok Build 使用的共享技能。",
+      "sharedHelp": ".agents/skills/ 中的共享技能。",
       "status": {
         "error": "无法读取技能文件夹:{message}"
       },
@@ -430,7 +430,7 @@
       "droppedFrontmatterWarning": "保存后仅保留名称和描述。以下键将被移除,服务商的行为可能改变:{keys}",
       "hidden": {
         "name": "隐藏的命令和技能",
-        "desc": "在所有服务商的命令菜单中隐藏命令和技能。输入不带前导斜杠的准确名称,每行一个(Pi 技能使用 skill:名称)。",
+        "desc": "在所有服务商的命令菜单中隐藏命令和技能。输入不带前导斜杠的准确名称,每行一个(技能使用 skill:名称)。",
         "placeholder": "commit\ncompact\nskill:review"
       },
       "sync": {

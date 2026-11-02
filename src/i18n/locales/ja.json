@@ -401,7 +401,7 @@
         "shared": "その他のプロバイダー"
       },
       "claudeHelp": ".claude/skills/ の Claude Code スキルと .claude/commands/ のコマンド。",
-      "sharedHelp": "Codex CLI、OpenCode、Pi、Grok Build 用の .agents/skills/ にある共有スキル。",
+      "sharedHelp": ".agents/skills/ にある共有スキル。",
       "status": {
         "error": "スキルフォルダーを読み取れませんでした: {message}"
       },
@@ -430,7 +430,7 @@
       "droppedFrontmatterWarning": "保存すると名前と説明だけが残ります。次のキーは削除され、プロバイダーの動作が変わる可能性があります: {keys}",
       "hidden": {
         "name": "非表示のコマンドとスキル",
-        "desc": "すべてのプロバイダーのコマンドメニューからコマンドとスキルを非表示にします。先頭のスラッシュを付けずに正確な名前を 1 行に 1 つずつ入力してください(Pi のスキルは skill:名前)。",
+        "desc": "すべてのプロバイダーのコマンドメニューからコマンドとスキルを非表示にします。先頭のスラッシュを付けずに正確な名前を 1 行に 1 つずつ入力してください(スキルは skill:名前)。",
         "placeholder": "commit\ncompact\nskill:review"
       },
       "sync": {

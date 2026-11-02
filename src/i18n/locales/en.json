@@ -401,7 +401,7 @@
         "shared": "Other providers"
       },
       "claudeHelp": "Claude Code skills in .claude/skills/ and commands in .claude/commands/.",
-      "sharedHelp": "Shared skills in .agents/skills/ for Codex CLI, OpenCode, Pi and Grok Build.",
+      "sharedHelp": "Shared skills in .agents/skills/.",
       "status": {
         "error": "Could not read the skill folders: {message}"
       },
@@ -430,7 +430,7 @@
       "droppedFrontmatterWarning": "Saving keeps only name and description. These keys will be removed and provider behavior may change: {keys}",
       "hidden": {
         "name": "Hidden commands and skills",
-        "desc": "Hide commands and skills from every provider's command menu. Enter exact names without the leading slash, one per line (Pi skills use skill:name).",
+        "desc": "Hide commands and skills from every provider's command menu. Enter exact names without the leading slash, one per line (skills use skill:name).",
         "placeholder": "commit\ncompact\nskill:review"
       },
       "sync": {

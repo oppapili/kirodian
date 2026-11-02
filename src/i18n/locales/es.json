@@ -401,7 +401,7 @@
         "shared": "Otros proveedores"
       },
       "claudeHelp": "Skills de Claude Code en .claude/skills/ y comandos en .claude/commands/.",
-      "sharedHelp": "Skills compartidos en .agents/skills/ para Codex CLI, OpenCode, Pi y Grok Build.",
+      "sharedHelp": "Skills compartidos en .agents/skills/.",
       "status": {
         "error": "No se pudieron leer las carpetas de skills: {message}"
       },
@@ -430,7 +430,7 @@
       "droppedFrontmatterWarning": "Al guardar solo se conservan el nombre y la descripción. Se eliminarán estas claves y el comportamiento de los proveedores puede cambiar: {keys}",
       "hidden": {
         "name": "Comandos y skills ocultos",
-        "desc": "Oculta comandos y skills del menú de comandos de todos los proveedores. Escribe los nombres exactos sin la barra inicial, uno por línea (los skills de Pi usan skill:nombre).",
+        "desc": "Oculta comandos y skills del menú de comandos de todos los proveedores. Escribe los nombres exactos sin la barra inicial, uno por línea (los skills usan skill:nombre).",
         "placeholder": "commit\ncompact\nskill:review"
       },
       "sync": {
