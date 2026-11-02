@@ -64,12 +64,12 @@ export function createHarness(options: {
   const backend = new FakeSideBackend();
   const lifecycleRegistry = new ProviderExecutionLifecycleRegistry();
   const forkState = { forkSource: { resumeAt: 'checkpoint-1', sessionId: 'main-session' } };
-  ProviderRegistry.register('claude', {
+  ProviderRegistry.register('kiro', {
     formatQuestionReply: options.formatQuestionReply,
     getConversationCapabilities: options.getConversationCapabilities,
-    capabilities: { providerId: 'claude', supportsFork: options.supportsFork ?? true, supportsEphemeralSessions: true, supportsEphemeralFork: options.supportsEphemeralFork, forkMode: options.forkMode },
-    modelPolicy: ProviderRegistry.getModelPolicy('claude'),
-    chatUIConfig: ProviderRegistry.getChatUIConfig('claude'),
+    capabilities: { providerId: 'kiro', supportsFork: options.supportsFork ?? true, supportsEphemeralSessions: true, supportsEphemeralFork: options.supportsEphemeralFork, forkMode: options.forkMode },
+    modelPolicy: ProviderRegistry.getModelPolicy('kiro'),
+    chatUIConfig: ProviderRegistry.getChatUIConfig('kiro'),
     createExecutionBackend: () => backend,
     subagentAdapter: options.subagentAdapter,
     taskResultInterpreter: options.taskResultInterpreter,
@@ -112,7 +112,7 @@ export function createHarness(options: {
     controllers: {},
     executionCoordinator: { resolveForkSource: async () => ({ resumeAt: checkpoint, sessionId: 'main-session' }) },
     id: 'tab-1',
-    providerId: 'claude',
+    providerId: 'kiro',
     state: { isRewinding: false, isStreaming: false, messages },
   } as unknown as AssembledTabRuntime;
 
@@ -122,7 +122,7 @@ export function createHarness(options: {
     getSessionSnapshotDirectory: () => '/tmp/claudian-sessions',
     app,
     getConversationSummary(id: string) { return (this as unknown as { getConversationSync: (id: string) => any }).getConversationSync(id); },
-    getConversationSync: () => options.providerState ? { id: 'conversation-1', providerId: 'claude', providerState: options.providerState } : null,
+    getConversationSync: () => options.providerState ? { id: 'conversation-1', providerId: 'kiro', providerState: options.providerState } : null,
     providerHost: { app, settings, executionLifecycleRegistry: lifecycleRegistry },
     settings,
   } as never;

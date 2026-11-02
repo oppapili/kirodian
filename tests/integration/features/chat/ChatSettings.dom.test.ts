@@ -18,6 +18,7 @@ import { formatReasoningValueLabel } from '@/core/providers/reasoning';
 import type { ProviderId } from '@/core/providers/types';
 import type { ClaudianSettings, Conversation } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
+import { updateCurrentKiroCatalog } from '@/providers/kiro/settings';
 import { getChatSettingsSnapshot } from '@/features/chat/ChatSettings';
 import { destroyTab } from '@/features/chat/tabs/TabLifecycle';
 import { updateTabProviderSettings } from '@/features/chat/tabs/tabProviderSettings';
@@ -43,9 +44,28 @@ afterEach(async () => {
 function createSettings({ id, populate }: typeof modelCatalogCases[number], advertisesHigh = true): ClaudianSettings {
   const settings = JSON.parse(JSON.stringify(DEFAULT_CLAUDIAN_SETTINGS)) as typeof DEFAULT_CLAUDIAN_SETTINGS;
   populate(settings);
-  const config = settings.providerConfigs[id]!;
   const levels = advertisesHigh ? ['low', 'medium', 'high'] : ['low', 'medium'];
-  if (id === 'claude') (config.discoveredModels as Array<Record<string, unknown>>)[0].supportedEffortLevels = levels;
+  if (id === 'kiro') {
+    // Advertise the selected model's reasoning efforts through the kiro catalog.
+    updateCurrentKiroCatalog(settings, {
+      models: [
+        {
+          rawId: 'sonnet',
+          displayName: 'Selected label',
+          description: 'Selected metadata',
+          reasoningEfforts: levels.map(value => ({ label: value, value })),
+          supportsReasoning: true,
+        },
+        {
+          rawId: 'unselected-catalog-entry',
+          displayName: 'Unselected',
+          description: '',
+          reasoningEfforts: [],
+          supportsReasoning: false,
+        },
+      ],
+    });
+  }
   settings.savedProviderModel = { [id]: 'old-model' };
   settings.savedProviderEffort = { [id]: 'high' };
   return settings;
@@ -62,7 +82,7 @@ function createChatHarness(settings: ClaudianSettings, id: ProviderId, selected:
   const sessions: FakeSideSession[] = [];
   const persist = jest.fn(async () => undefined);
   const settingsCoordinator = new SettingsCoordinator(settings, persist);
-  jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockImplementation((_host, providerId = 'claude') => ({
+  jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockImplementation((_host, providerId = 'kiro') => ({
     providerId,
     createSession: config => {
       const session = new FakeSideSession(config);
@@ -229,7 +249,7 @@ it.each(modelCatalogCases)('$id keeps displayed and submitted reasoning independ
 });
 
 test.each(['provider switch', 'switch back', 'closing'] as const)('queued toolbar changes cannot survive %s', async transition => {
-  const entry = modelCatalogCases.find(entry => entry.id === 'claude')!;
+  const entry = modelCatalogCases.find(entry => entry.id === 'kiro')!;
   const settings = createSettings(entry);
   const { plugin, createTab } = createChatHarness(settings, entry.id, entry.selected);
   const tab = await createTab();
