@@ -45,6 +45,11 @@ export const TOOL_WAIT_AGENT = 'wait_agent' as const;
 export const TOOL_RESUME_AGENT = 'resume_agent' as const;
 export const TOOL_CLOSE_AGENT = 'close_agent' as const;
 
+// Claudian-hosted cross-session tools; distinct from runtime agent `send_message`.
+export const TOOL_CLAUDIAN_LIST_DESTINATIONS = 'claudian_list_destinations' as const;
+export const TOOL_CLAUDIAN_SEND_MESSAGE = 'claudian_send_message' as const;
+export const TOOL_CLAUDIAN_READ_SESSION = 'claudian_read_session' as const;
+
 const SCRIPT_TOOLS: readonly string[] = [TOOL_EXEC, 'js', 'mcp__cua_repl__js', TOOL_WORKFLOW];
 
 export function isScriptTool(name: string): boolean {
@@ -66,6 +71,13 @@ export const AGENT_LIFECYCLE_TOOLS = [
 
 export function isAgentLifecycleTool(name: string): boolean {
   return (AGENT_LIFECYCLE_TOOLS as readonly string[]).includes(name);
+}
+
+export const SESSION_TOOLS = [TOOL_CLAUDIAN_LIST_DESTINATIONS, TOOL_CLAUDIAN_SEND_MESSAGE, TOOL_CLAUDIAN_READ_SESSION] as const;
+export type SessionToolName = (typeof SESSION_TOOLS)[number];
+
+export function isSessionTool(name: string): name is SessionToolName {
+  return (SESSION_TOOLS as readonly string[]).includes(name);
 }
 
 export const EDIT_TOOLS = [TOOL_WRITE, TOOL_EDIT, TOOL_NOTEBOOK_EDIT] as const;

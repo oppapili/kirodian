@@ -1,9 +1,10 @@
-import { Notice } from 'obsidian';
+import { type Keymap, Notice } from 'obsidian';
 import * as path from 'path';
 
 import { normalizeImageMediaType } from '@/core/execution/imageAttachment';
 import type { ImageAttachment, ImageMediaType } from '@/core/types';
 import { ComposerContextTray } from '@/features/chat/composer/ComposerContextTray';
+import { t } from '@/i18n/i18n';
 import type { ComposerInputElement } from '@/shared/composer-dropdown/types';
 import { ImagePreviewModal } from '@/shared/modals/ImagePreviewModal';
 
@@ -45,6 +46,7 @@ export class ImageContextManager {
   };
 
   constructor(
+    private readonly keymap: Keymap,
     containerEl: HTMLElement,
     inputEl: ComposerInputElement,
     callbacks: ImageContextCallbacks,
@@ -145,7 +147,7 @@ export class ImageContextManager {
     line.setAttribute('y1', '3');
     line.setAttribute('x2', '12');
     line.setAttribute('y2', '15');
-    dropContent.createSpan({ text: 'Drop image here' });
+    dropContent.createSpan({ text: t('chat.composer.dropImage') });
 
     inputWrapper.addEventListener('dragenter', this.dragEnterHandler);
     inputWrapper.addEventListener('dragover', this.dragOverHandler);
@@ -244,18 +246,18 @@ export class ImageContextManager {
   private async addImageFromFile(file: File, source: 'paste' | 'drop'): Promise<boolean> {
     if (this.destroyed) return false;
     if (!this.enabled) {
-      new Notice('Image attachments are not supported by this provider.');
+      new Notice(t('chat.images.unsupportedProvider'));
       return false;
     }
 
     if (file.size > MAX_IMAGE_SIZE) {
-      this.notifyImageError(`Image exceeds ${this.formatSize(MAX_IMAGE_SIZE)} limit.`);
+      this.notifyImageError(t('chat.images.tooLarge', { size: this.formatSize(MAX_IMAGE_SIZE) }));
       return false;
     }
 
     const mediaType = this.getMediaType(file.name) ?? normalizeImageMediaType(file.type);
     if (!mediaType) {
-      this.notifyImageError('Unsupported image type.');
+      this.notifyImageError(t('chat.images.unsupportedType'));
       return false;
     }
 
@@ -279,7 +281,7 @@ export class ImageContextManager {
       return true;
     } catch (error) {
       if (this.destroyed || !this.enabled || generation !== this.attachmentGeneration) return false;
-      this.notifyImageError('Failed to attach image.', error);
+      this.notifyImageError(t('chat.images.attachFailed'), error);
       return false;
     }
   }
@@ -304,8 +306,8 @@ export class ImageContextManager {
     this.contextTray.setItems('images', images.map(([id, image], index) => ({
       id,
       kind: 'image' as const,
-      label: images.length === 1 ? 'Image' : `Image ${index + 1}`,
-      ariaLabel: `Image attachment: ${image.name} · ${this.formatSize(image.size)}`,
+      label: images.length === 1 ? t('chat.images.label') : t('chat.images.numbered', { number: index + 1 }),
+      ariaLabel: t('chat.images.attachment', { name: image.name, size: this.formatSize(image.size) }),
       onActivate: () => this.showFullImage(image),
       onRemove: () => {
         this.attachedImages.delete(id);
@@ -319,7 +321,7 @@ export class ImageContextManager {
     if (this.destroyed) return;
 
     const ownerDocument = this.containerEl.ownerDocument ?? window.document;
-    this.imagePreviewModal.open(ownerDocument, image);
+    this.imagePreviewModal.open(ownerDocument, image, this.keymap);
   }
 
   private generateId(): string {
@@ -336,9 +338,9 @@ export class ImageContextManager {
     let userMessage = message;
     if (error instanceof Error) {
       if (error.message.includes('ENOENT') || error.message.includes('no such file')) {
-        userMessage = `${message} (File not found)`;
+        userMessage = t('chat.images.fileNotFound', { message });
       } else if (error.message.includes('EACCES') || error.message.includes('permission denied')) {
-        userMessage = `${message} (Permission denied)`;
+        userMessage = t('chat.images.permissionDenied', { message });
       }
     }
     new Notice(userMessage);

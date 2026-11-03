@@ -1,7 +1,11 @@
+import { createHarness } from '@test/helpers/ChatExecutionHarness';
+import { createSessionModelStub } from '@test/helpers/ConversationPorts';
 import { createMockEl } from '@test/helpers/MockElement';
 import { Menu } from 'obsidian';
 
 import { SessionBrowser, type SessionBrowserDeps } from '@/features/chat/session-manager/SessionBrowser';
+import { ChatSessionRuntime } from '@/features/chat/sessions/ChatSessionRuntime';
+import { SessionRuntimePool } from '@/features/chat/sessions/SessionRuntimePool';
 
 function createFixture() {
   const deps = {
@@ -231,6 +235,87 @@ describe('SessionActions', () => {
     )).toBe(false);
   });
 
+  it('marks released and never-loaded sessions unread, and read again, from their row menus', async () => {
+    const harness = createHarness();
+    const onChanged = jest.fn();
+    const pool = new SessionRuntimePool({
+      createRuntime: identity => new ChatSessionRuntime(identity, harness.coordinator, session => createSessionModelStub(session)),
+      releaseHistory: async () => true,
+      onChanged,
+      onError: error => { throw error; },
+    });
+    // Opened earlier, then closed: the session keeps a runtime but no loaded model.
+    const { attachment } = pool.acquire({ conversationId: 'seen', providerId: 'claude', draftModel: null }, { reveal: jest.fn() });
+    pool.release(attachment);
+    (deps.plugin as Record<string, unknown>).sessionRuntimes = pool;
+    (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+      { id: 'seen', title: 'Seen', createdAt: 2 },
+      { id: 'never-opened', title: 'Never opened', createdAt: 1, providerId: 'codex' },
+    ]);
+    const render = () => {
+      const container = createMockEl();
+      controller.renderHistoryDropdown(container, {
+        onSelectConversation: jest.fn(),
+        sessionActionMode: 'active',
+        sessionScope: 'active',
+        showAttentionState: true,
+        showOpenStateLabels: false,
+        showOpenStateActions: false,
+        getConversationStatus: id => ({
+          openState: 'closed',
+          isRunning: false,
+          attention: pool.get(id)?.statusAttention ?? null,
+        }),
+      });
+      return (id: string) => container.querySelectorAll('.claudian-history-item').find(
+        (item: ReturnType<typeof createMockEl>) => item.getAttribute('data-conversation-id') === id,
+      )!;
+    };
+    const openMenu = (item: ReturnType<typeof createMockEl>) => {
+      item.dispatchEvent({ type: 'contextmenu', stopPropagation: jest.fn(), preventDefault: jest.fn() });
+      return (Menu as typeof Menu & {
+        instances: Array<{ items: Array<{ title: string; clickHandler: (() => void) | null }> }>;
+      }).instances.at(-1)!;
+    };
+
+    let findItem = render();
+    expect(findItem('seen').querySelector('.claudian-session-status-indicator')).toBeNull();
+    let menu = openMenu(findItem('seen'));
+    expect(menu.items.map(item => item.title)).toEqual(['Pin', 'Mark as unread', 'Rename', 'Copy session ID', 'Archive']);
+    menu.items[1].clickHandler?.();
+
+    expect(onChanged).toHaveBeenCalled();
+    findItem = render();
+    const badge = findItem('seen').querySelector('.claudian-session-status-indicator--unread')!;
+    expect(badge).not.toBeNull();
+    expect(badge.getAttribute('aria-label')).toBe('Unread');
+    expect(findItem('seen').hasClass('claudian-history-item--attention')).toBe(true);
+    menu = openMenu(findItem('seen'));
+    expect(menu.items.map(item => item.title)).toEqual(['Pin', 'Mark as read', 'Rename', 'Copy session ID', 'Archive']);
+    menu.items[1].clickHandler?.();
+
+    findItem = render();
+    expect(findItem('seen').querySelector('.claudian-session-status-indicator')).toBeNull();
+    expect(findItem('seen').hasClass('claudian-history-item--attention')).toBe(false);
+
+    // A session not loaded since startup gets its session without loading history.
+    expect(pool.get('never-opened')).toBeNull();
+    menu = openMenu(findItem('never-opened'));
+    expect(menu.items.map(item => item.title)).toEqual(['Pin', 'Mark as unread', 'Rename', 'Copy session ID', 'Archive']);
+    menu.items[1].clickHandler?.();
+    expect(pool.get('never-opened')?.providerId).toBe('codex');
+    expect(pool.get('never-opened')?.peekModel).toBeNull();
+    findItem = render();
+    expect(findItem('never-opened').querySelector('.claudian-session-status-indicator--unread')).not.toBeNull();
+
+    // An error badge, like other badges, outranks the unread dot and offers no read-state action.
+    pool.get('never-opened')!.attention.markReviewRequired('error');
+    findItem = render();
+    expect(findItem('never-opened').querySelector('.claudian-session-status-indicator--error')).not.toBeNull();
+    expect(openMenu(findItem('never-opened')).items.map(item => item.title)).toEqual(['Pin', 'Rename', 'Copy session ID', 'Archive']);
+    await pool.dispose();
+  });
+
   it('renders archived sessions with restore and delete actions only', () => {
     const container = createMockEl();
     (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
@@ -384,6 +469,7 @@ describe('SessionActions', () => {
       'Open in new tab',
       'Open in background tab',
       'Rename',
+      'Copy session ID',
       'Delete',
     ]);
   });
@@ -415,6 +501,7 @@ describe('SessionActions', () => {
     expect(menu.items.map(item => item.title)).toEqual([
       'Switch to open session',
       'Rename',
+      'Copy session ID',
       'Delete',
     ]);
   });
@@ -448,6 +535,7 @@ describe('SessionActions', () => {
     expect(menu.items.map(item => item.title)).toEqual([
       'Switch to open session',
       'Rename',
+      'Copy session ID',
       'Delete',
     ]);
   });
@@ -479,7 +567,7 @@ describe('SessionActions', () => {
     const menu = (Menu as typeof Menu & {
       instances: Array<{ items: Array<{ title: string }> }>;
     }).instances[0];
-    expect(menu.items.map(item => item.title)).toEqual(['Rename', 'Delete']);
+    expect(menu.items.map(item => item.title)).toEqual(['Rename', 'Copy session ID', 'Delete']);
   });
 
   it('shows inline device assignment beside pin and archive only for legacy sessions', async () => {
@@ -543,6 +631,7 @@ describe('SessionActions', () => {
     expect(menu.items.map(item => item.title)).toEqual([
       'Pin',
       'Rename',
+      'Copy session ID',
       'Archive',
     ]);
   });
@@ -573,7 +662,7 @@ describe('SessionActions', () => {
     let menu = (Menu as typeof Menu & {
       instances: Array<{ items: Array<{ title: string; clickHandler: (() => void) | null }> }>;
     }).instances.at(-1)!;
-    expect(menu.items.map(item => item.title)).toEqual(['Pin', 'Rename', 'Archive']);
+    expect(menu.items.map(item => item.title)).toEqual(['Pin', 'Rename', 'Copy session ID', 'Archive']);
     menu.items[0].clickHandler?.();
     await Promise.resolve();
     expect(onSetConversationPinned).toHaveBeenCalledWith(['normal'], true);
@@ -588,7 +677,7 @@ describe('SessionActions', () => {
     menu = (Menu as typeof Menu & {
       instances: Array<{ items: Array<{ title: string; clickHandler: (() => void) | null }> }>;
     }).instances.at(-1)!;
-    expect(menu.items.map(item => item.title)).toEqual(['Unpin', 'Rename', 'Archive']);
+    expect(menu.items.map(item => item.title)).toEqual(['Unpin', 'Rename', 'Copy session ID', 'Archive']);
     menu.items[0].clickHandler?.();
     await Promise.resolve();
     expect(onSetConversationPinned).toHaveBeenCalledWith(['pinned'], false);
@@ -624,6 +713,7 @@ describe('SessionActions', () => {
     expect(menu.items.map(menuItem => menuItem.title)).toEqual([
       'Pin',
       'Rename',
+      'Copy session ID',
       'Archive',
     ]);
   });
@@ -654,7 +744,7 @@ describe('SessionActions', () => {
       }>;
     }).instances.at(-1)!;
     expect(menu.useNativeMenu).toBe(false);
-    expect(menu.items.map(item => item.title)).toEqual(['Pin', 'Rename', 'Archive']);
+    expect(menu.items.map(item => item.title)).toEqual(['Pin', 'Rename', 'Copy session ID', 'Archive']);
 
     const archivedContainer = createMockEl();
     (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
@@ -681,5 +771,40 @@ describe('SessionActions', () => {
     }).instances.at(-1)!;
     expect(menu.useNativeMenu).toBe(false);
     expect(menu.items.map(item => item.title)).toEqual(['Restore', 'Delete']);
+  });
+
+  it('copies the session ID from non-archived row menus so agents can target the session', async () => {
+    const writeText = jest.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const openRowMenu = (conversation: Record<string, unknown>, mode: 'active' | 'archived') => {
+      const container = createMockEl();
+      (deps.plugin.getConversationList as jest.Mock).mockReturnValue([conversation]);
+      controller.renderHistoryDropdown(container, {
+        onSelectConversation: jest.fn(),
+        showPinnedSection: mode === 'active',
+        showArchivedSection: mode === 'archived',
+        sessionScope: mode,
+        sessionActionMode: mode,
+        showOpenStateActions: false,
+      });
+      container.querySelector('.claudian-history-item')!.dispatchEvent({
+        type: 'contextmenu',
+        stopPropagation: jest.fn(),
+        preventDefault: jest.fn(),
+      });
+      return (Menu as typeof Menu & {
+        instances: Array<{ items: Array<{ title: string; clickHandler?: () => void }> }>;
+      }).instances.at(-1)!;
+    };
+
+    const activeMenu = openRowMenu({ id: 'conv-active-1', title: 'Active', createdAt: 2 }, 'active');
+    const copyItem = activeMenu.items.find(item => item.title === 'Copy session ID');
+    expect(copyItem).toBeDefined();
+    copyItem!.clickHandler!();
+    await Promise.resolve();
+    expect(writeText).toHaveBeenCalledWith('conv-active-1');
+
+    const archivedMenu = openRowMenu({ id: 'conv-archived', title: 'Archived', createdAt: 1, isArchived: true }, 'archived');
+    expect(archivedMenu.items.map(item => item.title)).toEqual(['Restore', 'Delete']);
   });
 });

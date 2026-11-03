@@ -97,7 +97,7 @@ it('surfaces a collapsed side approval without changing the composer destination
   expect(harness.controller.destination).toBe('side');
 });
 
-it('disposes the child when its bound main conversation is replaced but keeps it on tab switching', async () => {
+it('keeps the child on tab switching and disposes it with the parent owner', async () => {
   const harness = createHarness();
   const { started } = await startSideChat(harness);
   harness.backend.latest.establishChild('child-session');
@@ -107,13 +107,12 @@ it('disposes the child when its bound main conversation is replaced but keeps it
 
   harness.controller.setTabActive(false);
   harness.controller.setTabActive(true);
-  harness.controller.handleConversationChanged('conversation-1');
-  expect(harness.controller.hasSideChat).toBe(true);
+  expect(harness.controller.runtime).not.toBeNull();
   expect(native.disposeCalls).toBe(0);
 
-  harness.controller.handleConversationChanged('conversation-2');
+  await harness.controller.dispose();
   await waitFor(() => expect(native.disposeCalls).toBe(1));
-  expect(harness.controller.hasSideChat).toBe(false);
+  expect(harness.controller.runtime).toBeNull();
   expect(screen.queryByRole('heading', { name: 'Side chat' })).toBeNull();
 });
 
@@ -128,7 +127,7 @@ it('is safe to discard repeatedly and cannot be resurrected by late events', asy
   expect(await started).toBe(true);
 
   native.emitSessionEvent({ type: 'commands_changed' });
-  expect(harness.controller.hasSideChat).toBe(false);
+  expect(harness.controller.runtime).toBeNull();
   expect(screen.queryByRole('heading', { name: 'Side chat' })).toBeNull();
 });
 
@@ -199,4 +198,25 @@ it('keeps the side answer completed when cancellation follows native completion'
   await started;
   expect(screen.getByRole('button', { name: /Worked for/ })).toBeTruthy();
   expect(screen.queryByText('Interrupted')).toBeNull();
+});
+
+it('gives the child the parent conversation\'s session tools and releases them with the child', async () => {
+  const harness = createHarness();
+  const port = { list: jest.fn(), send: jest.fn(), read: jest.fn() };
+  const release = jest.fn();
+  const bindSessionTools = jest.fn((_conversationId: string) => ({ port, dispose: release }));
+  Object.assign(harness.plugin, { bindSessionTools });
+  const { started } = await startSideChat(harness);
+  const native = harness.backend.latest;
+  // The side chat acts for its parent session, with the same tools main chat has.
+  expect(bindSessionTools.mock.calls).toEqual([['conversation-1']]);
+  expect(native.config.sessionTools).toBe(port);
+  native.establishChild('child-session');
+  native.complete();
+  await started;
+  expect(release).not.toHaveBeenCalled();
+
+  await harness.controller.discard();
+  expect(native.disposeCalls).toBe(1);
+  expect(release).toHaveBeenCalledTimes(1);
 });

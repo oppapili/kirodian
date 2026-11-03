@@ -44,6 +44,7 @@ export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
 
   settingsProvider: DEFAULT_CHAT_PROVIDER_ID,
   lastSelectedChatModel: null,
+  inlineEditModel: null,
   savedProviderModel: {},
   savedProviderEffort: {},
   savedProviderServiceTier: {},
@@ -53,6 +54,7 @@ export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
   enableAutoScroll: true,
   showMessageTimestamps: false,
   deferMathRenderingDuringStreaming: true,
+  pluginRenderedFenceLanguages: [],
   expandFileEditsByDefault: false,
   chatViewPlacement: 'right-sidebar',
   enableZenMode: true,

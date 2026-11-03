@@ -1,6 +1,6 @@
-import type { Component } from 'obsidian';
+import { type Component, Notice } from 'obsidian';
 
-import { extractUserDisplayContent } from '@/core/prompt/promptContext';
+import { getUserDisplayText } from '@/core/prompt/promptContext';
 import { DEFAULT_CHAT_PROVIDER_ID, type ProviderCapabilities, type ProviderSubagentLifecycleAdapter } from '@/core/providers/types';
 import type { ChatMessage, ImageAttachment, SubagentInfo, ToolCallInfo } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
@@ -9,7 +9,16 @@ import { MarkdownContentRenderer, type RenderContentOptions } from '@/features/c
 import { type MessageActionCallbacks, MessageActions } from '@/features/chat/rendering/MessageActions';
 import { getResponseSegments } from '@/features/chat/rendering/NotificationBoundaries';
 import { ResponseFinalizer } from '@/features/chat/rendering/ResponseFinalizer';
-import { createResponseTextBlock } from '@/features/chat/rendering/ResponseLayout';
+import {
+  appendInterruptLabel,
+  createResponseTextBlock,
+  isConsumedInterruptMarker,
+  isFoldedByLaterInterrupt,
+  isInterruptedResponse,
+  isInterruptMarker,
+  markResponseElement,
+} from '@/features/chat/rendering/ResponseLayout';
+import { createSessionLink, registerSessionLinkHandler } from '@/features/chat/rendering/sessionLinks';
 import { renderStoredThinkingBlock } from '@/features/chat/rendering/ThinkingBlockRenderer';
 import { updateToolCallResult } from '@/features/chat/rendering/tools/ToolCallRenderer';
 import { isSilentWriteStdinTool, renderToolCard } from '@/features/chat/rendering/tools/toolCardDispatch';
@@ -18,7 +27,7 @@ import { resolveStoredTaskSubagent } from '@/features/chat/subagents/storedTaskS
 import { resolveSubagentAdapter } from '@/features/chat/subagents/subagentAdapterResolution';
 import { renderSubagentHistory } from '@/features/chat/subagents/SubagentHistoryRenderer';
 import { renderStoredAsyncSubagent, renderStoredSubagent } from '@/features/chat/subagents/SubagentRenderer';
-import { BRAND_NAME } from '@/i18n/constants';
+import { t } from '@/i18n/i18n';
 import { ImagePreviewModal } from '@/shared/modals/ImagePreviewModal';
 import { registerFileLinkHandler } from '@/utils/fileLink';
 
@@ -52,8 +61,11 @@ export class MessageRenderer {
   private readonly getCapabilities: () => ProviderCapabilities;
   private readonly messageEls = new Map<string, HTMLElement>();
   private removeFileLinkHandler: () => void;
+  private removeSessionLinkHandler: () => void;
+  readonly #openConversation: ((conversationId: string) => Promise<void>) | undefined;
   private readonly imagePreviewModal = new ImagePreviewModal();
   private readonly contentRemovalObserver?: MutationObserver;
+  #pendingLayoutScroll: ResizeObserver | null = null;
   readonly #markdown: MarkdownContentRenderer;
   readonly #actions: MessageActions;
   readonly #finalizer: ResponseFinalizer;
@@ -74,8 +86,11 @@ export class MessageRenderer {
     forkCallback?: MessageActionCallbacks['fork'],
     getCapabilities?: () => ProviderCapabilities,
     branchActions?: MessageActionCallbacks['branches'],
+    /** Opens a session from a transcript link; omitted where the presentation cannot navigate. */
+    openConversation?: (conversationId: string) => Promise<void>,
   ) {
     this.app = plugin.app;
+    this.#openConversation = openConversation;
     this.plugin = plugin;
     this.messagesEl = messagesEl;
     this.getCapabilities = getCapabilities ?? (() => ({
@@ -91,6 +106,7 @@ export class MessageRenderer {
     }));
     this.#markdown = new MarkdownContentRenderer(
       this.app, component, messagesEl, () => this.plugin.settings.mediaFolder,
+      () => this.plugin.settings.pluginRenderedFenceLanguages,
     );
     this.#actions = new MessageActions(plugin, messagesEl, this.getCapabilities, {
       rewind: rewindCallback,
@@ -104,6 +120,11 @@ export class MessageRenderer {
 
     // Register delegated click handler for file links
     this.removeFileLinkHandler = registerFileLinkHandler(this.app, this.messagesEl);
+    // Live tool cards render into the same container, so one delegated handler covers both paths.
+    this.removeSessionLinkHandler = registerSessionLinkHandler(this.messagesEl, id => { void this.#openSession(id); }, id => {
+      const summary = this.plugin.getConversationSummary(id);
+      return summary ? { title: summary.title || undefined, providerId: summary.providerId } : null;
+    });
 
     // Controllers also clear message DOM directly. Inspect only removed subtrees,
     // rather than scanning every retained message on each streaming mutation.
@@ -134,12 +155,34 @@ export class MessageRenderer {
   dispose(): void {
     if (this.#markdown.isDisposed) return;
     this.contentRemovalObserver?.disconnect();
+    this.#cancelLayoutScroll();
     this.#markdown.dispose();
     this.imagePreviewModal.close();
     this.removeFileLinkHandler();
     this.removeFileLinkHandler = () => {};
+    this.removeSessionLinkHandler();
+    this.removeSessionLinkHandler = () => {};
     this.#actions.clear();
     this.messageEls.clear();
+  }
+
+  /** Session links may outlive their session; a missing one is reported rather than opened. */
+  async #openSession(conversationId: string): Promise<void> {
+    try {
+      const open = this.#openConversation;
+      if (!open) {
+        new Notice(t('chat.sessionTools.openUnavailable'));
+        return;
+      }
+      await this.plugin.ensureConversationMetadataLoaded([conversationId]);
+      if (!this.plugin.getCachedConversation(conversationId)) {
+        new Notice(t('chat.sessionTools.sessionMissing'));
+        return;
+      }
+      await open(conversationId);
+    } catch (error) {
+      new Notice(t('chat.sessionTools.openFailed', { message: error instanceof Error ? error.message : String(error) }));
+    }
   }
 
   #resolveSubagentAdapter(toolName?: string) {
@@ -226,7 +269,7 @@ export class MessageRenderer {
       this.renderStoredMessage(messages[i], messages, i, live && { options: live, open: openIds?.has(messages[i].id) === true });
     }
 
-    this.scrollToBottom();
+    this.#scrollToBottomOnceLaidOut();
     return newWelcomeEl;
   }
 
@@ -234,11 +277,13 @@ export class MessageRenderer {
     const open = !!scope && (scope.options.isResponseOpen(msg.id)
       || (msg.isAutomaticResponse === true && msg.completedAt === undefined && !this.#hasVisibleContent(msg)));
     const live = scope && { options: scope.options, open: scope.open || open };
-    // Bare interrupt marker: user-role interrupts (Claude bracket markers) always render
-    // as a standalone indicator. Assistant-role interrupts (partial responses)
-    // only use the bare marker when there's no content to preserve.
-    if (msg.isInterrupt && (msg.role === 'user' || !this.#hasVisibleContent(msg))) {
-      this.#renderInterruptMessage();
+    // Bare interrupt marker: user-role interrupts (Claude bracket markers) and
+    // assistant-role interrupts without content (Codex aborted turns). The
+    // interrupted response it ends already shows it inside its disclosure.
+    if (isInterruptMarker(msg)) {
+      const previous = allMessages?.[(index ?? 0) - 1];
+      if (!previous || !isConsumedInterruptMarker(msg, allMessages ?? [], index)
+        || !this.messageEls.get(previous.id)?.isConnected) this.#renderInterruptMessage();
       return;
     }
 
@@ -252,7 +297,9 @@ export class MessageRenderer {
       this.#renderUserMessage(msg, { live: false, allMessages, index });
       return;
     }
-    if (msg.role === 'assistant' && !this.#hasVisibleContent(msg) && !open) {
+    const interrupted = isInterruptedResponse(msg, allMessages ?? [msg], index);
+    // An interrupted reply whose output is all hidden still ends its turn's fold.
+    if (msg.role === 'assistant' && !this.#hasVisibleContent(msg) && !open && !interrupted) {
       // A pre-output notification can leave an empty first segment that still
       // anchors its continuation's work disclosure when the transcript rerenders.
       const anchorsContinuation = allMessages?.some(message => message !== msg
@@ -268,16 +315,17 @@ export class MessageRenderer {
         const info = msg.toolCalls?.find(tool => tool.id === id)?.subagent;
         if (info) renderSubagentHistory(card, info, allMessages ?? [msg]);
       }
-      if (msg.isInterrupt) {
+      if (msg.isInterrupt || interrupted) {
         this.appendInterruptIndicator(contentEl);
       }
     }
 
     this.#actions.appendTimestamp(msgEl, msg.completedAt);
     const next = index === undefined ? undefined : allMessages?.[index + 1];
-    if (msg.role === 'assistant' && !open && (msg.durationSeconds !== undefined || next?.role !== 'assistant'
-      || msg.contentBlocks?.some(block => block.type === 'task_notification'))) {
-      this.finalizeResponse(msg, allMessages ?? [msg], !next?.isInterrupt, index);
+    if (msg.role === 'assistant' && !open && !isFoldedByLaterInterrupt(msg, allMessages ?? [msg], index)
+      && (msg.durationSeconds !== undefined || next?.role !== 'assistant'
+      || interrupted || msg.contentBlocks?.some(block => block.type === 'task_notification'))) {
+      this.finalizeResponse(msg, allMessages ?? [msg], true, index);
     }
   }
 
@@ -289,7 +337,7 @@ export class MessageRenderer {
     msg: ChatMessage,
     context: { live: true } | { live: false; allMessages?: ChatMessage[]; index?: number },
   ): HTMLElement | null {
-    const text = msg.displayContent ?? extractUserDisplayContent(msg.content) ?? msg.content;
+    const text = getUserDisplayText(msg);
     if (msg.images && msg.images.length > 0) {
       const imagesEl = this.#renderMessageImages(msg.images);
       imagesEl.dataset.userMessageId = msg.id;
@@ -298,6 +346,13 @@ export class MessageRenderer {
     if (!text && !this.#actions.branchesEnabled) return null;
 
     const { msgEl, contentEl } = this.#createMessageEl(msg);
+    if (msg.sessionMessage) {
+      const { from, sessionId } = msg.sessionMessage;
+      // Only the session name is the link; the label stays plain text beside it.
+      const senderEl = contentEl.createDiv({ cls: 'claudian-session-message-sender' });
+      senderEl.createSpan({ text: t('chat.sessionMessage.fromLabel') });
+      createSessionLink(senderEl, { sessionId, text: from });
+    }
     if (text) void this.renderContent(createResponseTextBlock(contentEl), text);
     this.#actions.decorateUserMessage(msgEl, msg, text, context.live ? undefined : context);
     return msgEl;
@@ -321,9 +376,9 @@ export class MessageRenderer {
     const msgEl = this.findMessageEl(msg.id);
     const contentEl = msgEl?.querySelector<HTMLElement>('.claudian-message-content');
     if (!msgEl || !contentEl) return;
-    const copyText = this.#finalizer.finalize(msgEl, contentEl, msg, messages, collapse, index);
-    if (copyText === null) return;
-    this.#actions.decorateResponse(msgEl, contentEl, msg, messages, copyText);
+    const finalized = this.#finalizer.finalize(msgEl, contentEl, msg, messages, collapse, index);
+    if (finalized === null) return;
+    this.#actions.decorateResponse(msgEl, contentEl, msg, messages, finalized.answer);
   }
 
   #hasVisibleContent(msg: ChatMessage): boolean {
@@ -353,13 +408,7 @@ export class MessageRenderer {
   }
 
   appendInterruptIndicator(contentEl: HTMLElement): void {
-    const textEl = createResponseTextBlock(contentEl);
-    textEl.createSpan({ cls: 'claudian-interrupted', text: 'Interrupted' });
-    textEl.appendText(' ');
-    textEl.createSpan({
-      cls: 'claudian-interrupted-hint',
-      text: `\u00B7 What should ${BRAND_NAME} do instead?`,
-    });
+    appendInterruptLabel(markResponseElement(contentEl.createDiv({ cls: 'claudian-text-block' }), 'interrupt'));
   }
 
   renderTaskNotification(contentEl: HTMLElement, content: string): void {
@@ -440,7 +489,7 @@ export class MessageRenderer {
 
   /**
    * Renders a tool call with special handling for Write/Edit, Agent (subagent),
-   * and collab agent lifecycle tools.
+   * and Codex collab agent lifecycle tools.
    */
   #renderToolCall(contentEl: HTMLElement, toolCall: ToolCallInfo, msg?: ChatMessage, live?: MessageLiveScope): void {
     if (!this.#shouldRenderToolCall(toolCall, msg)) return;
@@ -578,7 +627,7 @@ export class MessageRenderer {
 
       imageWrapper.addEventListener('click', () => {
         if (this.#markdown.isDisposed) return;
-        this.imagePreviewModal.open(this.messagesEl.ownerDocument ?? window.document, image);
+        this.imagePreviewModal.open(this.messagesEl.ownerDocument ?? window.document, image, this.app.keymap);
       });
     }
     return imagesEl;
@@ -631,6 +680,27 @@ export class MessageRenderer {
   /** Scrolls messages container to bottom. */
   scrollToBottom(): void {
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  /** A transcript rendered into a hidden presentation ignores scroll writes until it gets a box. */
+  #scrollToBottomOnceLaidOut(): void {
+    this.#cancelLayoutScroll();
+    this.scrollToBottom();
+    if (this.messagesEl.clientHeight > 0) return;
+    const Observer = this.messagesEl.ownerDocument?.defaultView?.ResizeObserver;
+    if (!Observer) return;
+    const observer = new Observer(() => {
+      if (this.messagesEl.clientHeight === 0) return;
+      this.#cancelLayoutScroll();
+      this.scrollToBottom();
+    });
+    this.#pendingLayoutScroll = observer;
+    observer.observe(this.messagesEl);
+  }
+
+  #cancelLayoutScroll(): void {
+    this.#pendingLayoutScroll?.disconnect();
+    this.#pendingLayoutScroll = null;
   }
 
   /** Scrolls to bottom if already near bottom (within threshold). */

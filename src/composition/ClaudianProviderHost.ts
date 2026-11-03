@@ -7,6 +7,7 @@ import type {
   ProviderExecutionLifecycleRegistry,
   ProviderExecutionTransitionScope,
 } from '@/core/execution';
+import { resolveLoginShellPath } from '@/core/process/loginShellPath';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import type {
@@ -14,6 +15,7 @@ import type {
   ProviderId,
   ProviderSessionArchive,
 } from '@/core/providers/types';
+import type { SessionToolEndpoint } from '@/core/session-tools/SessionToolEndpoint';
 import type { ClaudianSettings } from '@/core/types';
 import type { EnvironmentScope } from '@/core/types/settings';
 
@@ -22,6 +24,7 @@ export interface ClaudianProviderHostDeps {
   readonly manifest?: { version?: string };
   readonly executionLifecycleRegistry: ProviderExecutionLifecycleRegistry;
   readonly storage: ProviderHostStorage;
+  readonly sessionToolEndpoint: SessionToolEndpoint;
   readonly settings: Pick<
     SettingsCoordinator<ClaudianSettings>,
     'getCommittedSettings' | 'mutate' | 'mutateConditionally'
@@ -46,12 +49,14 @@ export class ClaudianProviderHost implements ProviderHost {
   readonly manifest?: { version?: string };
   readonly executionLifecycleRegistry: ProviderExecutionLifecycleRegistry;
   readonly storage: ProviderHostStorage;
+  readonly sessionToolEndpoint: SessionToolEndpoint;
 
   constructor(private readonly deps: ClaudianProviderHostDeps) {
     this.app = deps.app;
     this.manifest = deps.manifest;
     this.executionLifecycleRegistry = deps.executionLifecycleRegistry;
     this.storage = deps.storage;
+    this.sessionToolEndpoint = deps.sessionToolEndpoint;
   }
 
   get settings(): Readonly<ClaudianSettings> {
@@ -98,6 +103,8 @@ export class ClaudianProviderHost implements ProviderHost {
     providerId: ProviderId,
     context?: ProviderCLIResolutionContext,
   ): Promise<string | null> {
+    // Provider launches resolve their CLI here first, so the login-shell PATH is ready for them.
+    await resolveLoginShellPath();
     if (context?.providerTransitionOwner !== true) {
       await ProviderWorkspaceRegistry.ensureInitialized(this, providerId, 'cli-resolution');
     }

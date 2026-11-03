@@ -5,8 +5,10 @@ import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import type { SessionListSectionKind } from '@/features/chat/session-manager/SessionListOrganizer';
 import type { SessionMultiSelection } from '@/features/chat/session-manager/SessionMultiSelection';
 import {
+  canShowAttention,
   type HistoryConversationStatus,
   isCompletedReview,
+  type SessionStatusDisplay,
 } from '@/features/chat/session-manager/SessionStatusPresentation';
 import type { TabAttention } from '@/features/chat/state/types';
 import { confirmDelete } from '@/shared/modals/ConfirmModal';
@@ -48,7 +50,10 @@ export type SessionRowActionKind =
   | 'assign-device'
   | 'pin'
   | 'unpin'
+  | 'mark-unread'
+  | 'mark-read'
   | 'rename'
+  | 'copy-session-id'
   | 'archive'
   | 'restore'
   | 'delete';
@@ -67,6 +72,8 @@ export interface SessionRowActionInput {
   status: Pick<HistoryConversationStatus, 'openState' | 'isRunning'>;
   /** Attention the row presents; null when its surface hides attention. */
   attention: TabAttention | null;
+  /** The surface presents attention, so the user can change its unread state. */
+  tracksAttention?: boolean;
 }
 
 /** A rendered row; its surface decides where the rename editor appears. */
@@ -81,7 +88,10 @@ const ROW_ACTION_TITLES: Readonly<Record<SessionRowActionKind, string>> = {
   'assign-device': 'Assign to this device',
   pin: 'Pin',
   unpin: 'Unpin',
+  'mark-unread': 'Mark as unread',
+  'mark-read': 'Mark as read',
   rename: 'Rename',
+  'copy-session-id': 'Copy session ID',
   archive: 'Archive',
   restore: 'Restore',
   delete: 'Delete',
@@ -98,10 +108,13 @@ const INLINE_BUTTONS: Readonly<Partial<Record<SessionRowActionKind, { cls: strin
   delete: { cls: 'claudian-delete-btn', icon: 'trash-2' },
 };
 
-const ROW_ACTION_FAILURES: Readonly<Record<Exclude<SessionRowActionKind, 'rename'>, string>> = {
+type SynchronousRowActionKind = 'rename' | 'mark-unread' | 'mark-read';
+
+const ROW_ACTION_FAILURES: Readonly<Record<Exclude<SessionRowActionKind, SynchronousRowActionKind>, string>> = {
   'open-in-new-tab': 'Failed to load conversation',
   'open-in-background-tab': 'Failed to load conversation',
   'switch-to-open': 'Failed to load conversation',
+  'copy-session-id': 'Failed to copy session ID',
   'assign-device': 'Failed to assign session to this device',
   pin: 'Failed to pin session',
   unpin: 'Failed to unpin session',
@@ -112,6 +125,14 @@ const ROW_ACTION_FAILURES: Readonly<Record<Exclude<SessionRowActionKind, 'rename
 
 function action(kind: SessionRowActionKind, disabled = false): SessionRowAction {
   return { kind, disabled };
+}
+
+/** Only the unread dot or no badge can be toggled; every other badge keeps its own state. */
+function readStateAction(input: SessionRowActionInput): SessionRowAction | null {
+  if (!input.tracksAttention) return null;
+  if (isCompletedReview(input.attention ?? undefined)) return action('mark-read');
+  if (input.attention === null && !input.status.isRunning) return action('mark-unread');
+  return null;
 }
 
 /** The single policy for which actions a session row offers on each surface. */
@@ -159,8 +180,13 @@ export function resolveRowActions(
     actions.push(action('restore'), action('delete'));
     return actions;
   }
-  if (mode === 'active') actions.push(pinAction);
-  actions.push(action('rename'), mode === 'active' ? archiveAction : action('delete'));
+  if (mode === 'active') {
+    actions.push(pinAction);
+    const readAction = readStateAction(input);
+    if (readAction) actions.push(readAction);
+  }
+  // The ID lets the user point an agent's claudian_send_message at this session.
+  actions.push(action('rename'), action('copy-session-id'), mode === 'active' ? archiveAction : action('delete'));
   return actions;
 }
 
@@ -180,7 +206,7 @@ export interface SessionGroupActionTarget {
 }
 
 export interface SessionActionsDeps {
-  plugin: Pick<ChatFeatureHost, 'app' | 'getConversationList' | 'conversationLifecycle'>;
+  plugin: Pick<ChatFeatureHost, 'app' | 'getConversationList' | 'conversationLifecycle' | 'sessionRuntimes'>;
   selection: SessionMultiSelection;
 }
 
@@ -222,9 +248,10 @@ export class SessionActions {
     }
   }
 
-  rowMenu(row: SessionRow, options: SessionActionOptions): Menu {
+  rowMenu(row: SessionRow, options: SessionActionOptions & SessionStatusDisplay): Menu {
     const menu = new Menu().setUseNativeMenu(false);
-    for (const rowAction of resolveRowActions('menu', row, options)) {
+    const tracksAttention = canShowAttention(options);
+    for (const rowAction of resolveRowActions('menu', { ...row, tracksAttention }, options)) {
       menu.addItem((menuItem) => {
         menuItem.setTitle(ROW_ACTION_TITLES[rowAction.kind]);
         if (rowAction.disabled) {
@@ -432,6 +459,17 @@ export class SessionActions {
       row.beginRename();
       return;
     }
+    if (kind === 'mark-unread') {
+      // Attention lives on the session, which a session not loaded since startup does not have yet.
+      this.deps.plugin.sessionRuntimes.ensure({
+        conversationId: id, providerId: row.conversation.providerId, draftModel: null,
+      }).attention.markReviewRequired('completed');
+      return;
+    }
+    if (kind === 'mark-read') {
+      this.deps.plugin.sessionRuntimes.get(id)?.attention.acknowledgeReview();
+      return;
+    }
     const failureMessage = ROW_ACTION_FAILURES[kind];
     runSessionAction((): Promise<void> | undefined => {
       switch (kind) {
@@ -443,6 +481,8 @@ export class SessionActions {
           return options.onSelectConversation(id);
         case 'assign-device':
           return options.onAssignConversationToDevice?.(id);
+        case 'copy-session-id':
+          return navigator.clipboard.writeText(id).then(() => { new Notice('Session ID copied'); });
         case 'pin':
         case 'unpin':
           return this.deps.plugin.conversationLifecycle.setPinned([id], kind === 'pin');

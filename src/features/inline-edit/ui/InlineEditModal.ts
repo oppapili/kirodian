@@ -4,22 +4,27 @@ import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import type { App, Component, Editor, MarkdownView } from 'obsidian';
 import { Notice } from 'obsidian';
 
+import type { InlineEditService } from '@/core/auxiliary/InlineEditService';
 import type { CursorContext } from '@/core/prompt/editorContext';
-import { createCatalogCommandDiscoveryStore } from '@/core/providers/commands/catalogCommandDiscovery';
+import type { InlineEditMode, InlineEditRequest } from '@/core/prompt/inlineEdit';
+import { createCatalogCommandDiscoveryStore, discoverSessionlessCommands } from '@/core/providers/commands/catalogCommandDiscovery';
 import { getHiddenCommandSet } from '@/core/providers/commands/hiddenCommands';
+import { getProviderSettingsSnapshotWithModel } from '@/core/providers/conversationModel';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
-import { type InlineEditMode, type InlineEditService, type ProviderId } from '@/core/providers/types';
+import type { ProviderId } from '@/core/providers/types';
 import type { FeatureHost } from '@/features/FeatureHost';
 import type { InlineEditSessionOwner } from '@/features/inline-edit/InlineEditSessionOwner';
-import {
-  findBestMentionLookupMatch,
-  isMentionStart,
-  normalizeForPlatformLookup,
-  normalizeMentionPath,
-} from '@/features/inline-edit/ui/contextMentionResolver';
+import { resolveContextFiles } from '@/features/inline-edit/ui/contextMentionResolver';
 import { onInlineEditEditorDestroyed } from '@/features/inline-edit/ui/InlineEditEditorLifetime';
 import { renderInlineEditMarkdownPreview } from '@/features/inline-edit/ui/inlineEditMarkdownPreview';
+import {
+  buildMarkdownDiffDocuments,
+  computeMarkdownDiff,
+  countDiffLines,
+  type DiffOp,
+  diffOpsEqual,
+} from '@/features/inline-edit/ui/markdownLineDiff';
 import { normalizeInsertionText } from '@/features/inline-edit/ui/normalizeInsertionText';
 import { hideSelectionHighlight, showSelectionHighlight } from '@/shared/components/SelectionHighlight';
 import {
@@ -28,6 +33,10 @@ import {
   SlashCommandSource,
 } from '@/shared/composer-dropdown';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
+import { EffortSelector } from '@/shared/toolbar/EffortSelector';
+import { ModelSelector } from '@/shared/toolbar/ModelSelector';
+import { ToolbarMenuGroup } from '@/shared/toolbar/ToolbarMenu';
+import type { ModelPickerCallbacks, ModelPickerSettings } from '@/shared/toolbar/types';
 import { getEditorView } from '@/utils/obsidianCompat';
 
 export type InlineEditContext =
@@ -88,7 +97,7 @@ class MarkdownDiffWidget extends WidgetType {
   }
 }
 
-export function buildInlineEditInputDecorations(options: {
+function buildInlineEditInputDecorations(options: {
   doc: Text;
   inputPos: number;
   isInbetween?: boolean;
@@ -149,60 +158,6 @@ const inlineEditField = StateField.define<DecorationSet>({
   provide: (f) => EditorView.decorations.from(f),
 });
 
-const installedEditors = new WeakSet<EditorView>();
-
-interface DiffOp { type: 'equal' | 'insert' | 'delete'; text: string; }
-
-function splitLinesPreservingEndings(text: string): string[] {
-  if (!text) return [];
-  return text.match(/[^\n]*(?:\n|$)/g)?.filter(line => line.length > 0) ?? [];
-}
-
-function computeMarkdownDiff(oldText: string, newText: string): DiffOp[] {
-  const oldLines = splitLinesPreservingEndings(oldText);
-  const newLines = splitLinesPreservingEndings(newText);
-  const m = oldLines.length, n = newLines.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, () => Array<number>(n + 1).fill(0));
-
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = oldLines[i-1] === newLines[j-1]
-        ? dp[i-1][j-1] + 1
-        : Math.max(dp[i-1][j], dp[i][j-1]);
-    }
-  }
-
-  const temp: DiffOp[] = [];
-  let i = m, j = n;
-
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldLines[i-1] === newLines[j-1]) {
-      temp.push({ type: 'equal', text: oldLines[i-1] });
-      i--; j--;
-    } else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) {
-      temp.push({ type: 'insert', text: newLines[j-1] });
-      j--;
-    } else {
-      temp.push({ type: 'delete', text: oldLines[i-1] });
-      i--;
-    }
-  }
-
-  return mergeAdjacentDiffOps(temp.reverse());
-}
-
-function mergeAdjacentDiffOps(ops: DiffOp[]): DiffOp[] {
-  const merged: DiffOp[] = [];
-  for (const op of ops) {
-    if (merged.length > 0 && merged[merged.length-1].type === op.type) {
-      merged[merged.length-1].text += op.text;
-    } else {
-      merged.push({ ...op });
-    }
-  }
-  return merged;
-}
-
 function getDiffBlockClass(type: DiffOp['type']): string {
   switch (type) {
     case 'delete':
@@ -214,58 +169,41 @@ function getDiffBlockClass(type: DiffOp['type']): string {
   }
 }
 
-function buildMarkdownDiffDocuments(diffOps: DiffOp[]): Array<{ type: DiffOp['type']; markdown: string }> {
-  const oldMarkdown = diffOps
-    .filter(op => op.type !== 'insert')
-    .map(op => op.text)
-    .join('');
-  const newMarkdown = diffOps
-    .filter(op => op.type !== 'delete')
-    .map(op => op.text)
-    .join('');
-  const hasDeletion = diffOps.some(op => op.type === 'delete');
-  const hasInsertion = diffOps.some(op => op.type === 'insert');
-
-  const documents: Array<{ type: DiffOp['type']; markdown: string }> = [];
-
-  if (hasDeletion && oldMarkdown) {
-    documents.push({ type: 'delete', markdown: oldMarkdown });
-  }
-
-  if (hasInsertion && newMarkdown) {
-    documents.push({ type: 'insert', markdown: newMarkdown });
-  }
-
-  if (documents.length === 0 && newMarkdown) {
-    documents.push({ type: 'equal', markdown: newMarkdown });
-  }
-
-  return documents;
-}
-
-function diffOpsEqual(left: DiffOp[], right: DiffOp[]): boolean {
-  if (left.length !== right.length) return false;
-  return left.every((op, index) => {
-    const other = right[index];
-    return op.type === other.type && op.text === other.text;
-  });
-}
-
 export type InlineEditDecision = 'accept' | 'edit' | 'reject';
-
-interface InlineEditSourceSnapshot {
-  doc: Text;
-  from: number;
-  text: string;
-  to: number;
-}
 
 interface InlineEditProviderContext {
   modelOverride?: string;
+  reasoningOverride?: string;
   providerId: ProviderId;
 }
 
+/** The saved inline default, while its provider is enabled and still offers its model and effort. */
+function resolveSavedInlineEditModel(host: FeatureHost): InlineEditProviderContext | null {
+  const saved = host.settings.inlineEditModel;
+  if (!saved
+    || !ProviderRegistry.getRegisteredProviderIds().includes(saved.providerId)
+    || !ProviderRegistry.isEnabled(saved.providerId, host.settings)) {
+    return null;
+  }
+  const settings = getProviderSettingsSnapshotWithModel({ ...host.settings }, saved.providerId);
+  const uiConfig = ProviderRegistry.getChatUIConfig(saved.providerId);
+  const offered = uiConfig.getModelOptions({
+    ...settings,
+    environmentVariables: host.getActiveEnvironmentVariables(saved.providerId),
+  }).some(option => option.value === saved.model);
+  if (!offered) return null;
+  const reasoningOffered = uiConfig.getReasoningOptions(saved.model, settings)
+    .some(option => option.value === saved.reasoning);
+  return {
+    modelOverride: saved.model,
+    reasoningOverride: reasoningOffered ? saved.reasoning : undefined,
+    providerId: saved.providerId,
+  };
+}
+
 function resolveInlineEditProviderContext(host: FeatureHost): InlineEditProviderContext {
+  const saved = resolveSavedInlineEditModel(host);
+  if (saved) return saved;
   const selection = host.getActiveModelSelection?.();
   const providerId = selection && ProviderRegistry.isEnabled(selection.providerId, host.settings)
     ? selection.providerId : ProviderRegistry.resolveSettingsProviderId(host.settings);
@@ -365,6 +303,7 @@ export class InlineEditModal {
 export class InlineEditSession {
   private inputEl: HTMLInputElement | null = null;
   private spinnerEl: HTMLElement | null = null;
+  private modelToolbarEl: HTMLElement | null = null;
   private agentReplyEl: HTMLElement | null = null;
   private containerEl: HTMLElement | null = null;
   private editedText: string | null = null;
@@ -376,9 +315,9 @@ export class InlineEditSession {
   private mode: InlineEditMode;
   private cursorContext: CursorContext | null = null;
   private inlineEditService: InlineEditService;
-  private escHandler: ((e: KeyboardEvent) => void) | null = null;
+  /** Removes the current phase's Escape/Enter listener. */
+  private releaseKeyHandler: (() => void) | null = null;
   private selectionListener: ((e: Event) => void) | null = null;
-  private isConversing = false;
   private generating = false;
   private instructionDraft = '';
   private inputPlaceholder: string | null = null;
@@ -387,11 +326,17 @@ export class InlineEditSession {
   private inputResources: {
     container: HTMLElement;
     dropdown: ComposerDropdownController;
+    effortSelector: EffortSelector;
+    menus: ToolbarMenuGroup;
     dispose(): void;
   } | null = null;
+  /** This edit's model and effort; undefined follows the provider's saved selection. */
+  private modelOverride: string | undefined;
+  private reasoningOverride: string | undefined;
   private mentionDataProvider: VaultMentionDataProvider;
   private agentReplyRenderVersion = 0;
-  private sourceSnapshot: InlineEditSourceSnapshot | null = null;
+  /** The document the edit was computed against; CodeMirror documents are immutable. */
+  private sourceDoc: Text | null = null;
   private settled = false;
   private generation = 0;
   private releaseEditorLifetime: (() => void) | null = null;
@@ -406,15 +351,12 @@ export class InlineEditSession {
     editContext: InlineEditContext,
     private notePath: string,
     private resolve: (result: { decision: InlineEditDecision; editedText?: string }) => void,
-    providerContext?: InlineEditProviderContext,
+    providerContext: InlineEditProviderContext,
   ) {
-    const resolvedProviderContext = providerContext ?? resolveInlineEditProviderContext(host);
-    const providerId = resolvedProviderContext.providerId;
-    this.inlineEditService = ProviderRegistry.createInlineEditService(
-      host.providerHost,
-      providerId,
-    );
-    this.inlineEditService.setModelOverride?.(resolvedProviderContext.modelOverride);
+    const { modelOverride, providerId, reasoningOverride } = providerContext;
+    this.inlineEditService = ProviderRegistry.createInlineEditService(host.providerHost, providerId);
+    this.modelOverride = modelOverride;
+    this.reasoningOverride = reasoningOverride;
     this.resolvedProviderId = providerId;
     this.mentionDataProvider = new VaultMentionDataProvider(this.app, {
       onFileLoadError: () => {
@@ -455,12 +397,7 @@ export class InlineEditSession {
       this.selectedText = this.editor.getSelection() || this.selectedText;
       this.startLine = from.line + 1; // 1-indexed
     }
-    this.sourceSnapshot = {
-      doc,
-      from: this.selFrom,
-      text: this.#getDocumentSlice(doc, this.selFrom, this.selTo),
-      to: this.selTo,
-    };
+    this.sourceDoc = doc;
   }
 
   show() {
@@ -468,11 +405,10 @@ export class InlineEditSession {
       this.editorDestroyed = true;
       this.close();
     });
-    if (!installedEditors.has(this.editorView)) {
+    if (this.editorView.state.field(inlineEditField, false) === undefined) {
       this.editorView.dispatch({
         effects: StateEffect.appendConfig.of(inlineEditField),
       });
-      installedEditors.add(this.editorView);
     }
 
     this.#updateHighlight();
@@ -482,12 +418,15 @@ export class InlineEditSession {
     }
 
     // !e.isComposing: skip during IME composition (Chinese, Japanese, Korean, etc.)
-    this.escHandler = (e: KeyboardEvent) => {
+    // Bubble phase, so the instruction's suggestion menu and the model menu close on Escape first.
+    const ownerDocument = this.getOwnerDocument();
+    const onKeydown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !e.isComposing && this.isKeyboardEventInContext(e)) {
         this.reject();
       }
     };
-    this.getOwnerDocument().addEventListener('keydown', this.escHandler);
+    ownerDocument.addEventListener('keydown', onKeydown);
+    this.releaseKeyHandler = () => ownerDocument.removeEventListener('keydown', onKeydown);
   }
 
   #updateHighlight() {
@@ -544,6 +483,7 @@ export class InlineEditSession {
     this.agentReplyRenderVersion += 1;
     this.inputEl = null;
     this.spinnerEl = null;
+    this.modelToolbarEl = null;
     this.agentReplyEl = null;
     if (this.containerEl === container) this.containerEl = null;
   }
@@ -551,12 +491,17 @@ export class InlineEditSession {
   createInputDOM(): HTMLElement {
     if (this.inputResources) this.destroyInputDOM(this.inputResources.container);
     const ownerDocument = this.getOwnerDocument();
-    const container = createDiv({ cls: 'claudian-inline-input-container' });
+    const container = createDiv({
+      cls: 'claudian-inline-input-container',
+      attr: { 'data-provider': this.resolvedProviderId },
+    });
     this.containerEl = container;
 
-    this.agentReplyEl = container.createDiv({ cls: 'claudian-inline-agent-reply claudian-hidden' });
+    // The widget root only spaces the card: Obsidian zeroes editor widget margins.
+    const cardEl = container.createDiv({ cls: 'claudian-inline-composer' });
+    this.agentReplyEl = cardEl.createDiv({ cls: 'claudian-inline-agent-reply claudian-hidden' });
 
-    const inputWrap = container.createDiv({ cls: 'claudian-inline-input-wrap' });
+    const inputWrap = cardEl.createDiv({ cls: 'claudian-inline-input-wrap' });
 
     const inputEl = inputWrap.createEl('input', {
       cls: 'claudian-inline-input',
@@ -570,13 +515,23 @@ export class InlineEditSession {
     });
     this.inputEl = inputEl;
     inputEl.value = this.instructionDraft;
-    inputEl.disabled = this.generating;
 
     this.spinnerEl = inputWrap.createDiv({ cls: 'claudian-inline-spinner claudian-hidden' });
-    if (this.generating) this.spinnerEl.removeClass('claudian-hidden');
+    this.modelToolbarEl = inputWrap.createDiv({ cls: 'claudian-input-toolbar claudian-inline-model-toolbar' });
+    const menus = new ToolbarMenuGroup();
+    // Obsidian clips editor widgets, so the open model menu floats in a layer outside the editor.
+    const menuLayer = ownerDocument.body.createDiv({
+      cls: 'claudian-inline-menu-layer',
+      attr: { 'data-provider': this.resolvedProviderId },
+    });
+    const modelSelector = new ModelSelector(this.modelToolbarEl, this.#modelPickerCallbacks(), menus, menuLayer);
+    const effortSelector = new EffortSelector(modelSelector, this.#modelPickerCallbacks());
+    this.#showGenerating(this.generating);
 
     const inlineCatalog = ProviderWorkspaceRegistry.getCommandCatalog(this.resolvedProviderId);
-    const discovery = inlineCatalog ? createCatalogCommandDiscoveryStore(inlineCatalog) : null;
+    const discovery = inlineCatalog
+      ? createCatalogCommandDiscoveryStore(inlineCatalog, discoverSessionlessCommands(this.host.providerHost, this.resolvedProviderId))
+      : null;
     const slashSource = new SlashCommandSource({
       includeBuiltIns: false,
       providerId: this.resolvedProviderId,
@@ -604,12 +559,21 @@ export class InlineEditSession {
     };
     inputEl.addEventListener('keydown', onKeydown);
     inputEl.addEventListener('input', onInput);
-    const focusTimer = window.setTimeout(() => inputEl.focus(), 50);
+    const focusTimer = window.setTimeout(() => {
+      // A model menu opened before this fires keeps focus; moving it would close the menu.
+      const active = ownerDocument.activeElement;
+      if (active && (container.contains(active) || menuLayer.contains(active))) return;
+      inputEl.focus();
+    }, 50);
     this.inputResources = {
       container,
       dropdown,
+      effortSelector,
+      menus,
       dispose: () => {
         window.clearTimeout(focusTimer);
+        menus.destroy();
+        menuLayer.remove();
         inputEl.removeEventListener('keydown', onKeydown);
         inputEl.removeEventListener('input', onInput);
         dropdown.destroy();
@@ -622,6 +586,73 @@ export class InlineEditSession {
     return container;
   }
 
+  #modelPickerCallbacks(): ModelPickerCallbacks {
+    return {
+      getSettings: () => this.#getModelPickerSettings(),
+      getUIConfig: () => ProviderRegistry.getChatUIConfig(this.resolvedProviderId),
+      getCapabilities: () => ProviderRegistry.getCapabilities(this.resolvedProviderId),
+      getEnvironmentVariables: () => this.host.getActiveEnvironmentVariables(this.resolvedProviderId),
+      onModelChange: async (model) => {
+        this.modelOverride = model;
+        // An effort the new model does not offer falls back to the saved one.
+        const settings = this.#getModelPickerSettings();
+        const offered = ProviderRegistry.getChatUIConfig(this.resolvedProviderId)
+          .getReasoningOptions(settings.model, settings)
+          .some(option => option.value === this.reasoningOverride);
+        if (!offered) {
+          this.reasoningOverride = undefined;
+        }
+        this.inputResources?.effortSelector.updateDisplay();
+        await this.#saveInlineEditDefault();
+      },
+      onEffortLevelChange: async (effort) => {
+        this.reasoningOverride = effort;
+        await this.#saveInlineEditDefault();
+      },
+    };
+  }
+
+  /** A choice on the chip becomes the model later inline edits start from; chat keeps its own. */
+  async #saveInlineEditDefault(): Promise<void> {
+    const { model, reasoning } = this.#getModelPickerSettings();
+    if (!model) return;
+    const selection = {
+      providerId: this.resolvedProviderId,
+      model,
+      ...(reasoning ? { reasoning } : {}),
+    };
+    await this.host.mutateSettings((settings) => {
+      settings.inlineEditModel = selection;
+    });
+  }
+
+  /**
+   * The model and effort this edit runs with: the provider's saved selection projected with the chip's
+   * choices. The chip displays it, requests send it and the inline default saves it; nothing else may
+   * derive a model or effort.
+   */
+  #getModelPickerSettings(): ModelPickerSettings {
+    const snapshot = getProviderSettingsSnapshotWithModel(
+      { ...this.host.settings },
+      this.resolvedProviderId,
+      this.modelOverride,
+    );
+    const model = typeof snapshot.model === 'string' ? snapshot.model : '';
+    const offersReasoning = ProviderRegistry.getChatUIConfig(this.resolvedProviderId)
+      .getReasoningOptions(model, snapshot).length > 0;
+    const reasoning = this.reasoningOverride
+      ?? (typeof snapshot.effortLevel === 'string' ? snapshot.effortLevel : null);
+    return { ...snapshot, model, reasoning: offersReasoning && reasoning ? reasoning : null };
+  }
+
+  /** While a request runs, a spinner takes the model chip's place. */
+  #showGenerating(generating: boolean): void {
+    if (this.inputEl) this.inputEl.disabled = generating;
+    if (generating) this.inputResources?.menus.closeOpenMenu();
+    this.spinnerEl?.toggleClass('claudian-hidden', !generating);
+    this.modelToolbarEl?.toggleClass('claudian-hidden', generating);
+  }
+
   createDiffPreviewDOM(diffOps: DiffOp[]): HTMLElement {
     const previewEl = createDiv({ cls: 'claudian-inline-diff-preview' });
     this.containerEl = previewEl;
@@ -631,8 +662,14 @@ export class InlineEditSession {
     const actionsEl = previewEl.createDiv({ cls: 'claudian-inline-preview-actions' });
     actionsEl.setAttribute('role', 'toolbar');
     actionsEl.setAttribute('aria-label', 'Inline edit actions');
-    actionsEl.appendChild(this.#createPreviewActionButton('Reject', 'reject', () => this.reject()));
-    actionsEl.appendChild(this.#createPreviewActionButton('Accept', 'accept', () => this.accept()));
+    const statsEl = actionsEl.createDiv({ cls: 'claudian-inline-diff-stats' });
+    const removed = countDiffLines(diffOps, 'delete');
+    const added = countDiffLines(diffOps, 'insert');
+    if (removed > 0) statsEl.createSpan({ cls: 'claudian-inline-diff-stat-del', text: `−${removed}` });
+    if (added > 0) statsEl.createSpan({ cls: 'claudian-inline-diff-stat-ins', text: `+${added}` });
+    statsEl.createSpan({ text: removed + added === 1 ? 'line' : 'lines' });
+    actionsEl.appendChild(this.#createPreviewActionButton('Reject', 'reject', 'Esc', () => this.reject()));
+    actionsEl.appendChild(this.#createPreviewActionButton('Accept', 'accept', '↵', () => this.accept()));
 
     void this.#renderMarkdownDiffPreview(bodyEl, diffOps);
     return previewEl;
@@ -641,6 +678,7 @@ export class InlineEditSession {
   #createPreviewActionButton(
     label: string,
     variant: 'accept' | 'reject',
+    keyHint: string,
     onClick: () => void
   ): HTMLButtonElement {
     const button = createEl('button', {
@@ -652,6 +690,7 @@ export class InlineEditSession {
         'aria-keyshortcuts': variant === 'accept' ? 'Enter' : 'Escape',
       },
     });
+    button.createEl('kbd', { cls: 'claudian-inline-preview-key', text: keyHint, attr: { 'aria-hidden': 'true' } });
     button.addEventListener('click', (event: MouseEvent) => {
       event.preventDefault?.();
       event.stopPropagation?.();
@@ -681,21 +720,6 @@ export class InlineEditSession {
     }
   }
 
-  #replaceRenderedPreview(target: HTMLElement, rendered: HTMLElement): void {
-    target.empty();
-
-    if (rendered.childNodes) {
-      for (const child of Array.from(rendered.childNodes)) {
-        target.appendChild(child);
-      }
-      return;
-    }
-
-    for (const child of Array.from(rendered.children)) {
-      target.appendChild(child);
-    }
-  }
-
   private async generate(): Promise<void> {
     if (this.settled || this.generating || !this.inputEl || !this.spinnerEl) return;
     const userMessage = this.inputEl.value.trim();
@@ -707,41 +731,19 @@ export class InlineEditSession {
     const generation = ++this.generation;
     this.generating = true;
 
-    // Slash commands are passed directly to SDK for handling
-
     this.#removeSelectionListeners();
 
-    this.inputEl.disabled = true;
-    this.spinnerEl.removeClass('claudian-hidden');
-
-    const contextFiles = this.#resolveContextFilesFromMessage(userMessage);
+    this.#showGenerating(true);
 
     let result;
     try {
-      if (this.isConversing) {
-        result = await this.inlineEditService.continueConversation(userMessage, contextFiles);
-      } else {
-        if (this.mode === 'cursor') {
-          result = await this.inlineEditService.editText({
-            mode: 'cursor',
-            instruction: userMessage,
-            notePath: this.notePath,
-            cursorContext: this.cursorContext as CursorContext,
-            contextFiles,
-          });
-        } else {
-          const lineCount = this.selectedText.split(/\r?\n/).length;
-          result = await this.inlineEditService.editText({
-            mode: 'selection',
-            instruction: userMessage,
-            notePath: this.notePath,
-            selectedText: this.selectedText,
-            startLine: this.startLine,
-            lineCount,
-            contextFiles,
-          });
-        }
-      }
+      // Slash commands stay in the instruction for the provider to handle.
+      // The request runs with exactly what the model chip shows.
+      const { model, reasoning } = this.#getModelPickerSettings();
+      result = await this.inlineEditService.send(this.#buildRequest(userMessage), {
+        model: model || undefined,
+        reasoning,
+      });
     } catch (error) {
       if (this.#isGenerationActive(generation)) {
         if (!this.#isSourceUnchanged()) this.#rejectStaleSource();
@@ -751,8 +753,7 @@ export class InlineEditSession {
     } finally {
       if (this.#isGenerationActive(generation)) {
         this.generating = false;
-        if (this.inputEl) this.inputEl.disabled = false;
-        this.spinnerEl?.addClass('claudian-hidden');
+        this.#showGenerating(false);
       }
     }
 
@@ -772,7 +773,6 @@ export class InlineEditSession {
         this.insertedText = result.insertedText;
         this.#showInsertionInPlace();
       } else if (result.clarification) {
-        this.isConversing = true;
         this.instructionDraft = '';
         this.inputPlaceholder = 'Reply to continue...';
         this.showAgentReply(result.clarification);
@@ -786,12 +786,30 @@ export class InlineEditSession {
         this.#handleError('No response from agent');
       }
     } else {
-      if (result.resetRequired) {
-        this.isConversing = false;
-        this.inlineEditService.resetConversation();
-      }
       this.#handleError(result.error || 'Error - try again');
     }
+  }
+
+  #buildRequest(instruction: string): InlineEditRequest {
+    const contextFiles = resolveContextFiles(instruction, this.mentionDataProvider.getCachedVaultFiles());
+    if (this.mode === 'cursor') {
+      return {
+        mode: 'cursor',
+        instruction,
+        notePath: this.notePath,
+        cursorContext: this.cursorContext as CursorContext,
+        contextFiles,
+      };
+    }
+    return {
+      mode: 'selection',
+      instruction,
+      notePath: this.notePath,
+      selectedText: this.selectedText,
+      startLine: this.startLine,
+      lineCount: this.selectedText.split(/\r?\n/).length,
+      contextFiles,
+    };
   }
 
   private showAgentReply(message: string) {
@@ -807,7 +825,7 @@ export class InlineEditSession {
       if (renderVersion !== this.agentReplyRenderVersion || replyEl !== this.agentReplyEl) {
         return;
       }
-      this.#replaceRenderedPreview(replyEl, renderedEl);
+      replyEl.replaceChildren(...Array.from(renderedEl.childNodes));
     });
     this.containerEl.classList.add('has-agent-reply');
   }
@@ -817,7 +835,7 @@ export class InlineEditSession {
     if (!this.inputEl) return;
     this.inputEl.disabled = false;
     this.inputEl.placeholder = errorMessage;
-    if (!this.isConversing) {
+    if (!this.inlineEditService.isConversing) {
       this.#updatePositionsFromEditor();
       this.#updateHighlight();
       this.#attachSelectionListeners();
@@ -868,21 +886,28 @@ export class InlineEditSession {
     this.#installAcceptRejectHandler();
   }
 
+  /**
+   * Window capture runs ahead of CodeMirror, which would insert a newline on Enter and so turn the
+   * accept into a stale-source rejection, and ahead of Obsidian's keymap, which handles Escape.
+   */
   #installAcceptRejectHandler() {
-    if (this.escHandler) {
-      this.getOwnerDocument().removeEventListener('keydown', this.escHandler);
-    }
-    this.escHandler = (e: KeyboardEvent) => {
-      if (!this.isKeyboardEventInContext(e)) {
-        return;
-      }
-      if (e.key === 'Escape' && !e.isComposing) {
+    this.releaseKeyHandler?.();
+    const keyTarget = this.getOwnerDocument().defaultView ?? window;
+    const onKeydown = (e: KeyboardEvent) => {
+      if (e.isComposing || !this.isKeyboardEventInContext(e)) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
         this.reject();
-      } else if (e.key === 'Enter' && !e.isComposing) {
+      } else if (e.key === 'Enter' && !this.containerEl?.contains(e.target as Node)) {
+        // Preview controls keep their native Enter activation.
+        e.preventDefault();
+        e.stopPropagation();
         this.accept();
       }
     };
-    this.getOwnerDocument().addEventListener('keydown', this.escHandler);
+    keyTarget.addEventListener('keydown', onKeydown, true);
+    this.releaseKeyHandler = () => keyTarget.removeEventListener('keydown', onKeydown, true);
   }
 
   accept() {
@@ -946,13 +971,10 @@ export class InlineEditSession {
     this.generating = false;
     this.releaseEditorLifetime?.();
     this.releaseEditorLifetime = null;
-    this.inlineEditService.cancel();
-    this.inlineEditService.resetConversation();
-    this.isConversing = false;
+    this.inlineEditService.end();
     this.#removeSelectionListeners();
-    if (this.escHandler) {
-      this.getOwnerDocument().removeEventListener('keydown', this.escHandler);
-    }
+    this.releaseKeyHandler?.();
+    this.releaseKeyHandler = null;
     if (this.inputResources) this.destroyInputDOM(this.inputResources.container);
 
     if (this.editorDestroyed) return;
@@ -972,20 +994,7 @@ export class InlineEditSession {
   }
 
   #isSourceUnchanged(): boolean {
-    const snapshot = this.sourceSnapshot;
-    if (!snapshot) {
-      return false;
-    }
-
-    const currentDoc = this.editorView.state.doc;
-    const currentLength = typeof currentDoc.length === 'number'
-      ? currentDoc.length
-      : Number.POSITIVE_INFINITY;
-    return currentDoc === snapshot.doc
-      && snapshot.from >= 0
-      && snapshot.to >= snapshot.from
-      && snapshot.to <= currentLength
-      && this.#getDocumentSlice(currentDoc, snapshot.from, snapshot.to) === snapshot.text;
+    return this.editorView.state.doc === this.sourceDoc;
   }
 
   #isGenerationActive(generation: number): boolean {
@@ -1003,30 +1012,21 @@ export class InlineEditSession {
     this.resolve({ decision: 'reject' });
   }
 
-  #getDocumentSlice(doc: Text, from: number, to: number): string {
-    const compatibleDoc = doc as Text & {
-      sliceString?: (start: number, end: number) => string;
-    };
-    if (typeof compatibleDoc.sliceString === 'function') {
-      return compatibleDoc.sliceString(from, to);
-    }
-    return from === this.selFrom && to === this.selTo ? this.selectedText : '';
-  }
-
+  /** Keys aimed at the editor, this widget, or nowhere: a disabled or replaced input leaves focus on the body. */
   private isKeyboardEventInContext(event: KeyboardEvent): boolean {
     const target = event.target as Node | null;
     if (!target) {
       return false;
     }
-    return target === this.containerEl
+    return target === this.getOwnerDocument().body
+      || target === this.containerEl
       || this.containerEl?.contains(target) === true
       || target === this.editorView.dom
       || this.editorView.dom.contains(target);
   }
 
   #focusEditor(): void {
-    const compatibleView = this.editorView as EditorView & { focus?: () => void };
-    compatibleView.focus?.();
+    this.editorView.focus();
   }
 
   private handleKeydown(e: KeyboardEvent) {
@@ -1039,36 +1039,4 @@ export class InlineEditSession {
       void this.generate();
     }
   }
-
-  #resolveContextFilesFromMessage(message: string): string[] {
-    if (!message.includes('@')) return [];
-
-    const vaultFiles = this.mentionDataProvider.getCachedVaultFiles();
-
-    const pathLookup = new Map<string, string>();
-    for (const file of vaultFiles) {
-      // TFile paths are already Vault-relative; filesystem normalization would
-      // expand literal `%VAR%`/`$VAR` segments and stat every file.
-      const lookupKey = normalizeForPlatformLookup(normalizeMentionPath(file.path));
-      if (lookupKey && !pathLookup.has(lookupKey)) {
-        pathLookup.set(lookupKey, file.path);
-      }
-    }
-
-    const resolved = new Set<string>();
-    for (let index = 0; index < message.length; index++) {
-      if (!isMentionStart(message, index)) continue;
-
-      const vaultMatch = findBestMentionLookupMatch(
-        message, index + 1, pathLookup
-      );
-      if (vaultMatch) {
-        resolved.add(vaultMatch.resolvedPath);
-        index = vaultMatch.endIndex - 1;
-      }
-    }
-
-    return [...resolved];
-  }
-
 }

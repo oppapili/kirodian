@@ -139,6 +139,11 @@ export class ConversationRepository {
           this.#invalidateConversation(conversation.id);
         }
       },
+      invalidateSession: (conversation) => {
+        this.deps.providerSettings.invalidateConversationSessions([conversation], [conversation.providerId]);
+        this.hydratedConversationIds.delete(conversation.id);
+        this.#invalidateConversation(conversation.id);
+      },
     });
   }
 
@@ -535,6 +540,19 @@ export class ConversationRepository {
     }));
   }
 
+  /** Commits the generated title and status without overwriting a manual rename. */
+  async completeTitleGeneration(id: string, expectedTitle: string, title: string | null): Promise<void> {
+    await this.#mutateMetadata(id, conversation => {
+      if (conversation.title !== expectedTitle) return { titleGenerationStatus: undefined };
+      return title === null
+        ? { titleGenerationStatus: 'failed' }
+        : {
+          title: title.trim() || this.#generateDefaultTitle(),
+          titleGenerationStatus: 'success',
+        };
+    });
+  }
+
   async update(id: string, updates: ConversationMutablePatch): Promise<void> {
     const attemptedImmutableFields = IMMUTABLE_CONVERSATION_PATCH_FIELDS.filter(
       field => Object.prototype.hasOwnProperty.call(updates, field),
@@ -567,6 +585,52 @@ export class ConversationRepository {
       this.#invalidateConversation(id);
     }
     await this.#mutateMetadata(id, () => safeUpdates);
+  }
+
+  /**
+   * Commits a model compare-and-set and a synchronous admission under the metadata queue.
+   * Admission callbacks must not publish, await persistence, or throw from commit().
+   * A revoked reservation during IO restores the committed projection before releasing the queue.
+   */
+  updateSelectedModelIf(
+    id: string,
+    expectedModel: string | undefined,
+    selectedModel: string | undefined,
+    admission: {
+      isCurrent(candidate: Readonly<Conversation>): boolean;
+      commit(): void;
+    },
+  ): Promise<boolean> {
+    const conversation = this.#getRecord(id);
+    if (!conversation) return Promise.resolve(false);
+    return this.#enqueuePersistence(id, async () => {
+      const candidate = { ...conversation, ...(selectedModel !== undefined ? { selectedModel } : {}) };
+      const isCurrent = () => this.#getRecord(id) === conversation
+        && !this.deletingConversationIds.has(id) && !this.deletedConversationIds.has(id)
+        && !conversation.isArchived && conversation.selectedModel === expectedModel
+        && admission.isCurrent(candidate);
+      if (!isCurrent()) return false;
+      const changed = candidate.selectedModel !== conversation.selectedModel;
+      if (changed) await this.#writeMetadata(candidate);
+      let committed = false;
+      try {
+        if (!isCurrent()) return false;
+        if (changed) {
+          this.modelRecovery.markSelectedModelMutation(conversation);
+          conversation.selectedModel = candidate.selectedModel;
+        }
+        admission.commit();
+        committed = true;
+        return true;
+      } finally {
+        // All later metadata choices still wait behind this operation. Restore from the current
+        // authoritative record, never from a stale caller snapshot or after releasing the queue.
+        if (changed && !committed) {
+          const current = this.#getRecord(id) ?? this.deletionStates.get(id)?.conversation;
+          if (current) await this.#writeMetadata(current);
+        }
+      }
+    });
   }
 
   async setPinned(id: string, isPinned: boolean): Promise<void> {
@@ -652,6 +716,13 @@ export class ConversationRepository {
     const drafts = this.conversations
       .filter(conversation => providers.has(conversation.providerId))
       .map(conversation => cloneJSON(conversation));
+    // A session that outlives the transition, including one still creating its first native
+    // session, must not bind through a late snapshot. Bindings the provider preserves stay live.
+    for (const draft of drafts) {
+      if (!this.deps.providerSettings.preservesConversationSession(draft)) {
+        this.executionBindings.retire(draft.id);
+      }
+    }
     const invalidated = this.deps.providerSettings.invalidateConversationSessions(drafts, providerIds);
     return invalidated.flatMap(draft => {
       const conversation = this.#getRecord(draft.id);
@@ -668,6 +739,49 @@ export class ConversationRepository {
   async persistProviderSessionInvalidations(providerIds: ProviderId[]): Promise<void> {
     const providers = new Set(providerIds);
     await this.persistConversations(this.conversations.filter(conversation => providers.has(conversation.providerId)));
+  }
+
+  /**
+   * Rewrites unhydrated metadata whose provider state duplicates native history. Writes run one
+   * at a time through the persistence queue so this background pass never competes with startup.
+   */
+  async compactPersistedProviderState(isStopped: () => boolean): Promise<number> {
+    const vaultPath = this.deps.getVaultPath();
+    const checks = new Map<ProviderId, ((input: ProviderHistoryInput) => boolean) | null>();
+    const getCheck = (providerId: ProviderId): ((input: ProviderHistoryInput) => boolean) | null => {
+      if (!checks.has(providerId)) {
+        const historyService = this.deps.providers.getRegisteredProviderIds().includes(providerId)
+          ? this.deps.providers.getConversationHistoryService(providerId)
+          : null;
+        const pathContext = this.#getHistoryPathContext(providerId, vaultPath);
+        checks.set(providerId, historyService?.hasRedundantPersistedState
+          ? input => historyService.hasRedundantPersistedState!(input, vaultPath, pathContext)
+          : null);
+      }
+      return checks.get(providerId)!;
+    };
+    let compacted = 0;
+    for (const { id, providerId } of [...this.conversations]) {
+      if (isStopped()) break;
+      const current = this.#getRecord(id);
+      const isRedundant = current && !this.hydratedConversationIds.has(id) ? getCheck(providerId) : null;
+      if (!current || !isRedundant || !(
+        isRedundant(current)
+        || (current.modelRecoverySource && isRedundant({ ...current.modelRecoverySource, messages: [] }))
+      )) continue;
+      try {
+        await this.#enqueuePersistence(id, async () => {
+          const record = this.#getRecord(id);
+          if (isStopped() || !record || this.hydratedConversationIds.has(id)) return;
+          if (!await this.#canWriteConversation(record)) return;
+          await this.#writeMetadata(record, { preserveProviderState: true });
+          compacted += 1;
+        });
+      } catch {
+        // Best effort: the next save or launch retries.
+      }
+    }
+    return compacted;
   }
 
   async persistConversations(
@@ -1173,8 +1287,12 @@ export class ConversationRepository {
     const historyService = this.deps.providers.getConversationHistoryService(
       conversation.providerId,
     );
+    const getNativeHistory = () => {
+      const vaultPath = this.deps.getVaultPath();
+      return { vaultPath, pathContext: this.#getHistoryPathContext(conversation.providerId, vaultPath) };
+    };
     const providerState = historyService.buildPersistedProviderState
-      ? historyService.buildPersistedProviderState(conversation, options)
+      ? historyService.buildPersistedProviderState(conversation, { ...options, getNativeHistory })
       : conversation.providerState;
     const modelRecoverySource = !getStoredModelSelection(conversation.selectedModel)
       && conversation.modelRecoverySource
@@ -1183,7 +1301,7 @@ export class ConversationRepository {
     if (modelRecoverySource && historyService.buildPersistedProviderState) {
       modelRecoverySource.providerState = historyService.buildPersistedProviderState(
         { ...modelRecoverySource, messages: [] },
-        { preserveProviderState: true },
+        { preserveProviderState: true, getNativeHistory },
       );
     }
     return {

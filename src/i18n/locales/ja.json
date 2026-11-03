@@ -1,5 +1,6 @@
 {
   "common": {
+    "inputSuggestions": "入力候補",
     "save": "保存",
     "cancel": "キャンセル",
     "delete": "削除",
@@ -9,7 +10,8 @@
     "error": "エラー",
     "confirm": "確認",
     "refresh": "更新",
-    "inputSuggestions": "入力候補"
+    "retry": "再試行",
+    "none": "なし"
   },
   "chat": {
     "promptSuggestionHint": "Tab で採用",
@@ -52,9 +54,14 @@
     "quote": {
       "buttonLabel": "引用"
     },
+    "codeBlock": {
+      "copyAriaLabel": "{language} のコードをコピー",
+      "copied": "コピーしました！"
+    },
     "sideChat": {
       "title": "サイドチャット",
       "collapse": "折りたたむ",
+      "fullHeight": "全高表示",
       "discard": "破棄",
       "statusPreparing": "準備中",
       "statusQueued": "{count} 件待機中",
@@ -73,8 +80,7 @@
       "mainOnlyCommand": "/{command} はメインチャットでのみ使用できます。",
       "startFailed": "サイドチャットを開始できませんでした：{error}",
       "queued": "サイドチャットのキューに追加しました。",
-      "busySide": "サイドチャットが応答中です。完了までお待ちください。",
-      "fullHeight": "全高表示"
+      "busySide": "サイドチャットが応答中です。完了までお待ちください。"
     },
     "zen": {
       "regionLabel": "Claudian チャット",
@@ -91,15 +97,251 @@
       "toolCompleted": "{tool} · 完了",
       "toolFailed": "{tool} · 失敗",
       "toolBlocked": "{tool} · ブロック"
+    },
+    "composer": {
+      "placeholder": "変更を依頼、@でファイルを指定、/コマンドを実行",
+      "message": "メッセージ",
+      "dropImage": "ここに画像をドロップ",
+      "moreContext": "他 {count} 件のコンテキストを表示",
+      "showLess": "折りたたむ",
+      "moreItems": "他 {count} 件"
+    },
+    "worked": "作業完了",
+    "taskNotification": "タスク通知",
+    "copyMessage": "メッセージをコピー",
+    "renderFailed": "メッセージの表示に失敗しました。",
+    "interruptedHint": "· Kirodian は代わりに何をすべきですか？",
+    "sessions": {
+      "empty": "会話がありません",
+      "noMatch": "一致するセッションがありません",
+      "resume": "会話を再開",
+      "loading": "会話を読み込み中…",
+      "current": "現在のセッション",
+      "loadFailed": "会話の読み込みに失敗しました"
+    },
+    "linkedContent": {
+      "label": "リンクされたコンテンツ：",
+      "choices": "リンクするコンテンツの選択肢",
+      "noMatch": "一致するファイルやフォルダーがありません",
+      "missing": "コンテンツが見つかりません",
+      "path": "リンクされたコンテンツ：{path}",
+      "missingPath": "リンクされたコンテンツ：{path}。コンテンツが見つかりません",
+      "noContent": "リンクされたコンテンツなし",
+      "missingNotice": "リンクされたコンテンツが見つかりません：{path}",
+      "openFailed": "リンクされたコンテンツを開けませんでした：{error}"
+    },
+    "questions": {
+      "title": "質問",
+      "submit": "送信",
+      "review": "回答を確認",
+      "ready": "回答を送信しますか？",
+      "sending": "送信中…",
+      "submitAnswers": "回答を送信",
+      "notAnswered": "未回答",
+      "customAnswer": "回答を入力…",
+      "secret": "秘密情報を入力…",
+      "editAnswer": "「{question}」への回答を編集",
+      "waiting": "回答を待機中…",
+      "noOptions": "選択肢の記録がありません",
+      "sendFailed": "回答を送信できませんでした。再試行してください。",
+      "answerBelow": "下の質問パネルで回答してください。",
+      "expired": "質問の有効期限が切れました。",
+      "notSent": "回答が送信されませんでした。再試行してください。",
+      "unsupportedReply": "この質問はその回答を受け付けられません。",
+      "uncertainDelivery": "回答の送信を確認できませんでした。重複送信を避けるため、再キューイングしませんでした。",
+      "differentConversation": "この質問は別の会話に属しています。",
+      "sideUnavailable": "このサイドチャットは利用できなくなりました。"
+    },
+    "tools": {
+      "calls": "ツール呼び出し",
+      "output": "出力",
+      "noResult": "結果なし",
+      "noMatches": "一致する結果がありません",
+      "tasksUpdated": "タスクを更新しました",
+      "noChanges": "変更なし",
+      "moreLines": "…他 {count} 行",
+      "moreCharacters": "…他 {count} 文字",
+      "running": "実行中…",
+      "noOutput": "出力なし",
+      "status": {
+        "running": "状態：実行中",
+        "completed": "状態：完了",
+        "error": "状態：エラー",
+        "cancelled": "状態：キャンセル済み",
+        "blocked": "状態：ブロック済み"
+      },
+      "inProgress": "状態：進行中",
+      "writing": "書き込み中…",
+      "done": "完了",
+      "errorResult": "エラー",
+      "tasks": "タスク",
+      "taskProgress": "タスク {completed}/{total}",
+      "taskProgressLabel": "タスク（{completed}/{total}）",
+      "changes": "変更：+{added} -{removed}",
+      "fileDeleted": "ファイルを削除しました",
+      "noTextDiff": "テキスト差分がありません",
+      "patch": "パッチ",
+      "files": "{count} 個のファイル",
+      "file": "ファイル",
+      "enteringPlan": "計画モードに移行中",
+      "planComplete": "計画完了",
+      "messageAgent": "エージェントにメッセージを送信",
+      "listDestinations": "送信先を一覧表示",
+      "messageSession": "セッションにメッセージを送信",
+      "stopSession": "セッションを停止",
+      "readSession": "セッションを読む",
+      "continueAgent": "エージェントを継続",
+      "listAgents": "エージェント一覧",
+      "interruptAgent": "エージェントを中断",
+      "allAgents": "すべてのエージェント",
+      "commandPlaceholder": "コマンド",
+      "filesPlaceholder": "ファイル",
+      "patternPlaceholder": "パターン",
+      "toolsPlaceholder": "ツール",
+      "agentCount": "エージェント {count} 件",
+      "agentCountPlural": "エージェント {count} 件"
+    },
+    "citations": {
+      "memoryUsed": "使用したメモリ",
+      "source": "{count} 件のソース",
+      "sources": "{count} 件のソース"
+    },
+    "web": {
+      "findInPage": "ページ内を検索",
+      "openPage": "ページを開く",
+      "urlUnavailable": "URL がありません",
+      "clickLink": "リンク {id} をクリック",
+      "pattern": "パターン：{pattern}",
+      "query": "検索語：{query}",
+      "altQuery": "別の検索語：{query}",
+      "search": "ウェブを検索",
+      "moreQueries": "…他 {count} 件の検索語",
+      "clickInPage": "{url} のリンク {id} をクリック",
+      "open": "{url} を開く",
+      "find": "「{pattern}」を検索",
+      "inPage": "{url} で{action}",
+      "operations": "{count} 件のウェブ操作",
+      "searchTerm": "検索"
+    },
+    "permissionMode": {
+      "label": "権限モード",
+      "current": "権限モード：{mode}",
+      "changeFailed": "権限モードの変更に失敗しました",
+      "claude": {},
+      "codex": {}
+    },
+    "thinking": {
+      "active": "思考中 {seconds}秒…",
+      "completed": "{seconds}秒間思考しました",
+      "label": "思考"
+    },
+    "suggestions": {
+      "loading": "読み込み中…",
+      "noMatches": "一致する項目なし",
+      "loadFailed": "候補を読み込めませんでした",
+      "retryHint": "再入力して再試行",
+      "providerLoading": "プロバイダーのコマンドを読み込み中…",
+      "providerRetry": "プロバイダーのコマンド検出を再試行"
+    },
+    "approval": {
+      "title": "権限が必要です",
+      "question": "この操作を許可しますか？",
+      "deny": "拒否",
+      "allowOnce": "今回のみ許可",
+      "alwaysAllow": "常に許可",
+      "mcpRequest": "MCP リクエスト",
+      "mcpServer": "MCP サーバー：{server}",
+      "decline": "辞退",
+      "allow": "許可",
+      "cancelRequest": "このリクエストをキャンセル。",
+      "declineRequest": "このリクエストを辞退。",
+      "acceptRequest": "このリクエストを許可。",
+      "fileChange": "ファイル変更",
+      "fileChangeReason": "ファイル変更：{reason}",
+      "permissionRequest": "権限リクエスト",
+      "permissionReason": "権限リクエスト：{reason}",
+      "networkAccess": "{host} への {protocol} アクセスを許可",
+      "execute": "実行：{command}",
+      "executeCommand": "コマンドを実行",
+      "allowSimilar": "同様のコマンドを許可",
+      "execPolicy": "実行ポリシーの変更を承認して保存。",
+      "host": "ホスト",
+      "allowHost": "このセッションで {host} を許可",
+      "denyHost": "このセッションで {host} を拒否",
+      "allowRule": "{host} に許可ルールを適用。",
+      "denyRule": "{host} に拒否ルールを適用。",
+      "details": "{tool} の承認詳細",
+      "unexpectedSelection": "予期しない承認選択：「{value}」",
+      "runCommand": "コマンドを実行：{pattern}",
+      "readFile": "ファイルを読み込み：{pattern}",
+      "writeFile": "ファイルに書き込み：{pattern}",
+      "editFile": "ファイルを編集：{pattern}",
+      "searchFiles": "一致するファイルを検索：{pattern}",
+      "searchContent": "一致する内容を検索：{pattern}",
+      "unknownPattern": "（不明）"
+    },
+    "disclosure": {
+      "expand": "{label} - クリックして展開",
+      "collapse": "{label} - クリックして折りたたむ"
+    },
+    "removeItem": "{item} を削除",
+    "agent": "エージェント：{agent}",
+    "images": {
+      "unsupportedProvider": "このプロバイダーは画像添付に対応していません。",
+      "tooLarge": "画像が {size} の制限を超えています。",
+      "unsupportedType": "未対応の画像形式です。",
+      "attachFailed": "画像の添付に失敗しました。",
+      "label": "画像",
+      "numbered": "画像 {number}",
+      "attachment": "添付画像：{name} · {size}",
+      "fileNotFound": "{message}（ファイルが見つかりません）",
+      "permissionDenied": "{message}（アクセスが拒否されました）",
+      "preview": "画像プレビュー：{name}",
+      "closePreview": "画像プレビューを閉じる"
+    },
+    "pi": {},
+    "sessionMessage": {
+      "undelivered": "{senders} からのメッセージを配信できませんでした。",
+      "fromLabel": "送信元セッション:"
+    },
+    "sessionTools": {
+      "noSessions": "セッションはありません",
+      "thisSession": "このセッション",
+      "truncated": "表示されていないセッションがあります",
+      "recipient": "宛先",
+      "model": "モデル",
+      "reasoning": "推論",
+      "message": "メッセージ",
+      "openSession": "セッション {sessionId} を開く",
+      "openProviderSession": "{provider} のセッション {sessionId} を開く",
+      "sessionMissing": "そのセッションはもう存在しません。",
+      "openFailed": "セッションを開けませんでした: {message}",
+      "openUnavailable": "ここからはセッションを開けません。",
+      "providersIncluded": "利用可能なプロバイダーとモデルを含めました",
+      "newSession": "新しいセッション",
+      "session": "セッション",
+      "turns": "ターン",
+      "turnRange": "{from}–{to} / {total}",
+      "noTurns": "まだありません",
+      "mode": "配信",
+      "modeSteer": "実行中のターンに追加",
+      "modeInterrupt": "現在の作業を中断"
+    },
+    "navigation": {
+      "scrollToTop": "最上部へスクロール",
+      "previousMessage": "前のメッセージ",
+      "directory": "会話の目次",
+      "nextMessage": "次のメッセージ",
+      "scrollToBottom": "最下部へスクロール",
+      "emptyDirectory": "この会話にはユーザープロンプトがありません"
     }
   },
   "settings": {
-    "title": "Kirodian 設定",
     "tabs": {
       "general": "一般",
       "providers": "プロバイダー",
-      "claude": "Claude",
-      "skills": "スキル"
+      "skills": "スキル",
+      "claude": "Claude"
     },
     "providerSettings": {
       "unavailable": "プロバイダー設定を利用できません。",
@@ -151,39 +393,14 @@
       "name": "送信に Command/Ctrl+Enter を必須にする",
       "desc": "有効にすると、Enter は改行を挿入します。macOS では Command+Enter、Windows と Linux では Ctrl+Enter で送信します。"
     },
-    "hotkeys": "ホットキー",
-    "inlineEditHotkey": {
-      "name": "インライン編集"
-    },
-    "openChatHotkey": {
-      "name": "チャットを開く"
-    },
-    "newSessionHotkey": {
-      "name": "現在の会話を置き換える"
-    },
-    "newTabHotkey": {
-      "name": "新規"
-    },
-    "closeTabHotkey": {
-      "name": "タブを閉じる"
-    },
-    "slashCommands": {
-      "name": "コマンドとスキル",
-      "desc": ".claude/commands/ と .claude/skills/ に保存された Vault レベルのコマンドとスキルを管理します。/名前 でトリガーされます。"
-    },
-    "hiddenSlashCommands": {
-      "name": "非表示のコマンドとスキル",
-      "desc": "ドロップダウンから特定のコマンドとスキルを非表示にします。Kirodian に関係のない Claude Code の項目を隠すのに便利です。先頭のスラッシュなしで名前を1行に1つ入力してください。",
-      "placeholder": "commit\nbuild\ntest"
-    },
     "safety": "セキュリティ",
     "loadUserSettings": {
       "name": "ユーザーの Claude Code 設定を読み込む",
       "desc": "~/.claude からユーザーレベルの Claude Code 設定（settings.json、スキル、コマンド、エージェント、プラグイン）を読み込みます。無効にすると、Vault レベルの設定のみ利用できます。有効にすると、ユーザーの許可ルールがセキュリティモードをバイパスする可能性があります。"
     },
-    "claudeSafeMode": {
-      "name": "セーフモード",
-      "desc": "Safe トグルが有効なときに使用する権限モードです。"
+    "codexSandbox": {
+      "name": "サンドボックス",
+      "desc": "承認を任せる と 承認を求める モードでのファイルアクセスです。読み取り専用では編集のたびに確認します。フルアクセス では無視されます。"
     },
     "environment": "環境",
     "sharedEnvironment": {
@@ -268,6 +485,10 @@
       "name": "ストリーミング中の数式レンダリングを遅延",
       "desc": "応答のストリーミング中は生の LaTeX を表示し、各テキストブロックの完了時に一度だけ数式をレンダリングします。"
     },
+    "pluginRenderedFenceLanguages": {
+      "name": "プラグインで描画するコードブロック言語",
+      "desc": "1 行に 1 つずつ指定したコードブロック言語を、ノートで描画するプラグインに渡します（例: vega-lite）。応答の完了後に描画されます。その他のコードブロックは常にコードとして表示されます。"
+    },
     "expandFileEditsByDefault": {
       "name": "ファイル編集をデフォルトで展開",
       "desc": "Write と Edit の diff が最初に表示されるとき、展開した状態で表示します。"
@@ -312,9 +533,9 @@
     },
     "providerEnablement": {
       "name": "{provider} を有効化",
-      "desc": "有効にした {provider} モデルを新しい会話で使用できるようにします。無効にしても既存のセッションは保持されます。",
       "lastProviderWarning": "Kirodian を使用するには、少なくとも 1 つのプロバイダーを有効にする必要があります。",
-      "noModelsWarning": "有効な {provider} モデルがありません。下の「モデル」で少なくとも1つのモデルを有効にしてください。"
+      "noModelsWarning": "有効な {provider} モデルがありません。下の「モデル」で少なくとも1つのモデルを有効にしてください。",
+      "desc": "有効にした {provider} モデルを新しい会話で使用できるようにします。無効にしても既存のセッションは保持されます。"
     },
     "modelPicker": {
       "name": "表示するモデル",
@@ -346,22 +567,24 @@
       "stale": "{provider} のモデルカタログが古くなっています。「検出」をクリックして更新してください。"
     },
     "claude": {
-      "promptSuggestions": {
-        "name": "プロンプトの提案",
-        "desc": "空の入力欄に Claude が予測した次のプロンプトを表示します。提案ごとに各ターン後に追加の Claude リクエストが発生し、使用量の上限を早く消費する可能性があります。"
+      "promptSuggestions": {},
+      "responseStyle": {}
+    },
+    "codex": {
+      "installationMethod": {},
+      "cliPath": {
+        "validation": {}
       },
-      "configuration": "構成",
-      "responseStyle": {
-        "name": "応答スタイル",
-        "desc": "返信に使う Claude Code の出力スタイルです（カスタムスタイルを含む）。「Claude Code の設定」は Claude Code の構成に従います。モデルの更新時またはチャット開始時に一覧が更新されます。",
-        "default": "デフォルト",
-        "inherit": "Claude Code の設定"
-      }
+      "wslDistroOverride": {},
+      "safeMode": {},
+      "responseStyle": {},
+      "responseVerbosity": {},
+      "reasoningSummary": {},
+      "ultraEffort": {},
+      "environment": {}
     },
     "agentSkills": {
-      "sectionTitle": "Skills",
       "sharedExpectation": "Manage shared skills in .agents/skills/ for compatible providers.",
-      "sharedExpectationKiro": "Manage Kiro skills in .kiro/skills/ (kiro-cli does not read .agents/skills/).",
       "noSkills": "No shared skills configured. Click + to create one.",
       "skillBadge": "skill",
       "diagnosticsTitle": "Skills needing attention",
@@ -395,10 +618,70 @@
         "title": "共有スキルを削除",
         "description": "スクリプト、参照資料、アセットを含むスキルフォルダー全体がゴミ箱に移動されます。",
         "confirm": "ゴミ箱に移動"
-      }
+      },
+      "sectionTitle": "Skills",
+      "sharedExpectationKiro": "Manage Kiro skills in .kiro/skills/ (kiro-cli does not read .agents/skills/)."
+    },
+    "opencode": {
+      "environment": {},
+      "migrationNotice": {}
+    },
+    "pi": {
+      "environment": {},
+      "models": {}
+    },
+    "grok": {
+      "environment": {}
+    },
+    "deepseek": {
+      "installation": {},
+      "codeMode": {},
+      "presetPlugins": {},
+      "environment": {}
     },
     "skills": {
-      "droppedFrontmatterWarning": "保存すると名前と説明だけが残ります。次のキーは削除され、プロバイダーの動作が変わる可能性があります: {keys}"
+      "subTabs": {},
+      "status": {},
+      "actions": {},
+      "commands": {},
+      "droppedFrontmatterWarning": "保存すると名前と説明だけが残ります。次のキーは削除され、プロバイダーの動作が変わる可能性があります: {keys}",
+      "hidden": {},
+      "sync": {
+        "pros": {},
+        "cons": {},
+        "problems": {},
+        "options": {}
+      }
+    },
+    "title": "Kirodian 設定",
+    "hotkeys": "ホットキー",
+    "inlineEditHotkey": {
+      "name": "インライン編集"
+    },
+    "openChatHotkey": {
+      "name": "チャットを開く"
+    },
+    "newSessionHotkey": {
+      "name": "現在の会話を置き換える"
+    },
+    "newTabHotkey": {
+      "name": "新規"
+    },
+    "closeTabHotkey": {
+      "name": "タブを閉じる"
+    },
+    "slashCommands": {
+      "name": "コマンドとスキル",
+      "desc": ".claude/commands/ と .claude/skills/ に保存された Vault レベルのコマンドとスキルを管理します。/名前 でトリガーされます。"
+    },
+    "hiddenSlashCommands": {
+      "name": "非表示のコマンドとスキル",
+      "desc": "ドロップダウンから特定のコマンドとスキルを非表示にします。Kirodian に関係のない Claude Code の項目を隠すのに便利です。先頭のスラッシュなしで名前を1行に1つ入力してください。",
+      "placeholder": "commit\nbuild\ntest"
+    },
+    "claudeSafeMode": {
+      "name": "セーフモード",
+      "desc": "Safe トグルが有効なときに使用する権限モードです。"
     }
   }
 }
