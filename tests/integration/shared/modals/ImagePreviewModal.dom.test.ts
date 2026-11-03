@@ -1,7 +1,6 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
-import { claudeCatalogFixture } from '@test/helpers/claudeModels';
 import { createClaudianView } from '@test/helpers/features/chat/ClaudianViewHarness';
 import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { FakeSideBackend, type FakeSideSession } from '@test/helpers/features/chat/SideChatSessionHarness';
@@ -16,6 +15,7 @@ import { type ChatMessage, type ClaudianSettings, type Conversation, type ImageA
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { activateTab, destroyTab } from '@/features/chat/tabs/TabLifecycle';
 import { createTabRuntime } from '@/features/chat/tabs/TabRuntimeFactory';
+import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
 const originalResizeObserver = globalThis.ResizeObserver;
@@ -46,6 +46,11 @@ afterEach(() => {
 async function createView() {
   const backend = new FakeSideBackend();
   jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockReturnValue(backend);
+  // Kiro's real capabilities set supportsFork=false; side chat forks from a checkpoint, so the
+  // side-destination scenario needs fork support. Override only this flag over the real capabilities.
+  const realCapabilities = ProviderRegistry.getCapabilities('kiro');
+  jest.spyOn(ProviderRegistry, 'getCapabilities').mockImplementation((providerId = 'kiro') =>
+    providerId === 'kiro' ? { ...realCapabilities, supportsFork: true } : realCapabilities);
   const app = new App();
   const scopes: Scope[] = [];
   Object.assign(app, { keymap: {
@@ -61,15 +66,20 @@ async function createView() {
   Object.assign(app, { metadataCache: { on: () => ({}), offref() {} } });
   const lifecycle = new ProviderExecutionLifecycleRegistry();
   const settings = {
-    model: 'claude-sonnet-4-5', effortLevel: 'high', permissionMode: 'manual',
+    model: 'kiro/sonnet', effortLevel: 'high', permissionMode: 'manual',
     enableAutoTitleGeneration: false, excludedTags: [], mediaFolder: '', systemPrompt: '', userName: '',
     keyboardNavigation: { scrollUpKey: 'w', scrollDownKey: 's', focusInputKey: 'i' },
-    providerConfigs: { claude: {
-      ...claudeCatalogFixture(['claude-sonnet-4-5'], ['low', 'high']), promptSuggestions: true,
-    } },
   } as unknown as ClaudianSettings;
+  updateCurrentKiroCatalog(settings as unknown as Record<string, unknown>, {
+    defaultModelId: null, fingerprint: 'test-fingerprint', refreshedAt: 0,
+    models: [{
+      rawId: 'sonnet', displayName: 'Sonnet', description: 'SDK model',
+      reasoningEfforts: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }], supportsReasoning: true,
+    }],
+  });
+  updateKiroProviderSettings(settings as unknown as Record<string, unknown>, { enabled: true, visibleModels: ['sonnet'] });
   const conversation = {
-    id: 'conversation-1', providerId: 'claude', selectedModel: 'claude-sonnet-4-5',
+    id: 'conversation-1', providerId: 'kiro', selectedModel: 'kiro/sonnet',
     sessionId: 'main-session', messages: [], title: 'Existing conversation',
     createdAt: testDate().getTime(), lastActivityAt: testDate().getTime(),
   } as unknown as Conversation;
@@ -79,7 +89,7 @@ async function createView() {
     app, settings,
     providerHost: {
       app, settings, executionLifecycleRegistry: lifecycle,
-      getResolvedProviderCliPath: async () => '/bin/claude', getActiveEnvironmentVariables: () => '',
+      getResolvedProviderCliPath: async () => '/bin/kiro', getActiveEnvironmentVariables: () => '',
     },
     executionPersistence: {
       registerExecutionBinding() {}, releaseExecutionBinding() {},
@@ -87,7 +97,7 @@ async function createView() {
       persistExecutionSnapshot: async (...args: unknown[]) => { saved.push(structuredClone(args)); return true; },
       recordConversationActivity: async () => {},
     },
-    getSessionSnapshotDirectory: () => '/tmp/claudian-sessions', getCommittedSettings: () => settings,
+    getCommittedSettings: () => settings,
     getActiveEnvironmentVariables: () => '', getConversationSummary: (id: string) => conversations.get(id),
     getConversationSync: (id: string) => conversations.get(id), getCachedConversation: (id: string) => conversations.get(id),
     getConversationById: async (id: string) => conversations.get(id), findConversationAcrossViews: () => null,
@@ -106,7 +116,7 @@ async function createView() {
     openConversation: async () => {}, startNewConversation: async () => {},
   });
   tab.hydrationState = 'ready';
-  await tab.executionCoordinator.bindConversation({ conversationId: conversation.id, providerId: 'claude' });
+  await tab.executionCoordinator.bindConversation({ conversationId: conversation.id, providerId: 'kiro' });
   await tab.executionCoordinator.prepare();
   jest.spyOn(tab.dom.messagesEl, 'getClientRects').mockImplementation(() =>
     (tab.dom.contentEl.classList.contains('claudian-hidden') ? [] : [{}]) as unknown as DOMRectList);

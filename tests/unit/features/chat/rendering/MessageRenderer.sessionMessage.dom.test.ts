@@ -15,7 +15,7 @@ HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 it.each(['live', 'history'])('shows the sender safely in %s and keeps the envelope out of the body', async mode => {
   document.body.replaceChildren();
   const host = document.body.createDiv();
-  const records = new Map([['source-session', { id: 'source-session', providerId: 'claude' } as Conversation]]);
+  const records = new Map([['source-session', { id: 'source-session', providerId: 'kiro' } as Conversation]]);
   const openConversation = jest.fn(async (_id: string) => undefined);
   const renderer = new MessageRenderer({
     app: {}, settings: { mediaFolder: '' },
@@ -49,7 +49,7 @@ it.each(['live', 'history'])('shows the sender safely in %s and keeps the envelo
     const senderLine = badge.closest<HTMLElement>('.claudian-session-message-sender')!;
     expect(within(senderLine).getByText('From session:').closest('button')).toBeNull();
     expect(badge.getAttribute('type')).toBe('button');
-    expect(badge.getAttribute('title')).toBe('Open Claude Code session source-session');
+    expect(badge.getAttribute('title')).toBe('Open Kiro session source-session');
     expect(badge.querySelector('img')).toBeNull();
     expect(within(host).getByText('Please check the results.')).toBeTruthy();
     expect(host.textContent).not.toContain('<session_message');

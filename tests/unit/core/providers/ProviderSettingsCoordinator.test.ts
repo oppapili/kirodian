@@ -242,11 +242,11 @@ describe('ProviderSettingsCoordinator', () => {
         normalizeModelVariantSettings: jest.fn(() => false),
       };
       const reloadReconciler: ProviderSettingsReconciler = {
-        environmentSessionPolicy: 'reload',
         invalidateConversationSessions: jest.fn(conversations => conversations),
         reconcileModelWithEnvironment: jest.fn(() => ({
           changed: true,
           invalidatedConversations: [],
+          sessionPolicy: 'reload',
         })),
         normalizeModelVariantSettings: jest.fn(() => false),
       };
@@ -288,7 +288,9 @@ describe('ProviderSettingsCoordinator', () => {
       settingsProviderSpy.mockRestore();
       uiConfigSpy.mockRestore();
 
-      expect(defaultReconciler.environmentSessionPolicy).toBeUndefined();
+      // An omitted sessionPolicy defaults to invalidate; the reload provider opts out explicitly.
+      expect(jest.mocked(defaultReconciler.reconcileModelWithEnvironment).mock.results[0]!.value)
+        .not.toHaveProperty('sessionPolicy');
       expect(result.environmentChangedProviderIds).toEqual([
         'fake-invalidate',
         'fake-reload',

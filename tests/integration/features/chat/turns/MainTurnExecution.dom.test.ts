@@ -3,8 +3,6 @@ import '@/providers';
 
 import { createFixture } from '@test/helpers/ChatInputHarness';
 import { createTestSession } from '@test/helpers/ConversationPorts';
-import { parseCodexSessionContent } from '@test/helpers/providers/codex/parseCodexSessionContent';
-import { testTime } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
 import { Component, MarkdownRenderer } from 'obsidian';
 
@@ -31,7 +29,7 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
-const INTERRUPTED = 'Interrupted · What should Claudian do instead?';
+const INTERRUPTED = 'Interrupted · What should Kirodian do instead?';
 
 function visibleText(element: HTMLElement): string {
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
@@ -56,7 +54,6 @@ function inspect(root: HTMLElement) {
 
 const boundary = { type: 'assistant_message_started' };
 const text = (value: string) => ({ type: 'text_delta', text: value });
-const agentMessage = (message: string) => ({ type: 'event_msg', payload: { type: 'agent_message', message } });
 /** A session notification that arrives during the run, after the event before it. */
 const notification = 'notification';
 
@@ -72,7 +69,7 @@ async function stopTurn(events: readonly unknown[]) {
     getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
   cleanups.push(() => { streamController.dispose(); subagents.clear(); renderer.dispose(); });
   const fixture = createFixture({ session, state, renderer, streamController, getMessagesEl: () => messagesEl,
-    getTabProviderId: () => 'codex' });
+    getTabProviderId: () => 'kiro' });
 
   let sequence = 0;
   const scope = () => ({ kind: 'requested' as const, sessionInstanceId: 'native', executionId: 'execution', turnId: 'turn', sequence });
@@ -97,41 +94,31 @@ async function stopTurn(events: readonly unknown[]) {
   return { messagesEl, state, renderer };
 }
 
-// Codex and OpenCode start a new assistant message mid-turn; a Stop after a later one, even
-// before it shows any output, still stops the whole native turn, as Codex history records it
-// under one `turn_id`.
+// A native turn can start a new assistant message mid-turn; a Stop after a later one, even
+// before it shows any output, still folds the whole native turn under one indicator. Kiro's
+// native history records no interruption marker, so reload equivalence is proven by the
+// live render and the structural rerender; the native-reload columns are dropped with the
+// deleted providers that recorded a stop in their on-disk transcript.
 it.each([
-  ['with output', [boundary, text('Second partial.')], 'First message. Second partial.', [agentMessage('Second partial.')]],
-  ['before output', [boundary], 'First message.', []],
-  ['after blank output', [boundary, text('   ')], 'First message.', [agentMessage('   ')]],
-  ['after two boundaries', [boundary, boundary], 'First message.', []],
-  ['after two boundaries and blank output', [boundary, boundary, text('   ')], 'First message.', [agentMessage('   ')]],
+  ['with output', [boundary, text('Second partial.')], 'First message. Second partial.'],
+  ['before output', [boundary], 'First message.'],
+  ['after blank output', [boundary, text('   ')], 'First message.'],
+  ['after two boundaries', [boundary, boundary], 'First message.'],
+  ['after two boundaries and blank output', [boundary, boundary, text('   ')], 'First message.'],
   // Thinking streams into a buffer the response flushes at its end.
-  ['after thinking', [boundary, { type: 'thinking_delta', text: 'Weighing it.' }], expect.stringMatching(/^First message\. Thought\b/), null],
+  ['after thinking', [boundary, { type: 'thinking_delta', text: 'Weighing it.' }], expect.stringMatching(/^First message\. Thought\b/)],
   // The turn ends at its last output, whatever notifications and output-free messages follow it.
-  ['after a notification and output', [notification, text('Last output.')], 'First message. Task notification Last output.', null],
-  ['after a notification and blank output', [notification, text('   ')], 'First message. Task notification', null],
-  ['after a notification and blank thinking', [notification, { type: 'thinking_delta', text: '   ' }], 'First message. Task notification', null],
-  ['after a notification and a boundary', [notification, boundary], 'First message. Task notification', null],
-] as const)('folds every assistant message of a stopped turn, live and on rerender and Codex reload (%s)', async (_name, tail, body, codexTail) => {
+  ['after a notification and output', [notification, text('Last output.')], 'First message. Task notification Last output.'],
+  ['after a notification and blank output', [notification, text('   ')], 'First message. Task notification'],
+  ['after a notification and blank thinking', [notification, { type: 'thinking_delta', text: '   ' }], 'First message. Task notification'],
+  ['after a notification and a boundary', [notification, boundary], 'First message. Task notification'],
+] as const)('folds every assistant message of a stopped turn, live and on rerender (%s)', async (_name, tail, body) => {
   const { messagesEl, state, renderer } = await stopTurn([text('First message.'), ...tail]);
   const expected = { headers: 1, collapsed: `Read the note ${INTERRUPTED}`, body };
   const live = inspect(messagesEl);
   expect(live).toEqual(expected);
 
   renderer.renderMessages(state.messages, () => 'Welcome');
-  await Promise.resolve();
-  expect(inspect(messagesEl)).toEqual(live);
-
-  if (!codexTail) return;
-  const codex = parseCodexSessionContent([
-    { type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn' } },
-    { type: 'event_msg', payload: { type: 'user_message', message: 'Read the note' } },
-    agentMessage('First message.'),
-    ...codexTail,
-    { type: 'event_msg', payload: { type: 'turn_aborted', turn_id: 'turn', reason: 'interrupted' } },
-  ].map((record, seconds) => JSON.stringify({ timestamp: testTime({ seconds }), ...record })).join('\n'));
-  renderer.renderMessages(codex, () => 'Welcome');
   await Promise.resolve();
   expect(inspect(messagesEl)).toEqual(live);
 });

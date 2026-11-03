@@ -32,30 +32,27 @@ describe('inline-edit.css', () => {
   }
 
   it('spins in the Obsidian accent rather than the provider brand', () => {
-    const spinner = mountComposer('claude').querySelector<HTMLElement>('.claudian-inline-spinner')!;
+    const spinner = mountComposer('kiro').querySelector<HTMLElement>('.claudian-inline-spinner')!;
 
     expect(window.getComputedStyle(spinner).borderTopColor).toBe('var(--interactive-accent)');
   });
 
-  it('colours the model chip logo for the provider running the edit', () => {
-    const composer = mountComposer('deepseek');
+  // The upstream "model chip logo colour" case asserted a per-provider
+  // `--claudian-provider-logo` token (e.g. var(--claudian-brand-deepseek)). Kirodian is kiro-only
+  // and its merged `base/variables.css` defines no `--claudian-provider-logo` for any provider, so
+  // the per-provider logo-colour contract is not reproducible here and the deepseek provider does
+  // not exist. The dedicated colour case is dropped (no kiro token to retarget it to); the menu's
+  // float-geometry contract below retains the rest of the scenario's coverage.
 
-    expect(window.getComputedStyle(composer).getPropertyValue('--claudian-provider-logo').trim())
-      .toBe('var(--claudian-brand-deepseek)');
-  });
-
-  it('floats the model menu fixed above its chip, outside the clipped editor, in the provider colours', () => {
-    document.body.innerHTML = '<div class="claudian-inline-menu-layer" data-provider="deepseek">'
+  it('floats the model menu fixed above its chip, outside the clipped editor', () => {
+    document.body.innerHTML = '<div class="claudian-inline-menu-layer" data-provider="kiro">'
       + '<div class="claudian-toolbar-popover claudian-toolbar-popover--floating"></div></div>';
     const menu = window.getComputedStyle(document.querySelector('.claudian-toolbar-popover')!);
-    // jsdom does not inherit custom properties, so the layer the menu inherits from is read directly.
-    const layer = window.getComputedStyle(document.querySelector('.claudian-inline-menu-layer')!);
 
     // ToolbarMenu sets the variable from the chip's position, so the menu opens upward from it.
     expect(menu.position).toBe('fixed');
     expect(menu.top).toBe('auto');
     expect(menu.bottom).toBe('var(--claudian-toolbar-popover-bottom)');
-    expect(layer.getPropertyValue('--claudian-provider-logo').trim()).toBe('var(--claudian-brand-deepseek)');
   });
 
   it('keeps the review gutter bars inside the widget box, which Obsidian clips', () => {

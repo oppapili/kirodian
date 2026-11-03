@@ -1,9 +1,7 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
-import { useClaudeSessionFiles } from '@test/helpers/providers/claudeHistory';
-import { parseGrokHistoryContent } from '@test/helpers/providers/grokHistory';
-import { testDate, testTime } from '@test/helpers/testClock';
+import { testDate } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
 import { Component, MarkdownRenderer } from 'obsidian';
@@ -17,12 +15,7 @@ import { continueResponseAfterNotification } from '@/features/chat/turns/Respons
 import { ResponseStream } from '@/features/chat/turns/ResponseStream';
 import { StreamController } from '@/features/chat/turns/StreamController';
 import { TurnCoordinator } from '@/features/chat/turns/TurnCoordinator';
-import { loadSDKSessionMessages } from '@/providers/claude/history/ClaudeHistoryStore';
-import { mapOpencodeV2NativeMessages } from '@/providers/opencode/history/OpencodeHistoryStore';
-import { parsePiSessionContent } from '@/providers/pi/history/PiHistoryStore';
 
-jest.mock('node:fs/promises');
-const writeSession = useClaudeSessionFiles();
 HTMLElement.prototype.appendText = function (text) { this.append(document.createTextNode(text)); };
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
@@ -68,7 +61,7 @@ function visibleText(element: HTMLElement): string {
   return parts.join(' ');
 }
 
-const INTERRUPTED = 'Interrupted · What should Claudian do instead?';
+const INTERRUPTED = 'Interrupted · What should Kirodian do instead?';
 
 /** The interrupted turn as a reader sees it, collapsed and then expanded. */
 function inspectInterruptedTurn(root: HTMLElement, folded: RegExp[]) {
@@ -93,11 +86,15 @@ function inspectInterruptedTurn(root: HTMLElement, folded: RegExp[]) {
 }
 
 const expectedTurn = {
-  collapsed: { expanded: 'false', visible: [INTERRUPTED], actions: 0, header: ['Interrupted', '· What should Claudian do instead?'] },
+  collapsed: { expanded: 'false', visible: [INTERRUPTED], actions: 0, header: ['Interrupted', '· What should Kirodian do instead?'] },
   expanded: { expanded: 'true', ordered: true, hidden: false, indicatorInBody: false, worked: 0 },
 };
 
-it('collapses a stopped turn under Interrupted and renders it identically on rerender and every provider reload', async () => {
+// Kiro's native history records no interruption marker, so the cross-provider on-disk reload
+// columns are dropped with the deleted providers that recorded a stop in their transcript.
+// The stop-fold contract stays proven by the live render and the structural rerender from
+// the in-memory message list, which is what every reload ultimately produces.
+it('collapses a stopped turn under Interrupted and renders it identically on rerender', async () => {
   const session = createSession();
   const { response, stream, messagesEl, renderer, state } = session;
   const live = response.start();
@@ -119,60 +116,13 @@ it('collapses a stopped turn under Interrupted and renders it identically on rer
   await Promise.resolve();
   expect(inspectInterruptedTurn(messagesEl, folded)).toEqual(liveResult);
   expect(tool().closest('[hidden]')).not.toBeNull();
-
-  const replay = await loadSDKSessionMessages('/vault', 'session', undefined, writeSession([
-    { type: 'user', uuid: 'u', timestamp: testTime({ seconds: 0 }), message: { content: 'Read the note' } },
-    { type: 'assistant', uuid: 'tool', parentUuid: 'u', timestamp: testTime({ seconds: 1 }), message: { stop_reason: 'tool_use', content: [{ type: 'tool_use', id: 'read', name: 'Read', input: { file_path: 'note.md' } }] } },
-    { type: 'user', uuid: 'result', parentUuid: 'tool', timestamp: testTime({ seconds: 2 }), toolUseResult: { content: 'The note.' }, message: { content: [{ type: 'tool_result', tool_use_id: 'read', content: 'The note.' }] } },
-    { type: 'assistant', uuid: 'partial', parentUuid: 'result', timestamp: testTime({ seconds: 3 }), message: { content: [{ type: 'text', text: 'Partial answer' }] } },
-    { type: 'user', uuid: 'interrupt', parentUuid: 'partial', timestamp: testTime({ seconds: 4 }), message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } },
-  ]));
-  expect(replay.error).toBeUndefined();
-  renderer.renderMessages(replay.messages, () => 'Welcome');
-  await Promise.resolve();
-  expect(inspectInterruptedTurn(messagesEl, folded)).toEqual(liveResult);
-  expect(tool().closest('[hidden]')).not.toBeNull();
-
-  // Grok records the Stop as `stop_reason: cancelled` on the turn's completion.
-  const grok = parseGrokHistoryContent([
-    { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'Read the note' } },
-    { sessionUpdate: 'tool_call', toolCallId: 'read', title: 'read_file', kind: 'read', status: 'completed',
-      rawInput: { path: 'note.md' }, content: [{ type: 'content', content: { type: 'text', text: 'The note.' } }] },
-    { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Partial answer' } },
-    { sessionUpdate: 'turn_completed', prompt_id: 'prompt', stop_reason: 'cancelled' },
-  ].map((update, seconds) => JSON.stringify({ timestamp: testTime({ seconds }), method: 'session/update',
-    params: { sessionId: 'grok', update } })).join('\n'), 'grok');
-  // Pi records it as `stopReason: aborted` on the stopped assistant entry.
-  const pi = parsePiSessionContent([
-    { type: 'message', id: 'u', timestamp: testTime({ seconds: 0 }), message: { role: 'user', content: 'Read the note' } },
-    { type: 'message', id: 'tool', parentId: 'u', timestamp: testTime({ seconds: 1 }), message: { role: 'assistant', stopReason: 'toolUse',
-      content: [{ type: 'toolCall', id: 'read', name: 'read', arguments: { path: 'note.md' } }] } },
-    { type: 'message', id: 'result', parentId: 'tool', timestamp: testTime({ seconds: 2 }), message: { role: 'toolResult', toolCallId: 'read',
-      content: [{ type: 'text', text: 'The note.' }] } },
-    { type: 'message', id: 'partial', parentId: 'result', timestamp: testTime({ seconds: 3 }), message: { role: 'assistant',
-      stopReason: 'aborted', errorMessage: 'Operation aborted', content: [{ type: 'text', text: 'Partial answer' }] } },
-  ].map(entry => JSON.stringify(entry)).join('\n'));
-  // OpenCode v2 records it as the turn's `idle` outcome.
-  const created = testDate().getTime();
-  const opencode = mapOpencodeV2NativeMessages([
-    { id: 'u', type: 'user', time: { created }, text: 'Read the note' },
-    { id: 'partial', type: 'assistant', time: { created: created + 1_000, completed: created + 3_000 }, finish: 'error',
-      error: { type: 'aborted', message: 'Step interrupted' }, content: [
-        { type: 'tool', id: 'read', name: 'read', state: { status: 'completed', input: { filePath: 'note.md' }, content: [{ type: 'text', text: 'The note.' }] } },
-        { type: 'text', text: 'Partial answer' },
-      ] },
-    { id: 'idle', type: 'idle', time: { created: created + 3_500 }, outcome: 'interrupted' },
-  ]);
-  for (const reloaded of [grok.messages, pi, opencode]) {
-    renderer.renderMessages(reloaded, () => 'Welcome');
-    await Promise.resolve();
-    expect(inspectInterruptedTurn(messagesEl, folded)).toEqual(liveResult);
-    expect(tool().closest('[hidden]')).not.toBeNull();
-  }
 });
 
-it.each([true, false])('folds a turn stopped across compaction live and on Claude and OpenCode v2 reload (output after compaction: %s)', async after => {
-  const { response, stream, messagesEl, renderer } = createSession();
+// The deleted providers recorded a compaction boundary and a stop in their on-disk transcript,
+// so their reload columns are dropped; kiro has no such marker. The compaction-fold contract
+// stays proven live and on the structural rerender from the in-memory message list.
+it.each([true, false])('folds a turn stopped across compaction live and on rerender (output after compaction: %s)', async after => {
+  const { response, stream, messagesEl, renderer, state } = createSession();
   const live = response.start();
   await stream.handleStreamChunk({ type: 'text', content: 'Before compaction.' }, live);
   await stream.handleStreamChunk({ type: 'tool_use', id: 'read', name: 'Read', input: { file_path: 'note.md' } }, live);
@@ -185,33 +135,7 @@ it.each([true, false])('folds a turn stopped across compaction live and on Claud
   const liveResult = inspectInterruptedTurn(messagesEl, folded);
   expect(liveResult).toEqual(expectedTurn);
 
-  const created = testDate().getTime();
-  renderer.renderMessages(mapOpencodeV2NativeMessages([
-    { id: 'u', type: 'user', time: { created }, text: 'Read the note' },
-    { id: 'a1', type: 'assistant', time: { created: created + 1_000, completed: created + 2_000 }, content: [{ type: 'text', text: 'Before compaction.' }] },
-    { id: 'compact', type: 'compaction', time: { created: created + 3_000 }, status: 'completed', summary: 'Internal summary' },
-    ...(after ? [{ id: 'a2', type: 'assistant', time: { created: created + 4_000, completed: created + 5_000 }, content: [{ type: 'text', text: 'After compaction.' }] }] : []),
-    { id: 'idle', type: 'idle', time: { created: created + 6_000 }, outcome: 'interrupted' },
-  ]), () => 'Welcome');
-  await Promise.resolve();
-  expect(inspectInterruptedTurn(messagesEl, folded)).toEqual(liveResult);
-
-  // Claude auto-compacts between a tool result and the next model call.
-  const claude = await loadSDKSessionMessages('/vault', 'session', undefined, writeSession([
-    { type: 'user', uuid: 'u', timestamp: testTime({ seconds: 0 }), message: { content: 'Read the note' } },
-    { type: 'assistant', uuid: 'tool', parentUuid: 'u', timestamp: testTime({ seconds: 1 }), message: { stop_reason: 'tool_use',
-      content: [{ type: 'text', text: 'Before compaction.' }, { type: 'tool_use', id: 'read', name: 'Read', input: { file_path: 'note.md' } }] } },
-    { type: 'user', uuid: 'result', parentUuid: 'tool', timestamp: testTime({ seconds: 2 }), toolUseResult: { content: 'The note.' },
-      message: { content: [{ type: 'tool_result', tool_use_id: 'read', content: 'The note.' }] } },
-    { type: 'system', subtype: 'compact_boundary', uuid: 'compact', parentUuid: 'result', timestamp: testTime({ seconds: 3 }),
-      content: 'Conversation compacted', compactMetadata: { trigger: 'auto' } },
-    ...(after ? [{ type: 'assistant', uuid: 'after', parentUuid: 'compact', timestamp: testTime({ seconds: 4 }),
-      message: { content: [{ type: 'text', text: 'After compaction.' }] } }] : []),
-    { type: 'user', uuid: 'interrupt', parentUuid: after ? 'after' : 'compact', timestamp: testTime({ seconds: 5 }),
-      message: { content: [{ type: 'text', text: '[Request interrupted by user]' }] } },
-  ]));
-  expect(claude.error).toBeUndefined();
-  renderer.renderMessages(claude.messages, () => 'Welcome');
+  renderer.renderMessages(state.messages, () => 'Welcome');
   await Promise.resolve();
   expect(inspectInterruptedTurn(messagesEl, folded)).toEqual(liveResult);
 });

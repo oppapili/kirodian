@@ -2,7 +2,6 @@
 import '@/providers';
 
 import { deferred } from '@test/helpers/ChatInputHarness';
-import { claudeCatalogFixture } from '@test/helpers/claudeModels';
 import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { testDate } from '@test/helpers/testClock';
@@ -19,23 +18,39 @@ import type { ClaudianSettings, Conversation, ConversationMutablePatch, SessionM
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { SessionMessagingService } from '@/features/chat/session-messaging/SessionMessagingService';
 import { getSessionSettingsSnapshot } from '@/features/chat/sessions/sessionSettings';
+import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 
-const sonnet = 'claude-code/claude-sonnet-4-5';
-const haiku = 'claude-code/claude-haiku-4-5';
+// Selections carry the `kiro/` prefix; the backend receives the selection id (the kiro adapter decodes it on the wire).
+// Both models expose low/high effort.
+const sonnet = 'kiro/sonnet';
+const haiku = 'kiro/haiku';
+
+function buildKiroCatalog(settings: Record<string, unknown>): void {
+  updateCurrentKiroCatalog(settings, {
+    defaultModelId: null, fingerprint: 'test-fingerprint', refreshedAt: 0,
+    models: [
+      { rawId: 'sonnet', displayName: 'Sonnet', description: 'SDK model', supportsReasoning: true,
+        reasoningMetadataResolved: true, reasoningEfforts: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }] },
+      { rawId: 'haiku', displayName: 'Haiku', description: 'SDK model', supportsReasoning: true,
+        reasoningMetadataResolved: true, reasoningEfforts: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }] },
+    ],
+  });
+  updateKiroProviderSettings(settings, { enabled: true, visibleModels: ['sonnet', 'haiku'] });
+}
 
 function setup() {
   const app = new App();
   Object.assign(app.vault.adapter, { basePath: '/vault' });
   const backend = new FakeSideBackend();
   jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockReturnValue(backend);
-  ProviderWorkspaceRegistry.setServices('claude', {});
+  ProviderWorkspaceRegistry.setServices('kiro', {});
   const settings = {
     model: sonnet, permissionMode: 'normal', effortLevel: 'high', excludedTags: [],
-    lastSelectedChatModel: { providerId: 'claude', model: sonnet },
-    providerConfigs: { claude: claudeCatalogFixture(['claude-sonnet-4-5', 'claude-haiku-4-5'], ['low', 'high']) },
+    lastSelectedChatModel: { providerId: 'kiro', model: sonnet },
   } as unknown as ClaudianSettings;
+  buildKiroCatalog(settings as unknown as Record<string, unknown>);
   const records: Conversation[] = ['sender', 'recipient'].map(id => ({
-    id, sessionId: null, providerId: 'claude', selectedModel: sonnet, title: id, messages: [],
+    id, sessionId: null, providerId: 'kiro', selectedModel: sonnet, title: id, messages: [],
     createdAt: testDate().getTime(), lastActivityAt: testDate().getTime(),
   }));
   const stored = new Map<string, SessionMetadata>();
@@ -67,7 +82,7 @@ function setup() {
     commitSelection: (...args) => repository.updateSelectedModelIf(...args),
   });
   Object.assign(host, { bindSessionTools: (id: string) => service.bindSessionTools(id) });
-  const runtime = pool.ensure({ conversationId: 'recipient', providerId: 'claude', draftModel: null });
+  const runtime = pool.ensure({ conversationId: 'recipient', providerId: 'kiro', draftModel: null });
   getSessionSettingsSnapshot(runtime, host);
   const reasoningBefore = [...runtime.reasoningSelections];
   const send = (choice = { model: haiku, reasoning: 'low' }) => service.bindSessionTools('sender').port.send(
@@ -140,7 +155,7 @@ it('rejects reasoning validated against a model superseded by a competing select
 it('does not reject an admitted switch when its presentation refresh throws', async () => {
   const h = setup();
   h.refreshModelControls.mockImplementation(() => { throw new Error('View closed'); });
-  await expect(h.send()).resolves.toEqual({ sessionId: 'recipient', title: 'recipient', provider: 'claude', status: 'started' });
+  await expect(h.send()).resolves.toEqual({ sessionId: 'recipient', title: 'recipient', provider: 'kiro', status: 'started' });
   await waitFor(() => expect(h.backend.sessions[0]?.requests).toHaveLength(1));
   expect(h.backend.latest.requests[0].configuration).toMatchObject({ model: haiku, reasoning: 'low' });
   h.backend.latest.complete();
@@ -172,12 +187,12 @@ it('preserves a newer reasoning choice made while the model write is pending', a
   const write = h.pauseWrite();
   const sending = h.send().catch(error => error as unknown);
   await write.entered;
-  h.runtime.reasoningSelections.set(`claude:${haiku}`, 'high');
+  h.runtime.reasoningSelections.set(`kiro:${haiku}`, 'high');
   write.release();
   expect(await sending).toBeInstanceOf(Error);
   expect(h.repository.getSummary('recipient')?.selectedModel).toBe(sonnet);
   expect(h.stored.get('recipient')?.selectedModel).toBe(sonnet);
-  expect([...h.runtime.reasoningSelections]).toEqual([...h.reasoningBefore, [`claude:${haiku}`, 'high']]);
+  expect([...h.runtime.reasoningSelections]).toEqual([...h.reasoningBefore, [`kiro:${haiku}`, 'high']]);
   expect(h.backend.sessions).toHaveLength(0);
 });
 
@@ -186,8 +201,16 @@ it('revalidates reasoning capability after persistence and restores metadata if 
   const write = h.pauseWrite();
   const sending = h.send().catch(error => error as unknown);
   await write.entered;
-  const config = h.host.settings.providerConfigs.claude as ReturnType<typeof claudeCatalogFixture>;
-  config.discoveredModels[1].supportedEffortLevels = ['high'];
+  // Haiku loses its `low` effort mid-write, so the queued `reasoning: 'low'` switch fails revalidation after persistence.
+  updateCurrentKiroCatalog(h.host.settings as unknown as Record<string, unknown>, {
+    defaultModelId: null, fingerprint: 'test-fingerprint', refreshedAt: 0,
+    models: [
+      { rawId: 'sonnet', displayName: 'Sonnet', description: 'SDK model', supportsReasoning: true,
+        reasoningMetadataResolved: true, reasoningEfforts: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }] },
+      { rawId: 'haiku', displayName: 'Haiku', description: 'SDK model', supportsReasoning: true,
+        reasoningMetadataResolved: true, reasoningEfforts: [{ label: 'High', value: 'high' }] },
+    ],
+  });
   write.release();
   expect(await sending).toBeInstanceOf(Error);
   expect(h.repository.getSummary('recipient')?.selectedModel).toBe(sonnet);

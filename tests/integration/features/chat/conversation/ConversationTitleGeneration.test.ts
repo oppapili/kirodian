@@ -1,7 +1,6 @@
 import '@/providers';
 
 import { deferred } from '@test/helpers/ChatInputHarness';
-import { claudeCatalogFixture } from '@test/helpers/claudeModels';
 import { testDate } from '@test/helpers/testClock';
 
 import { ConversationRepository } from '@/app/conversations/ConversationRepository';
@@ -11,16 +10,27 @@ import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCo
 import type { TitleGenerationResult, TitleGenerationService } from '@/core/providers/types';
 import type { ClaudianSettings, Conversation } from '@/core/types';
 import { ConversationTitleGeneration } from '@/features/chat/conversation/ConversationTitleGeneration';
+import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 
 function createFixture(result: TitleGenerationResult = { success: true, title: 'Generated title' }) {
+  // Kiro resolves the title model through its own catalog plus visibleModels; the selection carries the `kiro/` prefix.
   const settings = {
     enableAutoTitleGeneration: true,
-    titleGenerationModel: 'haiku',
-    providerConfigs: { claude: claudeCatalogFixture(['haiku']) },
+    titleGenerationModel: 'kiro/haiku',
   } as unknown as ClaudianSettings;
+  updateCurrentKiroCatalog(settings as unknown as Record<string, unknown>, {
+    defaultModelId: null,
+    fingerprint: 'test-fingerprint',
+    refreshedAt: 0,
+    models: [{
+      rawId: 'haiku', displayName: 'Haiku', description: 'Title model',
+      reasoningEfforts: [], supportsReasoning: false,
+    }],
+  });
+  updateKiroProviderSettings(settings as unknown as Record<string, unknown>, { enabled: true, visibleModels: ['haiku'] });
   const at = testDate().getTime();
   const conversation: Conversation = {
-    id: 'conversation-1', providerId: 'claude', title: 'Original title', selectedModel: 'haiku',
+    id: 'conversation-1', providerId: 'kiro', title: 'Original title', selectedModel: 'kiro/haiku',
     createdAt: at, lastActivityAt: at, sessionId: 'native',
     messages: [{ id: 'user', role: 'user', content: 'Explain the note', timestamp: at }],
   };

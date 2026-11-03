@@ -59,7 +59,8 @@ function fixture() {
   repository.replaceAll([conversation]);
   const runtimeSettings = new RuntimeSettingsCoordinator({
     settings: new SettingsCoordinator(settings, async () => undefined),
-    conversations: repository, getSettings: () => settings, canCompleteInvalidations: () => false,
+    conversations: repository, executionLifecycle: new ProviderExecutionLifecycleRegistry(),
+    getSettings: () => settings, canCompleteInvalidations: () => false,
   });
   return { conversation, persistence, repository, runtimeSettings };
 }

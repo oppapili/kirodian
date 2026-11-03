@@ -2,7 +2,6 @@
 import '@/providers';
 
 import { deferred } from '@test/helpers/ChatInputHarness';
-import { claudeCatalogFixture } from '@test/helpers/claudeModels';
 import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { testDate } from '@test/helpers/testClock';
@@ -20,23 +19,37 @@ import type { ClaudianSettings, Conversation, ConversationMutablePatch } from '@
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { SessionMessagingService } from '@/features/chat/session-messaging/SessionMessagingService';
 import { getSessionSettingsSnapshot } from '@/features/chat/sessions/sessionSettings';
+import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 
 function setup() {
   const app = new App();
   Object.assign(app.vault.adapter, { basePath: '/vault' });
   const backend = new FakeSideBackend();
   jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockReturnValue(backend);
-  ProviderWorkspaceRegistry.setServices('claude', {});
-  // Sonnet has effort control; Haiku has none.
-  const catalog = claudeCatalogFixture(['claude-sonnet-4-5', 'claude-haiku-4-5'], ['low', 'high']);
-  delete (catalog.discoveredModels[1] as { supportedEffortLevels?: string[] }).supportedEffortLevels;
+  // Kiro's real capabilities set supportsTurnSteer=false; the session-message steer path gates on it,
+  // so enable only that flag over the real capabilities to exercise steering delivery.
+  const realCapabilities = ProviderRegistry.getCapabilities('kiro');
+  jest.spyOn(ProviderRegistry, 'getCapabilities').mockImplementation((providerId = 'kiro') =>
+    providerId === 'kiro' ? { ...realCapabilities, supportsTurnSteer: true } : realCapabilities);
+  ProviderWorkspaceRegistry.setServices('kiro', {});
+  // Selections carry the `kiro/` prefix; the backend receives the selection id. Sonnet has effort control; Haiku has none.
   const settings = {
-    model: 'claude-sonnet-4-5', permissionMode: 'normal', effortLevel: 'high', excludedTags: [],
-    lastSelectedChatModel: { providerId: 'claude', model: 'claude-sonnet-4-5' },
-    providerConfigs: { claude: catalog },
+    model: 'kiro/sonnet', permissionMode: 'normal', effortLevel: 'high', excludedTags: [],
+    lastSelectedChatModel: { providerId: 'kiro', model: 'kiro/sonnet' },
   } as unknown as ClaudianSettings;
+  updateCurrentKiroCatalog(settings as unknown as Record<string, unknown>, {
+    defaultModelId: null, fingerprint: 'test-fingerprint', refreshedAt: 0,
+    models: [
+      { rawId: 'sonnet', displayName: 'Sonnet', description: 'SDK model', supportsReasoning: true,
+        reasoningMetadataResolved: true, reasoningEfforts: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }] },
+      { rawId: 'haiku', displayName: 'Haiku', description: 'SDK model', supportsReasoning: false,
+        reasoningMetadataResolved: true, reasoningEfforts: [] },
+    ],
+  });
+  // getModelOptions reverses visibleModels, so list haiku first to surface sonnet ahead of haiku.
+  updateKiroProviderSettings(settings as unknown as Record<string, unknown>, { enabled: true, visibleModels: ['haiku', 'sonnet'] });
   const record = (id: string, activityOffset = 0): Conversation => ({
-    id, sessionId: null, providerId: 'claude', selectedModel: settings.model, title: id === 'sender' ? 'Research' : id,
+    id, sessionId: null, providerId: 'kiro', selectedModel: settings.model, title: id === 'sender' ? 'Research' : id,
     messages: [], createdAt: testDate().getTime(), lastActivityAt: testDate({ minutes: activityOffset }).getTime(),
   } as Conversation);
   // The recipient is the most recently active session; the caller is older.
@@ -94,16 +107,16 @@ const listArgs = (overrides: Partial<{ includeProviders: boolean; limit: number 
 it('lists recent sessions first without creating runtimes, omitting archived records and providers', async () => {
   const h = setup();
   expect(await h.binding.port.list(listArgs(), signal())).toEqual({ sessions: [
-    { sessionId: 'recipient', title: 'recipient', provider: 'claude', status: 'idle', active: false },
-    { sessionId: 'sender', title: 'Research', provider: 'claude', status: 'idle', active: true, self: true },
+    { sessionId: 'recipient', title: 'recipient', provider: 'kiro', status: 'idle', active: false },
+    { sessionId: 'sender', title: 'Research', provider: 'kiro', status: 'idle', active: true, self: true },
   ] });
   expect(await h.binding.port.list(listArgs({ limit: 1 }), signal())).toEqual({ sessions: [
-    { sessionId: 'recipient', title: 'recipient', provider: 'claude', status: 'idle', active: false },
+    { sessionId: 'recipient', title: 'recipient', provider: 'kiro', status: 'idle', active: false },
   ], truncated: true });
   // `self` follows the calling binding, independently of the user's active view.
   expect((await h.service.bindSessionTools('recipient').port.list(listArgs(), signal())).sessions).toEqual([
-    { sessionId: 'recipient', title: 'recipient', provider: 'claude', status: 'idle', active: false, self: true },
-    { sessionId: 'sender', title: 'Research', provider: 'claude', status: 'idle', active: true },
+    { sessionId: 'recipient', title: 'recipient', provider: 'kiro', status: 'idle', active: false, self: true },
+    { sessionId: 'sender', title: 'Research', provider: 'kiro', status: 'idle', active: true },
   ]);
   expect(h.pool.getAll()).toHaveLength(0);
   expect(h.backend.sessions).toHaveLength(0);
@@ -111,16 +124,16 @@ it('lists recent sessions first without creating runtimes, omitting archived rec
 
 it('lists enabled providers with available models, new-session defaults and reasoning, read fresh', async () => {
   const h = setup();
-  const sonnet = 'claude-code/claude-sonnet-4-5';
-  const haiku = 'claude-code/claude-haiku-4-5';
+  const sonnet = 'kiro/sonnet';
+  const haiku = 'kiro/haiku';
   const { providers } = await h.binding.port.list(listArgs({ includeProviders: true }), signal());
-  expect(providers).toEqual([{ provider: 'claude', default: true, models: [
+  expect(providers).toEqual([{ provider: 'kiro', default: true, models: [
     { id: sonnet, default: true, reasoning: { options: ['low', 'high'], default: 'high' } },
     { id: haiku },
   ] }]);
 
   // A later user choice of the future-tab model is reflected by the next call.
-  await h.host.mutateSettings(settings => { settings.lastSelectedChatModel = { providerId: 'claude', model: 'claude-haiku-4-5' }; });
+  await h.host.mutateSettings(settings => { settings.lastSelectedChatModel = { providerId: 'kiro', model: 'kiro/haiku' }; });
   const fresh = await h.binding.port.list(listArgs({ includeProviders: true }), signal());
   expect(fresh.providers?.[0]?.models).toEqual([
     { id: sonnet, reasoning: { options: ['low', 'high'], default: 'high' } },
@@ -132,7 +145,7 @@ it('lists enabled providers with available models, new-session defaults and reas
 it('delivers to a cold headless recipient with caller provenance and no composer capture', async () => {
   const h = setup();
   expect(await h.binding.port.send({ sessionId: 'recipient', text: 'Review this' }, signal()))
-    .toEqual({ sessionId: 'recipient', title: 'recipient', provider: 'claude', status: 'started' });
+    .toEqual({ sessionId: 'recipient', title: 'recipient', provider: 'kiro', status: 'started' });
   await waitFor(() => expect(h.backend.sessions[0]?.requests).toHaveLength(1));
   expect(decodeSessionMessage(requestText(h.backend.latest.requests[0]))).toEqual({ from: 'Research', sessionId: 'sender', text: 'Review this' });
   expect(h.backend.latest.config.sessionTools).toBeDefined();
@@ -144,7 +157,7 @@ it('delivers to a cold headless recipient with caller provenance and no composer
 
 it('keeps FIFO mailbox turns behind queued user input without consuming recovered input', async () => {
   const h = setup();
-  const runtime = h.pool.ensure({ conversationId: 'recipient', providerId: 'claude', draftModel: null });
+  const runtime = h.pool.ensure({ conversationId: 'recipient', providerId: 'kiro', draftModel: null });
   // Keep the real model present while checking its unsent draft.
   await runtime.withModel(async model => {
     const sending = model.inputController.sendMessage({ content: 'User first' });
@@ -181,8 +194,8 @@ it('reads stored transcripts by id, archived included, loading metadata the defe
   h.repository.replaceAll([...h.records.values()].filter(record => record.id !== 'archived'));
   const read = await h.binding.port.read({ sessionId: 'archived' }, signal());
   expect(read).toEqual({
-    sessionId: 'archived', title: 'archived', provider: 'claude', status: 'idle',
-    content: expect.stringContaining('ID: archived\nProvider: claude'), fromTurn: 1, toTurn: 1, totalTurns: 1,
+    sessionId: 'archived', title: 'archived', provider: 'kiro', status: 'idle',
+    content: expect.stringContaining('ID: archived\nProvider: kiro'), fromTurn: 1, toTurn: 1, totalTurns: 1,
   });
   expect(read.content).toContain('## T1 user\nq1\n\n## T1 assistant\na1');
   expect(await h.binding.port.read({ sessionId: 'archived', beforeTurn: 1 }, signal())).toMatchObject({ fromTurn: 0, toTurn: 0, totalTurns: 1 });
@@ -213,7 +226,7 @@ it('interrupts a running recipient, delivers the interrupting message next and k
   const native = h.backend.latest;
   expect(await h.binding.port.send({ sessionId: 'recipient', text: 'Later' }, signal())).toMatchObject({ status: 'queued' });
   expect(await h.binding.port.send({ sessionId: 'recipient', text: 'Do Y instead', mode: 'interrupt' }, signal()))
-    .toEqual({ sessionId: 'recipient', title: 'recipient', provider: 'claude', status: 'interrupted' });
+    .toEqual({ sessionId: 'recipient', title: 'recipient', provider: 'kiro', status: 'interrupted' });
   expect(native.cancelCalls).toBe(1);
   await waitFor(() => expect(native.requests).toHaveLength(2));
   expect(decodeSessionMessage(requestText(native.requests[1]))?.text).toBe('Do Y instead');
@@ -226,7 +239,7 @@ it('interrupts a running recipient, delivers the interrupting message next and k
 
 it('stops without a message, returning the user\'s queued input to the composer', async () => {
   const h = setup();
-  const runtime = h.pool.ensure({ conversationId: 'recipient', providerId: 'claude', draftModel: null });
+  const runtime = h.pool.ensure({ conversationId: 'recipient', providerId: 'kiro', draftModel: null });
   await runtime.withModel(async model => {
     const sending = model.inputController.sendMessage({ content: 'User task' });
     await waitFor(() => expect(h.backend.sessions[0]?.requests).toHaveLength(1));
@@ -251,7 +264,7 @@ it('steers into a running turn with a sender line, and queues when the recipient
   const steers: ProviderExecutionRequest[] = [];
   Object.assign(native, { steer: async (request: ProviderExecutionRequest) => { steers.push(request); return true; } });
   expect(await h.binding.port.send({ sessionId: 'recipient', text: 'Also check X', mode: 'steer' }, signal()))
-    .toEqual({ sessionId: 'recipient', title: 'recipient', provider: 'claude', status: 'steered' });
+    .toEqual({ sessionId: 'recipient', title: 'recipient', provider: 'kiro', status: 'steered' });
   expect(decodeSessionMessage(requestText(steers[0]))).toEqual({ from: 'Research', sessionId: 'sender', text: 'Also check X' });
   // The turn's own input echoes first; the next echo is the steer.
   native.emitOutput({ type: 'user_message_started', content: requestText(native.requests[0]), nativeUserMessageId: 'native-start' });
@@ -308,13 +321,13 @@ it.each(['sender', 'archived', 'missing'])('rejects unavailable recipient %s wit
 });
 
 it.each([
-  ['an unknown provider', { provider: 'nope', model: 'm' }, /^Unknown or disabled provider "nope"\. Available: claude$/],
+  ['an unknown provider', { provider: 'nope', model: 'm' }, /^Unknown or disabled provider "nope"\. Available: kiro$/],
   ['an unavailable model', { model: 'unavailable' },
-    /^Unknown model "unavailable" for claude\. Available: claude-code\/claude-sonnet-4-5, claude-code\/claude-haiku-4-5$/],
-  ['an unsupported reasoning level', { model: 'claude-sonnet-4-5', reasoning: 'max' },
-    /^Unknown reasoning "max" for claude model claude-code\/claude-sonnet-4-5\. Available: low, high$/],
-  ['reasoning for a model without effort control', { model: 'claude-haiku-4-5', reasoning: 'low' },
-    /^Model claude-code\/claude-haiku-4-5 for claude has no reasoning control\.$/],
+    /^Unknown model "unavailable" for kiro\. Available: kiro\/sonnet, kiro\/haiku$/],
+  ['an unsupported reasoning level', { model: 'kiro/sonnet', reasoning: 'max' },
+    /^Unknown reasoning "max" for kiro model kiro\/sonnet\. Available: low, high$/],
+  ['reasoning for a model without effort control', { model: 'kiro/haiku', reasoning: 'low' },
+    /^Model kiro\/haiku for kiro has no reasoning control\.$/],
 ])('rejects %s before creating a shell, listing the valid options', async (_label, choice, error) => {
   const h = setup();
   await expect(h.binding.port.send({ text: 'Hello', ...choice }, signal())).rejects.toThrow(error);
@@ -323,11 +336,11 @@ it.each([
 
 it('applies an explicit model and reasoning to the new session before its first turn', async () => {
   const h = setup();
-  expect(await h.binding.port.send({ text: 'New task', provider: 'claude', model: 'claude-sonnet-4-5', reasoning: 'low' }, signal()))
-    .toEqual({ sessionId: 'created', title: 'created', provider: 'claude', status: 'started' });
-  expect(h.host.createConversation).toHaveBeenCalledWith({ providerId: 'claude', selectedModel: 'claude-code/claude-sonnet-4-5' });
+  expect(await h.binding.port.send({ text: 'New task', provider: 'kiro', model: 'kiro/sonnet', reasoning: 'low' }, signal()))
+    .toEqual({ sessionId: 'created', title: 'created', provider: 'kiro', status: 'started' });
+  expect(h.host.createConversation).toHaveBeenCalledWith({ providerId: 'kiro', selectedModel: 'kiro/sonnet' });
   await waitFor(() => expect(h.backend.sessions[0]?.requests).toHaveLength(1));
-  expect(modelChoice(h.backend.latest.requests[0])).toEqual({ model: 'claude-code/claude-sonnet-4-5', reasoning: 'low' });
+  expect(modelChoice(h.backend.latest.requests[0])).toEqual({ model: 'kiro/sonnet', reasoning: 'low' });
   // The session-owned choice does not rewrite the user's saved effort.
   expect(h.host.settings.effortLevel).toBe('high');
   h.backend.latest.complete();
@@ -394,12 +407,12 @@ it('defers a message when native background work starts during preparation, then
 it('creates a headless session using the selected default without mutating the future-tab seed', async () => {
   const h = setup();
   const seed = structuredClone(h.host.settings.lastSelectedChatModel);
-  expect(await h.binding.port.send({ text: 'New task' }, signal())).toEqual({ sessionId: 'created', title: 'created', provider: 'claude', status: 'started' });
-  expect(h.host.createConversation).toHaveBeenCalledWith({ providerId: 'claude', selectedModel: 'claude-code/claude-sonnet-4-5' });
+  expect(await h.binding.port.send({ text: 'New task' }, signal())).toEqual({ sessionId: 'created', title: 'created', provider: 'kiro', status: 'started' });
+  expect(h.host.createConversation).toHaveBeenCalledWith({ providerId: 'kiro', selectedModel: 'kiro/sonnet' });
   expect(h.host.settings.lastSelectedChatModel).toEqual(seed);
   expect(h.pool.getAttachment('created')).toBeNull();
   await waitFor(() => expect(h.backend.sessions[0]?.requests).toHaveLength(1));
-  expect(modelChoice(h.backend.latest.requests[0])).toEqual({ model: 'claude-code/claude-sonnet-4-5', reasoning: 'high' });
+  expect(modelChoice(h.backend.latest.requests[0])).toEqual({ model: 'kiro/sonnet', reasoning: 'high' });
   h.backend.latest.complete();
   await h.pool.get('created')!.turns.drain();
 });
@@ -413,7 +426,7 @@ it('waits for a published first-turn shell to adopt its original draft runtime',
     h.records.set(created.id, created);
     return completion.promise;
   });
-  const { attachment } = h.pool.acquire({ conversationId: null, providerId: 'claude', draftModel: 'claude-sonnet-4-5' }, { reveal() {} });
+  const { attachment } = h.pool.acquire({ conversationId: null, providerId: 'kiro', draftModel: 'kiro/sonnet' }, { reveal() {} });
   const original = attachment.runtime;
   const first = original.withModel(model => model.inputController.sendMessage({ content: 'Original user task' }));
   const firstResult = first.catch(error => error as unknown);
@@ -439,18 +452,18 @@ it('waits for a published first-turn shell to adopt its original draft runtime',
   await original.turns.drain();
 });
 
-const sonnetId = 'claude-code/claude-sonnet-4-5';
-const haikuId = 'claude-code/claude-haiku-4-5';
+const sonnetId = 'kiro/sonnet';
+const haikuId = 'kiro/haiku';
 
 it('switches an existing session\'s reasoning for the delivered turn and later user turns, not the running one', async () => {
   const h = setup();
-  const runtime = h.pool.ensure({ conversationId: 'recipient', providerId: 'claude', draftModel: null });
+  const runtime = h.pool.ensure({ conversationId: 'recipient', providerId: 'kiro', draftModel: null });
   await runtime.withModel(async model => {
     const running = model.inputController.sendMessage({ content: 'User first' });
     await waitFor(() => expect(h.backend.sessions[0]?.requests).toHaveLength(1));
     expect(await h.binding.port.send({ sessionId: 'recipient', text: 'Go faster', reasoning: 'low' }, signal()))
-      .toEqual({ sessionId: 'recipient', title: 'recipient', provider: 'claude', status: 'queued' });
-    expect(h.refreshModelControls).toHaveBeenCalledWith('claude');
+      .toEqual({ sessionId: 'recipient', title: 'recipient', provider: 'kiro', status: 'queued' });
+    expect(h.refreshModelControls).toHaveBeenCalledWith('kiro');
     h.backend.latest.complete();
     await running;
     await waitFor(() => expect(h.backend.latest.requests).toHaveLength(2));
@@ -472,8 +485,8 @@ it('switches an existing session\'s reasoning for the delivered turn and later u
 it('switches a history-only session\'s model without opening it in a tab', async () => {
   const h = setup();
   expect(h.pool.get('recipient')).toBeNull();
-  expect(await h.binding.port.send({ sessionId: 'recipient', text: 'Use Haiku', model: 'claude-haiku-4-5' }, signal()))
-    .toEqual({ sessionId: 'recipient', title: 'recipient', provider: 'claude', status: 'started' });
+  expect(await h.binding.port.send({ sessionId: 'recipient', text: 'Use Haiku', model: 'kiro/haiku' }, signal()))
+    .toEqual({ sessionId: 'recipient', title: 'recipient', provider: 'kiro', status: 'started' });
   expect(h.host.getConversationSummary('recipient')!.selectedModel).toBe(haikuId);
   expect(h.pool.getAttachment('recipient')).toBeNull();
   await waitFor(() => expect(h.backend.sessions[0]?.requests).toHaveLength(1));
@@ -484,19 +497,19 @@ it('switches a history-only session\'s model without opening it in a tab', async
 
 it.each([
   ['an unavailable model', { sessionId: 'recipient', model: 'unavailable' },
-    /^Unknown model "unavailable" for claude\. Available: claude-code\/claude-sonnet-4-5, claude-code\/claude-haiku-4-5$/],
+    /^Unknown model "unavailable" for kiro\. Available: kiro\/sonnet, kiro\/haiku$/],
   ['an unsupported reasoning level', { sessionId: 'recipient', reasoning: 'max' },
-    /^Unknown reasoning "max" for claude model claude-code\/claude-sonnet-4-5\. Available: low, high$/],
-  ['reasoning for the switched model without effort control', { sessionId: 'recipient', model: 'claude-haiku-4-5', reasoning: 'low' },
-    /^Model claude-code\/claude-haiku-4-5 for claude has no reasoning control\.$/],
-  ['a self-send', { sessionId: 'sender', model: 'claude-haiku-4-5', reasoning: 'low' }, /cannot send a message to itself/],
-  ['an archived destination', { sessionId: 'archived', model: 'claude-haiku-4-5' }, /does not exist or is archived/],
+    /^Unknown reasoning "max" for kiro model kiro\/sonnet\. Available: low, high$/],
+  ['reasoning for the switched model without effort control', { sessionId: 'recipient', model: 'kiro/haiku', reasoning: 'low' },
+    /^Model kiro\/haiku for kiro has no reasoning control\.$/],
+  ['a self-send', { sessionId: 'sender', model: 'kiro/haiku', reasoning: 'low' }, /cannot send a message to itself/],
+  ['an archived destination', { sessionId: 'archived', model: 'kiro/haiku' }, /does not exist or is archived/],
 ])('rejects an existing-session switch with %s and changes nothing', async (_label, choice, error) => {
   const h = setup();
-  const runtime = h.pool.ensure({ conversationId: choice.sessionId, providerId: 'claude', draftModel: null });
+  const runtime = h.pool.ensure({ conversationId: choice.sessionId, providerId: 'kiro', draftModel: null });
   const before = getSessionSettingsSnapshot(runtime, h.host);
   await expect(h.binding.port.send({ text: 'Hello', ...choice }, signal())).rejects.toThrow(error);
-  expect(h.records.get(choice.sessionId)!.selectedModel).toBe('claude-sonnet-4-5');
+  expect(h.records.get(choice.sessionId)!.selectedModel).toBe('kiro/sonnet');
   expect(h.saves).toEqual([]);
   const after = getSessionSettingsSnapshot(runtime, h.host);
   expect({ model: after.model, reasoning: after.reasoning }).toEqual({ model: before.model, reasoning: before.reasoning });
@@ -508,7 +521,7 @@ it('applies no switch when the call is cancelled before admission', async () => 
   const h = setup();
   const cancelled = new AbortController();
   cancelled.abort();
-  await expect(h.binding.port.send({ sessionId: 'recipient', text: 'Hello', model: 'claude-haiku-4-5' }, cancelled.signal)).rejects.toThrow();
-  expect(h.records.get('recipient')!.selectedModel).toBe('claude-sonnet-4-5');
+  await expect(h.binding.port.send({ sessionId: 'recipient', text: 'Hello', model: 'kiro/haiku' }, cancelled.signal)).rejects.toThrow();
+  expect(h.records.get('recipient')!.selectedModel).toBe('kiro/sonnet');
   expect(h.pool.get('recipient')).toBeNull();
 });

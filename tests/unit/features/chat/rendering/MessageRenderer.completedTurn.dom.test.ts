@@ -142,18 +142,33 @@ it('keeps live output in place until completion, then preserves the same content
   renderer.dispose();
 });
 
-it('leaves interrupted and unsuccessful output expanded', () => {
-  for (const interrupted of [true, false]) {
-    const { renderer } = setup();
-    const msg: ChatMessage = { id: `failed-${interrupted}`, role: 'assistant', content: 'Partial', timestamp: 4,
-      isInterrupt: interrupted, contentBlocks: [{ type: 'text', content: 'Partial' }] };
-    const el = renderer.addMessage(msg);
-    el.querySelector('.claudian-message-content')!.createDiv({ cls: 'claudian-text-block', text: 'Partial' });
-    renderer.finalizeResponse(msg, [msg], interrupted);
-    expect(within(el).queryByRole('button', { name: /Worked/ })).toBeNull();
-    expect(within(el).getByRole('button', { name: 'Copy message' })).toBeDefined();
-    renderer.dispose();
-  }
+it('leaves unsuccessful output expanded but folds an interrupted turn under its indicator', () => {
+  // Unsuccessful (non-interrupt) output stays expanded with a copy action; a
+  // genuinely interrupted turn has no answer, so it folds whole under the
+  // "Interrupted" disclosure and offers no copy toolbar button.
+  const { renderer: failedRenderer } = setup();
+  const failed: ChatMessage = { id: 'failed', role: 'assistant', content: 'Partial', timestamp: 4,
+    contentBlocks: [{ type: 'text', content: 'Partial' }] };
+  const failedEl = failedRenderer.addMessage(failed);
+  failedEl.querySelector('.claudian-message-content')!.createDiv({ cls: 'claudian-text-block', text: 'Partial' });
+  failedRenderer.finalizeResponse(failed, [failed], false);
+  expect(within(failedEl).queryByRole('button', { name: /^(Worked|Interrupted)/ })).toBeNull();
+  expect(within(failedEl).getByText('Partial').closest('[hidden]')).toBeNull();
+  expect(within(failedEl).getByRole('button', { name: 'Copy message' })).toBeDefined();
+  failedRenderer.dispose();
+
+  const { renderer: interruptedRenderer } = setup();
+  const interrupted: ChatMessage = { id: 'interrupted', role: 'assistant', content: 'Partial', timestamp: 4,
+    isInterrupt: true, contentBlocks: [{ type: 'text', content: 'Partial' }] };
+  const interruptedEl = interruptedRenderer.addMessage(interrupted);
+  interruptedEl.querySelector('.claudian-message-content')!.createDiv({ cls: 'claudian-text-block', text: 'Partial' });
+  interruptedRenderer.finalizeResponse(interrupted, [interrupted], true);
+  expect(within(interruptedEl).queryByRole('button', { name: /^Worked/ })).toBeNull();
+  const header = within(interruptedEl).getByRole('button', { name: /^Interrupted/ });
+  expect(within(interruptedEl).getByText('Partial').closest('[hidden]'))
+    .toBe(document.getElementById(header.getAttribute('aria-controls')!));
+  expect(within(interruptedEl).queryByRole('button', { name: 'Copy message' })).toBeNull();
+  interruptedRenderer.dispose();
 });
 
 it('copies retired interruption markup as ordinary message text', async () => {
@@ -208,7 +223,10 @@ it.each([true, false])('keeps the final answer visible with fallback tools (cont
   renderer.dispose();
 });
 
-it('keeps Claude replay output expanded when a user-role interrupt follows it', () => {
+it('folds a replayed reply and the user-role interrupt marker following it under one disclosure', () => {
+  // Claude JSONL replay records an interrupt as a user-role bracket marker after
+  // the partial reply. The reply ends interrupted, so its whole turn folds under
+  // the "Interrupted" disclosure headed by the marker, not a "Worked" header.
   const { renderer, messagesEl } = setup();
   renderer.renderMessages([
     messages[0],
@@ -217,8 +235,12 @@ it('keeps Claude replay output expanded when a user-role interrupt follows it', 
     { id: 'interrupt', role: 'user', content: '[Request interrupted by user]', timestamp: 4, isInterrupt: true },
   ], () => 'Hello');
   expect(within(messagesEl).queryByRole('button', { name: /^Worked/ })).toBeNull();
-  expect(within(messagesEl).getByText('Partial answer').closest('[hidden]')).toBeNull();
-  expect(within(messagesEl).getByText('Interrupted')).toBeDefined();
+  const header = within(messagesEl).getByRole('button', { name: 'Interrupted · What should Kirodian do instead?' });
+  const history = document.getElementById(header.getAttribute('aria-controls')!)!;
+  expect(within(messagesEl).getByText('Partial answer').closest('[hidden]')).toBe(history);
+  // The marker's indicator heads the disclosure and is not repeated inside its body.
+  expect(messagesEl.querySelectorAll('.claudian-interrupted')).toHaveLength(1);
+  expect(header.querySelector('.claudian-interrupted')?.textContent).toBe('Interrupted');
   renderer.dispose();
 });
 

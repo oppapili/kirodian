@@ -402,7 +402,9 @@ it('localizes task progress and patch status through their real card consumers',
 
 it.each([
   ['Bash', 'Bash: 命令'], ['Glob', 'Glob: 文件'], ['Grep', 'Grep: 匹配模式'],
-  ['Skill', 'Skill: 技能'], ['ToolSearch', 'ToolSearch: 工具'],
+  // The skill badge stays the untranslated `skill` token across locales, so its
+  // placeholder reads literally even under zh-CN (settings.agentSkills.skillBadge).
+  ['Skill', 'Skill: skill'], ['ToolSearch', 'ToolSearch: 工具'],
 ])('localizes the %s placeholder through its disclosure', (name, label) => {
   setLocale('zh-CN');
   const block = renderToolCall(document.body.createDiv(), { id: 'partial', name, status: 'running', input: {} });

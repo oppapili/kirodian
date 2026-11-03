@@ -371,10 +371,10 @@ describe('AgentSkillRepository', () => {
     it('rejects a closing delimiter with trailing text in strict and lenient reads', async () => {
       const source = '---\nname: example\ndescription: Example\n---suffix\nPrompt';
       addSkill('example', source);
-      dataAdapter.addFolder('.claude');
-      dataAdapter.addFolder(CLAUDE_SKILLS_ROOT);
-      dataAdapter.addFolder(`${CLAUDE_SKILLS_ROOT}/example`);
-      dataAdapter.addFile(`${CLAUDE_SKILLS_ROOT}/example/SKILL.md`, source);
+      dataAdapter.addFolder('.kiro');
+      dataAdapter.addFolder(KIRO_WORKSPACE_SKILLS_ROOT);
+      dataAdapter.addFolder(`${KIRO_WORKSPACE_SKILLS_ROOT}/example`);
+      dataAdapter.addFile(`${KIRO_WORKSPACE_SKILLS_ROOT}/example/SKILL.md`, source);
 
       const strict = await repository.list();
       expect(strict.skills).toEqual([]);
@@ -382,15 +382,15 @@ describe('AgentSkillRepository', () => {
         [`${AGENT_SKILLS_ROOT}/example`, undefined],
       ]);
 
-      const lenient = await claudeRepository().list();
+      const lenient = await configuredRootRepository().list();
       expect(lenient.skills).toEqual([]);
       expect(lenient.diagnostics.map(item => [item.directoryPath, item.repairName])).toEqual([
-        [`${CLAUDE_SKILLS_ROOT}/example`, undefined],
+        [`${KIRO_WORKSPACE_SKILLS_ROOT}/example`, undefined],
       ]);
 
       await expect(repository.readForRepair('example')).rejects.toThrow('cannot be repaired');
       expect(await dataAdapter.read(`${AGENT_SKILLS_ROOT}/example/SKILL.md`)).toBe(source);
-      expect(await dataAdapter.read(`${CLAUDE_SKILLS_ROOT}/example/SKILL.md`)).toBe(source);
+      expect(await dataAdapter.read(`${KIRO_WORKSPACE_SKILLS_ROOT}/example/SKILL.md`)).toBe(source);
     });
 
     it('accepts a standalone closing delimiter after the same metadata', async () => {
@@ -417,10 +417,10 @@ describe('AgentSkillRepository', () => {
       ));
       try {
         addSkill('example', source);
-        dataAdapter.addFolder('.claude');
-        dataAdapter.addFolder(CLAUDE_SKILLS_ROOT);
-        dataAdapter.addFolder(`${CLAUDE_SKILLS_ROOT}/example`);
-        dataAdapter.addFile(`${CLAUDE_SKILLS_ROOT}/example/SKILL.md`, source);
+        dataAdapter.addFolder('.kiro');
+        dataAdapter.addFolder(KIRO_WORKSPACE_SKILLS_ROOT);
+        dataAdapter.addFolder(`${KIRO_WORKSPACE_SKILLS_ROOT}/example`);
+        dataAdapter.addFile(`${KIRO_WORKSPACE_SKILLS_ROOT}/example/SKILL.md`, source);
 
         const strict = await repository.list();
         expect(strict.skills).toEqual([]);
@@ -429,17 +429,17 @@ describe('AgentSkillRepository', () => {
           message: 'SKILL.md frontmatter must be a YAML mapping',
         }]);
 
-        const lenient = await claudeRepository().list();
+        const lenient = await configuredRootRepository().list();
         expect(lenient.skills).toEqual([]);
         expect(lenient.diagnostics).toEqual([{
-          directoryPath: `${CLAUDE_SKILLS_ROOT}/example`,
+          directoryPath: `${KIRO_WORKSPACE_SKILLS_ROOT}/example`,
           message: 'SKILL.md frontmatter must be a YAML mapping',
         }]);
 
         await expect(repository.readForRepair('example')).rejects.toThrow('cannot be repaired');
-        await expect(claudeRepository().readForRepair('example')).rejects.toThrow('cannot be repaired');
+        await expect(configuredRootRepository().readForRepair('example')).rejects.toThrow('cannot be repaired');
         expect(await dataAdapter.read(`${AGENT_SKILLS_ROOT}/example/SKILL.md`)).toBe(source);
-        expect(await dataAdapter.read(`${CLAUDE_SKILLS_ROOT}/example/SKILL.md`)).toBe(source);
+        expect(await dataAdapter.read(`${KIRO_WORKSPACE_SKILLS_ROOT}/example/SKILL.md`)).toBe(source);
       } finally {
         parseYamlSpy.mockRestore();
       }
@@ -475,17 +475,17 @@ describe('AgentSkillRepository', () => {
       strictDiagnostics,
     ) => {
       addSkill('example', source);
-      dataAdapter.addFolder('.claude');
-      dataAdapter.addFolder(CLAUDE_SKILLS_ROOT);
-      dataAdapter.addFolder(`${CLAUDE_SKILLS_ROOT}/example`);
-      dataAdapter.addFile(`${CLAUDE_SKILLS_ROOT}/example/SKILL.md`, source);
+      dataAdapter.addFolder('.kiro');
+      dataAdapter.addFolder(KIRO_WORKSPACE_SKILLS_ROOT);
+      dataAdapter.addFolder(`${KIRO_WORKSPACE_SKILLS_ROOT}/example`);
+      dataAdapter.addFile(`${KIRO_WORKSPACE_SKILLS_ROOT}/example/SKILL.md`, source);
 
       const strict = await repository.list();
       expect(strict.skills.map(skill => [skill.name, skill.description, skill.instructions])).toEqual(strictSkills);
       expect(strict.diagnostics.map(item => [item.directoryPath, item.message, item.repairName]))
         .toEqual(strictDiagnostics);
 
-      const lenient = await claudeRepository().list();
+      const lenient = await configuredRootRepository().list();
       expect(lenient.skills.map(skill => [skill.name, skill.description, skill.instructions])).toEqual([
         ['example', 'Example', instructions],
       ]);
@@ -496,7 +496,7 @@ describe('AgentSkillRepository', () => {
       });
 
       expect(await dataAdapter.read(`${AGENT_SKILLS_ROOT}/example/SKILL.md`)).toBe(source);
-      expect(await dataAdapter.read(`${CLAUDE_SKILLS_ROOT}/example/SKILL.md`)).toBe(source);
+      expect(await dataAdapter.read(`${KIRO_WORKSPACE_SKILLS_ROOT}/example/SKILL.md`)).toBe(source);
     });
   });
   describe('repairing packages that need attention', () => {

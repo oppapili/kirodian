@@ -4,7 +4,6 @@ import '@/providers';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { claudeCatalogFixture } from '@test/helpers/claudeModels';
 import { createClaudianView } from '@test/helpers/features/chat/ClaudianViewHarness';
 import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
@@ -21,6 +20,7 @@ import { PromptHistoryNavigation } from '@/features/chat/composer/PromptHistoryN
 import { activateTab, destroyTab } from '@/features/chat/tabs/TabLifecycle';
 import { TabManager } from '@/features/chat/tabs/TabManager';
 import { createTabRuntime } from '@/features/chat/tabs/TabRuntimeFactory';
+import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
 const originalResizeObserver = globalThis.ResizeObserver;
@@ -60,14 +60,30 @@ async function createView(provisional = false, options: { managed?: boolean; dra
   Object.assign(app, { metadataCache: { on: () => ({}), offref() {} } });
   const lifecycle = new ProviderExecutionLifecycleRegistry();
   const settings = {
-    model: 'claude-sonnet-4-5', effortLevel: 'high', permissionMode: 'manual',
+    model: 'kiro/claude-sonnet-4-5', effortLevel: 'high', permissionMode: 'manual',
     enableAutoTitleGeneration: false, excludedTags: [], mediaFolder: '', systemPrompt: '', userName: '',
-    providerConfigs: { claude: {
-      ...claudeCatalogFixture(['claude-sonnet-4-5'], ['low', 'high']), promptSuggestions: true,
-    } },
   } as unknown as ClaudianSettings;
+  updateCurrentKiroCatalog(settings as unknown as Record<string, unknown>, {
+    defaultModelId: null,
+    fingerprint: 'test-fingerprint',
+    refreshedAt: 0,
+    models: [{
+      rawId: 'claude-sonnet-4-5',
+      displayName: 'claude-sonnet-4-5',
+      description: 'SDK model',
+      reasoningEfforts: [
+        { label: 'Low', value: 'low' },
+        { label: 'High', value: 'high' },
+      ],
+      supportsReasoning: true,
+    }],
+  });
+  updateKiroProviderSettings(settings as unknown as Record<string, unknown>, {
+    enabled: true,
+    visibleModels: ['claude-sonnet-4-5'],
+  });
   const conversation = {
-    id: 'conversation-1', providerId: 'claude', selectedModel: 'claude-sonnet-4-5',
+    id: 'conversation-1', providerId: 'kiro', selectedModel: 'kiro/claude-sonnet-4-5',
     sessionId: 'main-session', messages: [], title: 'Existing conversation',
     createdAt: testDate().getTime(), lastActivityAt: testDate().getTime(),
   } as unknown as Conversation;
@@ -109,7 +125,7 @@ async function createView(provisional = false, options: { managed?: boolean; dra
   });
   tab.hydrationState = 'ready';
   if (!options.draft) {
-    await tab.executionCoordinator.bindConversation({ conversationId: conversation.id, providerId: 'claude' });
+    await tab.executionCoordinator.bindConversation({ conversationId: conversation.id, providerId: 'kiro' });
     await tab.executionCoordinator.prepare();
   }
   jest.spyOn(tab.dom.messagesEl, 'getClientRects').mockImplementation(() =>
@@ -493,8 +509,8 @@ it('keeps IME suppression until compositionend despite input and identity resets
     view.tab.dom.inputEl.focus();
     view.tab.dom.inputEl.value = '';
     fireEvent.input(view.tab.dom.inputEl);
-    view.tab.session.runtime.selectDraft('claude', 'different-draft-model');
-    view.tab.session.runtime.selectDraft('claude', 'claude-sonnet-4-5');
+    view.tab.session.runtime.selectDraft('kiro', 'kiro/different-draft-model');
+    view.tab.session.runtime.selectDraft('kiro', 'kiro/claude-sonnet-4-5');
     expect(key(view, 'ArrowUp', { isComposing: false }).inputPrevented).toBe(false);
     expect(view.tab.dom.inputEl.value).toBe('');
     fireEvent.compositionEnd(textbox(view));
@@ -607,34 +623,15 @@ it('preserves real prediction acceptance priority and refreshes the ghost after 
   } finally { await view.dispose(); }
 });
 
-it('never recalls parent or child text in Side and resets history on a real Main-Side-Main round trip', async () => {
-  const view = await createView();
-  try {
-    await completeTurn(view, 'Parent prompt');
-    const parent = view.backend.latest;
-    await completeTurn(view, '/side Independent child prompt');
-    expect(view.backend.sessions).toHaveLength(2);
-    expect(parent.requests).toHaveLength(1);
-    expect(view.tab.controllers.sideChatController.destination).toBe('side');
-    expect(key(view, 'ArrowUp').inputPrevented).toBe(false);
-    key(view, 'Escape');
-    view.tab.dom.inputEl.focus();
-    expect(view.tab.dom.inputEl.value).toBe('');
-    view.tab.controllers.sideChatController.collapse();
-    key(view, 'ArrowUp');
-    expect(view.tab.dom.inputEl.value).toBe('Parent prompt');
-    view.tab.controllers.sideChatController.expand();
-    view.tab.controllers.sideChatController.collapse();
-    key(view, 'Escape');
-    view.tab.dom.inputEl.focus();
-    expect(view.tab.dom.inputEl.value).toBe('Parent prompt');
-    expect(key(view, 'ArrowDown').inputPrevented).toBe(false);
-    expect(view.tab.dom.inputEl.value).toBe('Parent prompt');
-    view.tab.dom.inputEl.value = ''; fireEvent.input(view.tab.dom.inputEl);
-    key(view, 'ArrowUp');
-    expect(view.tab.dom.inputEl.value).toBe('Parent prompt');
-  } finally { await view.dispose(); }
-});
+// Removed: a real Main-Side-Main round trip requires an actually-started side chat, which forks
+// from the parent. Kiro has `supportsFork: false`, so `captureLatestCompletedForkSource` returns
+// `unsupported-provider` and the side destination is never reached through the real `createView`
+// (unlike the side-chat suites, which inject `supportsFork: true` via SideChatDOMHarness). The
+// behavior is unreachable for the only remaining provider. Fork-based side routing/recall stays
+// covered by tests/integration/features/chat/side-chat/*, and PromptHistoryNavigation's own
+// destination-reset recall is still exercised by the preview round-trip ("updates the actual
+// Side draft preview on recall and draft restoration without starting a child") and the identity
+// round-trip ("resets on a conversation identity round trip without intervening keys").
 
 it('does not recall when an earlier capturing listener consumed the key', async () => {
   const view = await createView();
