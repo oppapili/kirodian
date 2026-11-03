@@ -248,6 +248,7 @@ describe('ClaudianPlugin', () => {
         }),
         setActiveLeaf: jest.fn(),
         revealLeaf: jest.fn(),
+        trigger: jest.fn(),
       },
     };
 
@@ -1472,7 +1473,7 @@ describe('ClaudianPlugin', () => {
 
       expect(plugin.addCommand).toHaveBeenCalledWith({
         id: 'open-view',
-        name: 'Open chat view',
+        name: 'Toggle chat view',
         callback: expect.any(Function),
       });
       const commandConfig = getRegisteredCommand('open-view');

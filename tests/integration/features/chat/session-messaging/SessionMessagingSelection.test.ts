@@ -67,6 +67,7 @@ function setup() {
   const host = {
     app, settings, providerHost: { app, settings, executionLifecycleRegistry: new ProviderExecutionLifecycleRegistry() },
     getCommittedSettings: () => settings, getActiveEnvironmentVariables: () => '',
+    projects: { get: () => null },
     getConversationSummary: (id: string) => repository.getSummary(id),
     getConversationSync: (id: string) => repository.getSync(id),
     getCachedConversation: (id: string) => repository.getSync(id),

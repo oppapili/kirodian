@@ -273,7 +273,7 @@ export function renderProviderModelPicker(
         type: 'text',
       });
       aliasInput.placeholder = defaultLabel;
-      aliasInput.value = aliasInput.defaultValue = state.aliases[model.id] ?? '';
+      aliasInput.value = aliasInput.defaultValue = Object.hasOwn(state.aliases, model.id) ? state.aliases[model.id] : '';
       aliasInput.setAttribute('aria-label', t('settings.customModelAliases.ariaLabel', { model: defaultLabel }));
       aliasInput.setAttribute('aria-description', t('settings.customModelAliases.ariaDescription'));
       aliasInput.addEventListener('blur', () => {
@@ -285,7 +285,8 @@ export function renderProviderModelPicker(
           aliasInput.blur();
         } else if (event.key === 'Escape') {
           event.preventDefault();
-          aliasInput.value = options.getState().aliases[model.id] ?? '';
+          const aliases = options.getState().aliases;
+          aliasInput.value = Object.hasOwn(aliases, model.id) ? aliases[model.id] : '';
           aliasInput.blur();
         }
       });
@@ -388,6 +389,9 @@ export function renderProviderModelPicker(
   };
 
   const renderList = (): void => {
+    const active = listEl.ownerDocument.activeElement;
+    const focusedModelId = active && listEl.contains(active) && active.matches('input[type="checkbox"]')
+      ? (active as HTMLInputElement).value : null;
     listEl.empty();
     const state = options.getState();
     const selectedIds = new Set(state.selectedIds);
@@ -416,6 +420,7 @@ export function renderProviderModelPicker(
 
       const checkboxEl = rowEl.createEl('input', { type: 'checkbox' });
       checkboxEl.checked = isSelected;
+      checkboxEl.value = model.id;
       checkboxEl.addEventListener('change', () => {
         void persistSelection({ type: 'set', modelId: model.id, selected: checkboxEl.checked });
       });
@@ -448,6 +453,10 @@ export function renderProviderModelPicker(
           text: model.description,
         });
       }
+    }
+    if (focusedModelId !== null) {
+      [...listEl.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]
+        .find(checkbox => checkbox.value === focusedModelId)?.focus({ preventScroll: true });
     }
   };
 

@@ -31,7 +31,7 @@ import { StreamController } from '@/features/chat/turns/StreamController';
 import type { ComposerInputElement } from '@/shared/composer-dropdown/types';
 import { getVaultPath } from '@/utils/path';
 
-export type SessionChange = 'streaming' | 'rewinding' | 'attention' | 'conversation' | 'identity' | 'usage' | 'scroll' | 'work' | 'commands' | 'settings' | 'destination';
+export type SessionChange = 'streaming' | 'rewinding' | 'attention' | 'conversation' | 'identity' | 'usage' | 'scroll' | 'work' | 'commands' | 'settings' | 'destination' | 'project';
 
 /** The current view only. No execution dependency may retain an earlier instance. */
 export interface SessionPresentation {
@@ -165,6 +165,8 @@ export class SessionModel {
       onConversationHydrated: () => { this.hydrationState = 'ready'; },
       onPersistenceChanged: () => session.notifyChanged(),
       onBranchPreviewCancelled: () => this.publish('work'),
+      // Presentation-only: the seed is no session status, so only the attached composer hears it.
+      onDraftProjectChanged: () => this.presentation?.onChanged('project'),
       ensureExecutionForConversation: async conversation => {
         this.publish('commands');
         const sameIdentity = session.conversationId === (conversation?.id ?? null);
@@ -301,8 +303,8 @@ export class SessionModel {
 
   detach(expected?: SessionPresentation): void {
     if (expected && this.presentation !== expected) return;
-    // A branch preview exists only in the presentation showing it; reattachment shows the full transcript.
-    if (this.presentation) this.conversationController.cancelBranchDraft();
+    // A branch preview exists only in the presentation showing it; reattachment renders the full transcript.
+    if (this.presentation) this.conversationController.cancelBranchDraft({ render: false });
     this.session.sideChat.detachPresentation();
     this.inlinePrompts.detachPresentation();
     this.linkedContentController.unmountWelcome();
@@ -385,6 +387,7 @@ export function createSessionSideChat(session: ChatSessionRuntime, plugin: ChatF
           get conversationId() { return session.conversationId; },
           get providerId() { return session.providerId; },
           get draftModel() { return session.draftModel; },
+          settledTranscriptEnd: messages => model.inputController.settledTranscriptEnd(messages),
           state: model.state, executionCoordinator: session.executionCoordinator,
         }, plugin, () => !session.isDisposed);
         if (session.isDisposed) return { ok: false, reason: 'stale-binding' };

@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
+import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
 import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
@@ -88,6 +89,7 @@ async function createView(fakeBackend?: FakeSideBackend) {
     },
     getCommittedSettings: () => settings,
     getActiveEnvironmentVariables: () => '',
+    projects: createProjectsFake(),
     getConversationSummary: () => conversation,
     getConversationSync: () => conversation,
     getConversationById: async () => conversation,

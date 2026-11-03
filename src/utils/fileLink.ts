@@ -6,6 +6,7 @@
  */
 
 import type { App, WorkspaceLeaf } from 'obsidian';
+import { Notice } from 'obsidian';
 
 import { getVaultFileByPath } from './obsidianCompat';
 
@@ -40,7 +41,7 @@ function buildWikilinkMatch(
   linkPath: string,
   index: number
 ): WikilinkMatch {
-  const pipeIndex = fullMatch.lastIndexOf('|');
+  const pipeIndex = fullMatch.indexOf('|');
   const displayText = pipeIndex > 0 ? fullMatch.slice(pipeIndex + 1, -2) : linkPath;
 
   return {
@@ -181,7 +182,9 @@ export function registerFileLinkHandler(
       event.preventDefault();
       const linkTarget = link.dataset.href || link.getAttribute('href');
       if (linkTarget) {
-        void openFileLink(app, linkTarget);
+        void openFileLink(app, linkTarget).catch(() => {
+          new Notice('Failed to open file.');
+        });
       }
     }
   };
@@ -246,7 +249,7 @@ export function processFileLinks(app: App, container: HTMLElement): void {
 
   // Wikilinks in inline code aren't rendered by Obsidian's MarkdownRenderer
   container.querySelectorAll('code').forEach((codeEl) => {
-    if (codeEl.parentElement?.tagName === 'PRE') return;
+    if (codeEl.closest('pre, a, .claudian-file-link, .internal-link')) return;
 
     const text = codeEl.textContent;
     if (!text || !text.includes('[[')) return;
