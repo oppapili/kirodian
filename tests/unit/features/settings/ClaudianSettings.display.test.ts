@@ -528,13 +528,16 @@ it('batches a burst of text edits into one settings mutation and flushes on tear
   } finally { cleanup(); jest.useRealTimers(); }
 });
 
-it('offers no Projects tab; the doc folder is chosen per project', () => {
+it('renders the General and Providers tabs, but no top-level Skills or Projects tab', () => {
   const { tab } = createTab(false);
   const container = createContainer();
   const cleanup = (tab as any).renderSettings(container);
   try {
-    expect(findByClass(container, 'claudian-settings-skills')).not.toBeNull();
-    expect(findContainer(container, t('settings.tabs.skills'))).not.toBeNull();
+    // Skills moved under the per-provider settings tab; the main settings has no
+    // standalone Skills or Projects tab, and the doc folder is chosen per project.
+    expect(findByClass(container, 'claudian-settings-general')).not.toBeNull();
+    expect(findByClass(container, 'claudian-settings-provider-tabs')).not.toBeNull();
+    expect(findByClass(container, 'claudian-settings-skills')).toBeNull();
     expect(findByClass(container, 'claudian-settings-projects')).toBeNull();
     expect(findContainer(container, 'Projects')).toBeNull();
   } finally { cleanup(); }

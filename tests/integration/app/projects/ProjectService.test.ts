@@ -20,7 +20,7 @@ const TEMPLATE_SECTIONS = '## Goal\n\n## Requirements\n\n## Decisions\n\n## Stat
 
 function conversation(id: string, projectId?: string): Conversation {
   return {
-    id, providerId: 'claude', title: id, sessionId: null,
+    id, providerId: 'kiro', title: id, sessionId: null,
     createdAt: testDate().getTime(), lastActivityAt: testDate().getTime(), messages: [],
     ...(projectId ? { projectId } : {}),
   };

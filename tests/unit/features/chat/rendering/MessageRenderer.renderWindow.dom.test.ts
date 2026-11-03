@@ -9,7 +9,7 @@ import { fireEvent, within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
 import { Component, MarkdownRenderer } from 'obsidian';
 
-import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
+import type { ProviderCapabilities } from '@/core/providers/types';
 import type { ChatMessage } from '@/core/types';
 import { ConversationController } from '@/features/chat/conversation/ConversationController';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
@@ -44,7 +44,10 @@ function transcript(): ChatMessage[] {
   return messages;
 }
 
-function setup(providerId?: string, navigate: (id: string, target?: string) => Promise<void> = jest.fn()) {
+function setup(
+  capabilities?: Partial<ProviderCapabilities>,
+  navigate: (id: string, target?: string) => Promise<void> = jest.fn(),
+) {
   const messagesEl = document.body.createDiv();
   // jsdom has no layout: a 500px viewport over top-level nodes 100px tall each.
   let scrollTop = 0;
@@ -58,7 +61,7 @@ function setup(providerId?: string, navigate: (id: string, target?: string) => P
   });
   const renderer = new MessageRenderer(
     { app: {}, settings: { mediaFolder: '' } } as any, new Component() as any, messagesEl, undefined, undefined,
-    providerId ? () => ProviderRegistry.getCapabilities(providerId) : undefined,
+    capabilities ? () => capabilities as ProviderCapabilities : undefined,
     { navigate, isBusy: () => false },
   );
   return { renderer, messagesEl };
@@ -121,7 +124,7 @@ it('renders a short transcript whole without an earlier-messages control', () =>
 });
 
 it('offers branching from the first rendered prompt while earlier prompts are unrendered, never from the transcript start', () => {
-  const { renderer, messagesEl } = setup('pi');
+  const { renderer, messagesEl } = setup({ supportsConversationBranches: true });
   const messages = Array.from({ length: 30 }, (_, index) => turn(index)).flat()
     .map(message => message.role === 'user' ? { ...message, userMessageId: `native-${message.id}`, treeBranches: [`native-${message.id}`] } : message);
   const branchFrom = (id: string) => within(messagesEl.querySelector<HTMLElement>(`[data-message-id="${id}"]`)!)
@@ -142,9 +145,9 @@ it('returns to the reading position after cancelling a branch preview of a revea
   const history = Array.from({ length: 30 }, (_, index) => turn(index)).flat()
     .map(message => message.role === 'user' ? { ...message, userMessageId: `native-${message.id}`, treeBranches: [`native-${message.id}`] } : message);
   const plugin = { app: {}, settings: { mediaFolder: '' }, updateConversation: jest.fn(),
-    getConversationById: jest.fn().mockResolvedValue({ id: 'pi-chat', messages: history }),
+    getConversationById: jest.fn().mockResolvedValue({ id: 'kiro-chat', messages: history }),
     getConversationSummary: jest.fn().mockReturnValue(null), projects: createProjectsFake() };
-  const { renderer, messagesEl } = setup('pi', (id, target) => controller.navigateBranch(id, target));
+  const { renderer, messagesEl } = setup({ supportsConversationBranches: true }, (id, target) => controller.navigateBranch(id, target));
   let welcomeEl: HTMLElement | null = null;
   const controller: ConversationController = new ConversationController({ plugin, state, renderer,
     ...createConversationPorts({ state, getInputEl: () => inputEl, getImageContextManager: () => null }),
@@ -155,7 +158,7 @@ it('returns to the reading position after cancelling a branch preview of a revea
     getImageContextManager: () => null, clearQueuedMessage: jest.fn(),
     getExecutionCoordinator: () => ({ supportsConversationBranches: true }),
   } as any);
-  state.currentConversationId = 'pi-chat';
+  state.currentConversationId = 'kiro-chat';
   await controller.loadActive();
   fireEvent.click(within(messagesEl).getByRole('button', { name: 'Show earlier messages' }));
   const prompt = messagesEl.querySelector<HTMLElement>('[data-message-id="u5"]')!;

@@ -124,6 +124,7 @@ export function createHarness(options: {
     app,
     getConversationSummary(id: string) { return (this as unknown as { getConversationSync: (id: string) => any }).getConversationSync(id); },
     getConversationSync: () => options.providerState ? { id: 'conversation-1', providerId: 'kiro', providerState: options.providerState } : null,
+    projects: { get: () => null },
     providerHost: { app, settings, executionLifecycleRegistry: lifecycleRegistry },
     settings,
   } as never;

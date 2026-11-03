@@ -504,6 +504,12 @@ it('reuses created message elements instead of searching the growing history for
   renderer.renderMessages(history, () => 'Hello');
   expect(positionLookup).not.toHaveBeenCalled();
   expect(query.mock.calls.filter(([selector]) => selector.includes('data-message-id') || selector.includes('data-work-message-id'))).toHaveLength(0);
-  expect(messagesEl.querySelectorAll('.claudian-message')).toHaveLength(100);
+  // The transcript renders only the trailing window that starts at a prompt; the newest
+  // message is present while the oldest stays unrendered behind "Show earlier messages".
+  const rendered = messagesEl.querySelectorAll('.claudian-message');
+  expect(rendered.length).toBeGreaterThan(0);
+  expect(rendered.length).toBeLessThan(history.length);
+  expect(messagesEl.querySelector('[data-message-id="indexed-99"]')).not.toBeNull();
+  expect(messagesEl.querySelector('[data-message-id="indexed-0"]')).toBeNull();
   renderer.dispose();
 });
