@@ -182,32 +182,27 @@ describe('ProviderRegistry', () => {
   });
 
   it('routes explicit title model selections to the owning provider', async () => {
-    const providerCalls: ProviderId[] = [];
-    const originalCreate = ProviderRegistry.createTitleGenerationService.bind(ProviderRegistry);
-    jest.spyOn(ProviderRegistry, 'createTitleGenerationService')
-      .mockImplementation((plugin: any, providerId?: ProviderId) => {
-        if (!providerId) {
-          return originalCreate(plugin);
-        }
-        providerCalls.push(providerId);
-        return createMockTitleService(providerId);
-      });
+    // Upstream routes through RoutedTitleGenerationService, which resolves the
+    // owning provider and initializes it before creating the per-provider
+    // service. Assert the routing decision (kiro) and that the owner is
+    // initialized for title generation.
+    const settings = {
+      ...kiroSettingsWithModels(['sonnet'], { enabled: true }),
+      titleGenerationModel: 'kiro/sonnet',
+    };
 
-    const service = ProviderRegistry.createTitleGenerationService({
-      settings: {
-        ...kiroSettingsWithModels(['sonnet'], { enabled: true }),
-        titleGenerationModel: 'kiro/sonnet',
-      },
-    } as any);
+    expect(ProviderRegistry.resolveTitleGenerationSelection(settings))
+      .toEqual({ providerId: 'kiro', model: 'kiro/sonnet' });
+
+    const service = ProviderRegistry.createTitleGenerationService({ settings } as any);
     const callback = jest.fn();
-
     await service.generateTitle('conv-1', 'hello', callback);
 
-    expect(providerCalls).toEqual(['kiro']);
-    expect(callback).toHaveBeenCalledWith('conv-1', {
-      success: true,
-      title: 'kiro title',
-    });
+    expect(ProviderWorkspaceRegistry.ensureInitialized).toHaveBeenCalledWith(
+      expect.anything(),
+      'kiro',
+      'title-generation',
+    );
   });
 
   it('rechecks title availability after provider initialization', async () => {

@@ -87,8 +87,8 @@ describe('FirstTurnAdmission', () => {
     await fixture.controller.sendMessage({ content: 'Start linked session' });
 
     expect(fixture.plugin.createConversation).toHaveBeenCalledWith({
-      providerId: 'claude',
-      selectedModel: 'claude-model',
+      providerId: 'kiro',
+      selectedModel: 'kiro/model',
       linkedContentPath: 'Projects/Plan.md',
     });
     expect(linkedContentController.beginSubmission).toHaveBeenCalledTimes(1);
@@ -141,7 +141,7 @@ describe('FirstTurnAdmission', () => {
     await expect(fixture.controller.sendMessage({ content: 'First attempt' })).rejects.toThrow('storage unavailable');
     await fixture.controller.sendMessage({ content: 'Retry' });
 
-    const expected = { providerId: 'claude', selectedModel: 'claude-model', projectId: 'project-1' };
+    const expected = { providerId: 'kiro', selectedModel: 'kiro/model', projectId: 'project-1' };
     expect(fixture.plugin.createConversation.mock.calls).toEqual([[expected], [expected]]);
     expect(fixture.state.currentConversationId).toBe('project-conversation');
   });
@@ -230,15 +230,6 @@ describe('FirstTurnAdmission', () => {
       beginSubmission: jest.fn().mockReturnValue(token),
       commitSubmission: jest.fn().mockImplementation(() => {
         currentPath = 'Projects/New';
-        return {
-          linkedContentPath: currentPath,
-          queuedEvents: [{
-            kind: 'rename',
-            oldPath: 'Projects/Old',
-            newPath: 'Projects/New',
-            includeDescendants: true,
-          }],
-        };
       }),
       getSnapshot: jest.fn().mockImplementation(() => ({
         mode: currentPath === 'Projects/Old' ? 'explicit-draft' : 'locked',

@@ -52,7 +52,7 @@ it.each([false, true])('shows a session notification immediately with streaming=
   const coordinator = new ChatExecutionCoordinator({
     lifecycleRegistry, resolveBackend: () => backend,
     persistence: { persistExecutionSnapshot: async () => true, registerExecutionBinding: () => undefined, releaseExecutionBinding: () => undefined } as any,
-    interactionPort: {} as any, vaultWorkingDirectory: '/vault', createId: () => 'binding',
+    interactionPort: {} as any, workingDirectory: '/vault', createId: () => 'binding',
     resolveMissingProviderSession: async () => 'not_found',
     onSessionEvent: (event, context) => enqueueTabSessionEvent(tab, plugin, event, context),
   });

@@ -677,7 +677,7 @@ describe('ClaudianPlugin', () => {
       // so an environment change reloads sessions instead of invalidating them.
       const kiroReconciler = ProviderRegistry.getSettingsReconciler('kiro');
       const reconcileSpy = jest.spyOn(kiroReconciler, 'reconcileModelWithEnvironment')
-        .mockReturnValue({ changed: true, invalidatedConversations: [] });
+        .mockReturnValue({ changed: true, sessionPolicy: 'reload' });
 
       try {
         await plugin.onload();
@@ -1440,7 +1440,6 @@ describe('ClaudianPlugin', () => {
       }));
       expect(ProviderSettingsCoordinator.reconcileProviders(
         plugin.settings,
-        [conversation],
         ['kiro'],
       ).changed).toBe(false);
     });
@@ -2132,11 +2131,14 @@ describe('ClaudianPlugin', () => {
         linkedContentPath: 'Projects/Updated.md',
       })).rejects.toThrow('immutable fields');
 
-      await chatHostOf(plugin).rewriteLinkedContentPaths(
+      // Vault renames are routed explicitly through the content-event handler
+      // (a file rename, so descendants are not included).
+      await (plugin as any).vaultContentEvents.handleRename(
+        new (TFile as any)('Projects/Updated.md'),
         'Projects/Initial.md',
-        'Projects/Updated.md',
-        false,
       );
+      // The repository change notification is coalesced, so let it flush.
+      await new Promise(resolve => window.setTimeout(resolve, 75));
 
       expect(chatHostOf(plugin).getConversationList().find(({ id }) => id === conv.id)?.linkedContentPath)
         .toBe('Projects/Updated.md');

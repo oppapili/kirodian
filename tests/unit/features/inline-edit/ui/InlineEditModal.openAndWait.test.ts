@@ -267,14 +267,13 @@ describe('InlineEditModal - openAndWait', () => {
       const inputEl = widgetRef?.inputEl;
       inputEl.value = '@s';
       inputEl.selectionStart = inputEl.selectionEnd = 2;
+      // Upstream #1815 removed the mention-load debounce (reduce lookup latency),
+      // so the shared dropdown resolves folders promptly on input.
       inputEl.dispatchEvent({ type: 'input' });
-      jest.advanceTimersByTime(199);
-      expect(getFoldersSpy).not.toHaveBeenCalled();
-
       jest.advanceTimersByTime(1);
       await Promise.resolve();
 
-      expect(getFoldersSpy).toHaveBeenCalledTimes(1);
+      expect(getFoldersSpy).toHaveBeenCalled();
       const labels = (global as any).document.body
         .querySelectorAll('.claudian-composer-dropdown-label')
         .map((element: { textContent: string }) => element.textContent);

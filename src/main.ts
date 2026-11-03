@@ -211,7 +211,6 @@ export default class ClaudianPlugin extends Plugin {
       providers: ProviderRegistry,
       providerSettings: ProviderSettingsCoordinator,
       executionLifecycle: this.executionLifecycleRegistry,
-      deferNonRestoredSessionMetadata: true,
       isUnloading: () => this.isUnloading,
       publishCommittedSettings: async (settings, previous) => this.chatViews.publishSettings(settings, previous),
       // No chat view can hold tabs before loading completes and assigns the lifecycle.
@@ -293,11 +292,11 @@ export default class ClaudianPlugin extends Plugin {
       getHost: () => this.chatHost,
       getActiveConversationId: () => this.views.getInputFocusView(this.zenMode.getActiveLeaf())?.getActiveTab()?.conversationId ?? null,
       refreshModelControls: providerId => this.chatViews.refreshModelSelector(providerId),
-      commitSelection: (...args) => domains.conversations.updateSelectedModelIf(...args),
     });
     this.api = createClaudianAPI(this.sessionMessaging);
     this.conversationLifecycle = new ConversationLifecycle({
       conversations: domains.conversations,
+      projects: domains.projects,
       views: this.views,
       sessions: this.sessionRuntimes,
     });

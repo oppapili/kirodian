@@ -16,14 +16,12 @@ import type {
   RewindableExecutionSession,
   SteerableExecutionSession,
 } from '../../../core/execution';
-import { appendBrowserContext } from '../../../core/prompt/browserContext';
-import { appendCanvasContext } from '../../../core/prompt/canvasContext';
-import { appendEditorContext } from '../../../core/prompt/editorContext';
 import {
   buildContextFromHistory,
   buildPromptWithHistoryContext,
 } from '../../../core/prompt/historyContext';
-import { appendLinkedContent } from '../../../core/prompt/promptContext';
+import { appendExecutionContext } from '../../../core/prompt/promptContext';
+import { createProviderHistoryPathContext } from '../../../core/providers/historyPathContext';
 import type { ProviderHost } from '../../../core/providers/ProviderHost';
 import { normalizeToolResultDetails } from '../../../core/tools/toolResultDetails';
 import type { ChatMessage, SlashCommand } from '../../../core/types';
@@ -57,10 +55,6 @@ import {
   normalizeKiroToolUseResult,
   resolveKiroRawToolName,
 } from '../normalization/kiroToolNormalization';
-import {
-  buildKiroSystemPrompt,
-  type KiroSystemPromptSettings,
-} from '../prompt/KiroSystemPrompt';
 import { waitForKiroCancelDelivery } from '../runtime/KiroCancelDelivery';
 import type { KiroModelCatalogCoordinator } from '../runtime/KiroModelCatalogCoordinator';
 import { buildKiroRuntimeEnv } from '../runtime/KiroRuntimeEnvironment';
@@ -499,7 +493,7 @@ RewindableExecutionSession {
     const generation = ++this.nativeGeneration;
     const native = this.options.nativeFactory.create({
       command,
-      cwd: this.config.vaultWorkingDirectory,
+      cwd: this.config.workingDirectory,
       env: buildKiroRuntimeEnv(this.plugin.settings, command),
       requestPermission: (request, signal) => {
         const policy = this.active?.request.toolPolicy.kind;
@@ -635,7 +629,7 @@ RewindableExecutionSession {
         native,
         state.forkSource.sessionId,
         {
-          newCwd: this.config.vaultWorkingDirectory,
+          newCwd: this.config.workingDirectory,
           ...(request?.configuration.model
             ? { newModelId: decodeKiroModelId(request.configuration.model) ?? undefined }
             : {}),
@@ -643,7 +637,7 @@ RewindableExecutionSession {
             state.forkSourceSessionDirectory,
             state.forkSource.sessionId,
           )
-            ?? this.config.vaultWorkingDirectory,
+            ?? this.config.workingDirectory,
           sourceSessionId: state.forkSource.sessionId,
           targetPromptIndex,
         },
@@ -660,7 +654,7 @@ RewindableExecutionSession {
     }
     const response = await native.newSession({
       _meta: this.buildSessionMeta(request),
-      cwd: this.config.vaultWorkingDirectory,
+      cwd: this.config.workingDirectory,
       mcpServers: [],
     });
     this.throwIfCancellationRequested(active);
@@ -686,7 +680,7 @@ RewindableExecutionSession {
     const owner = this.getNativeOwner(native);
     const response = await native.loadSession({
       _meta: this.buildSessionMeta(request),
-      cwd: this.config.vaultWorkingDirectory,
+      cwd: this.config.workingDirectory,
       mcpServers: [],
       sessionId: targetSessionId,
     });
@@ -713,8 +707,11 @@ RewindableExecutionSession {
   ): Record<string, unknown> {
     return buildSessionMeta(
       request,
-      request?.configuration.systemInstructions.kind === 'provider-default'
-        ? buildKiroSystemPrompt(this.getSystemPromptSettings())
+      // Upstream #1285 renamed the default-prompt kind to 'main-agent' and now has
+      // core build the shared Main Agent prompt, so use the provided instructions
+      // rather than rebuilding a Kiro-specific prompt.
+      request?.configuration.systemInstructions.kind === 'main-agent'
+        ? request.configuration.systemInstructions.instructions
         : undefined,
     );
   }
@@ -725,15 +722,6 @@ RewindableExecutionSession {
       systemPromptOverride: meta.systemPromptOverride ?? null,
       yoloMode: meta.yoloMode === true,
     });
-  }
-
-  private getSystemPromptSettings(): KiroSystemPromptSettings {
-    return {
-      customPrompt: this.plugin.settings.systemPrompt,
-      mediaFolder: this.plugin.settings.mediaFolder,
-      userName: this.plugin.settings.userName,
-      vaultPath: this.config.vaultWorkingDirectory,
-    };
   }
 
   private async applyConfiguration(
@@ -1098,12 +1086,15 @@ RewindableExecutionSession {
     const sessionDirectory = resolveKiroSessionDirectory(
       persistedSessionDirectory,
       providerSessionId,
-      this.config.vaultWorkingDirectory,
+      this.config.workingDirectory,
       {
+        ...createProviderHistoryPathContext(
+          this.plugin.settings,
+          'kiro',
+          this.config.workingDirectory,
+        ),
+        // Kiro resolves its session roots from its own runtime env (KIRO_HOME).
         environment: buildKiroRuntimeEnv(this.plugin.settings, ''),
-        hostPlatform: process.platform,
-        settings: this.plugin.settings,
-        vaultPath: this.config.vaultWorkingDirectory,
       },
     );
     if (sessionDirectory) {
@@ -1356,14 +1347,7 @@ function buildPromptBlocks(
     .map(block => block.text)
     .join('\n');
   const context = request.context;
-  if (context?.linkedContent) {
-    text = appendLinkedContent(text, context.linkedContent.path);
-  }
-  if (context?.editorSelection && context.editorSelection.mode !== 'none') {
-    text = appendEditorContext(text, context.editorSelection);
-  }
-  if (context?.browserSelection) text = appendBrowserContext(text, context.browserSelection);
-  if (context?.canvasSelection) text = appendCanvasContext(text, context.canvasSelection);
+  text = appendExecutionContext(text, context);
   if (replayConversationHistory && request.conversationHistory?.length) {
     const history = [...request.conversationHistory] as ChatMessage[];
     text = buildPromptWithHistoryContext(

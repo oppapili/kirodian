@@ -2,7 +2,6 @@ import { type App, Modal, Notice, setIcon, Setting } from 'obsidian';
 
 import {
   ManagedResourcePathError,
-  ManagedResourceRelocationError,
 } from '@/core/storage/VaultFileAdapter';
 import type { AgentSkillDiagnostic, AgentSkillDocument, AgentSkillInput } from '@/features/agent-skills/AgentSkill';
 import { extraFrontmatterKeys } from '@/features/agent-skills/AgentSkillCodec';
@@ -22,7 +21,6 @@ function errorMessage(error: unknown): string {
   if (
     error instanceof AgentSkillRepositoryError
     || error instanceof ManagedResourcePathError
-    || error instanceof ManagedResourceRelocationError
   ) {
     return error.message;
   }

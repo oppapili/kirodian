@@ -8,8 +8,6 @@ import type {
   ComposerTriggerMatch,
 } from './types';
 
-const INPUT_LOAD_DEBOUNCE_MS = 200;
-
 export interface ComposerDropdownControllerOptions {
   readonly fixed?: boolean;
   /** Runs after the menu shows or hides. */
@@ -23,8 +21,6 @@ export class ComposerDropdownController {
   private activeMatch: ComposerTriggerMatch | null = null;
   private activeSource: ComposerDropdownSource | null = null;
   private destroyed = false;
-  private generation = 0;
-  private inputLoadTimer: number | null = null;
   private items: readonly ComposerDropdownItem[] = [];
   private selectedIndex = -1;
 
@@ -62,10 +58,10 @@ export class ComposerDropdownController {
   }
 
   handleInputChange(): void {
-    this.#rematchAndLoad(true);
+    this.#rematchAndLoad();
   }
 
-  #rematchAndLoad(inputDriven: boolean): void {
+  #rematchAndLoad(): void {
     if (this.destroyed) {
       this.hide();
       return;
@@ -88,7 +84,7 @@ export class ComposerDropdownController {
     this.activeSource = source;
     this.activeMatch = match;
     if (opening) source.onOpen?.();
-    this.#requestActiveLoad(inputDriven);
+    this.#requestActiveLoad();
   }
 
   handleKeydown(event: KeyboardEvent): boolean {
@@ -132,74 +128,61 @@ export class ComposerDropdownController {
 
   #rematchInput(): void {
     if (!this.activeSource || !this.activeMatch || this.destroyed) return;
-    this.#rematchAndLoad(false);
+    this.#rematchAndLoad();
   }
 
-  #requestActiveLoad(inputDriven: boolean): void {
+  #requestActiveLoad(): void {
     const source = this.activeSource;
     const match = this.activeMatch;
     if (!source || !match || this.destroyed) return;
 
-    const generation = this.#invalidateActiveLoad();
+    this.#invalidateActiveLoad();
+    const controller = new AbortController();
+    this.activeController = controller;
+    let result: ReturnType<ComposerDropdownSource['load']>;
+    try {
+      result = source.load(match, controller.signal);
+    } catch {
+      this.#renderLoadFailure();
+      return;
+    }
+    // Synchronous results replace the list directly; only pending loads show a placeholder.
+    if (!(result instanceof Promise)) {
+      this.#renderLoaded(result);
+      return;
+    }
     this.items = [{ id: 'loading', kind: 'status', label: t('chat.suggestions.loading'), state: 'loading' }];
     this.selectedIndex = -1;
     this.view.render(this.items, this.selectedIndex);
-
-    if (inputDriven && source.inputLoadPolicy === 'debounced') {
-      this.inputLoadTimer = window.setTimeout(() => {
-        this.inputLoadTimer = null;
-        void this.loadActive(generation);
-      }, INPUT_LOAD_DEBOUNCE_MS);
-      return;
-    }
-
-    void this.loadActive(generation);
+    result.then(
+      items => { if (!controller.signal.aborted) this.#renderLoaded(items); },
+      () => { if (!controller.signal.aborted) this.#renderLoadFailure(); },
+    );
   }
 
-  private async loadActive(generation: number): Promise<void> {
-    const source = this.activeSource;
-    const match = this.activeMatch;
-    if (
-      !source
-      || !match
-      || this.destroyed
-      || generation !== this.generation
-    ) return;
-
-    const controller = new AbortController();
-    this.activeController = controller;
-
-    try {
-      const items = await source.load(match, controller.signal);
-      if (this.destroyed || controller.signal.aborted || generation !== this.generation) return;
-      this.items = items.length > 0
-        ? items
-        : [{ id: 'empty', kind: 'status', label: t('chat.suggestions.noMatches'), state: 'empty' }];
-      this.selectedIndex = this.#findSelectable(0, 1, true);
-      this.view.render(this.items, this.selectedIndex);
-    } catch {
-      if (this.destroyed || controller.signal.aborted || generation !== this.generation) return;
-      this.items = [{
-        id: 'error',
-        kind: 'status',
-        label: t('chat.suggestions.loadFailed'),
-        detail: t('chat.suggestions.retryHint'),
-        state: 'error',
-      }];
-      this.selectedIndex = -1;
-      this.view.render(this.items, this.selectedIndex);
-    }
+  #renderLoaded(items: readonly ComposerDropdownItem[]): void {
+    this.items = items.length > 0
+      ? items
+      : [{ id: 'empty', kind: 'status', label: t('chat.suggestions.noMatches'), state: 'empty' }];
+    this.selectedIndex = this.#findSelectable(0, 1, true);
+    this.view.render(this.items, this.selectedIndex);
   }
 
-  #invalidateActiveLoad(): number {
-    this.generation++;
-    if (this.inputLoadTimer !== null) {
-      window.clearTimeout(this.inputLoadTimer);
-      this.inputLoadTimer = null;
-    }
+  #renderLoadFailure(): void {
+    this.items = [{
+      id: 'error',
+      kind: 'status',
+      label: t('chat.suggestions.loadFailed'),
+      detail: t('chat.suggestions.retryHint'),
+      state: 'error',
+    }];
+    this.selectedIndex = -1;
+    this.view.render(this.items, this.selectedIndex);
+  }
+
+  #invalidateActiveLoad(): void {
     this.activeController?.abort();
     this.activeController = null;
-    return this.generation;
   }
 
   #moveSelection(delta: number): void {
