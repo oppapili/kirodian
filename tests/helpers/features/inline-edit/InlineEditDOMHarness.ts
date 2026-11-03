@@ -9,7 +9,7 @@ import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceReg
 import type { ProviderId, ProviderModelPolicy, ProviderRegistration } from '@/core/providers/types';
 import { InlineEditSessionOwner } from '@/features/inline-edit/InlineEditSessionOwner';
 import { InlineEditModal, InlineEditSession } from '@/features/inline-edit/ui/InlineEditModal';
-import { CLAUDE_PROVIDER_ICON } from '@/shared/icons';
+import { KIRO_PROVIDER_ICON } from '@/shared/icons';
 
 // Obsidian augments HTMLElement; jsdom needs the subset Inline Edit uses.
 Object.assign(HTMLElement.prototype, {
@@ -58,7 +58,7 @@ export function registerFakeInlineEditProvider(providerId: ProviderId): FakeAuxi
   ProviderRegistry.register(providerId, {
     blankTabOrder: 0,
     capabilities: { supportsEphemeralSessions: true, supportsProviderCommands: true, reasoningControl: 'effort' },
-    chatUIConfig: { ...fakeModelPolicy, getProviderIcon: () => CLAUDE_PROVIDER_ICON },
+    chatUIConfig: { ...fakeModelPolicy, getProviderIcon: () => KIRO_PROVIDER_ICON },
     modelPolicy: fakeModelPolicy,
     createExecutionBackend: () => backend,
     isEnabled: (settings: Record<string, unknown>) => isProviderEnabled(providerId, settings),

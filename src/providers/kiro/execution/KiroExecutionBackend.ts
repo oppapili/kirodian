@@ -20,7 +20,6 @@ import type {
   ACPSetSessionModelResponse,
   ACPSetSessionModeRequest,
 } from '../../acp';
-import type { KiroCommandCatalog } from '../commands/KiroCommandCatalog';
 import { loadKiroPromptIndexAfterAssistant } from '../history/KiroHistoryStore';
 import type { KiroModelCatalogCoordinator } from '../runtime/KiroModelCatalogCoordinator';
 import { KiroExecutionNativeConnectionImpl } from './KiroExecutionNativeConnection';
@@ -98,7 +97,6 @@ export interface KiroExecutionNativeFactory {
 }
 
 export interface KiroExecutionBackendOptions {
-  readonly commandCatalog?: Pick<KiroCommandCatalog, 'setCommandSnapshot'>;
   readonly modelCatalogCoordinator?: Pick<KiroModelCatalogCoordinator, 'mergeLiveModels'>;
   readonly nativeFactory?: KiroExecutionNativeFactory;
   readonly resolvePromptIndex?: (
@@ -123,7 +121,6 @@ export class KiroExecutionBackend implements ProviderExecutionBackend {
 
   createSession(config: ProviderSessionConfig): ProviderExecutionSession {
     return new KiroExecutionSession(this.plugin, config, {
-      commandCatalog: this.options.commandCatalog,
       modelCatalogCoordinator: this.options.modelCatalogCoordinator,
       nativeFactory: this.nativeFactory,
       resolvePromptIndex: this.options.resolvePromptIndex

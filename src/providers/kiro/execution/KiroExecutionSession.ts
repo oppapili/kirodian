@@ -26,7 +26,7 @@ import {
 import { appendLinkedContent } from '../../../core/prompt/promptContext';
 import type { ProviderHost } from '../../../core/providers/ProviderHost';
 import { normalizeToolResultDetails } from '../../../core/tools/toolResultDetails';
-import type { ChatMessage, PermissionMode } from '../../../core/types';
+import type { ChatMessage, SlashCommand } from '../../../core/types';
 import {
   type ACPContentBlock,
   ACPExecutionEventNormalizer,
@@ -38,7 +38,6 @@ import {
   ACPToolStreamAdapter,
   buildACPUsageInfo,
 } from '../../acp';
-import type { KiroCommandCatalog } from '../commands/KiroCommandCatalog';
 import { computeKiroEnvironmentHash } from '../env/KiroSettingsReconciler';
 import {
   resolveKiroSessionCwd,
@@ -86,7 +85,6 @@ import {
 import { normalizeKiroSessionModeMetadata } from './KiroSessionModeMetadata';
 
 interface KiroExecutionSessionOptions {
-  readonly commandCatalog?: Pick<KiroCommandCatalog, 'setCommandSnapshot'>;
   readonly modelCatalogCoordinator?: Pick<KiroModelCatalogCoordinator, 'mergeLiveModels'>;
   readonly nativeFactory: KiroExecutionNativeFactory;
   readonly resolvePromptIndex?: (
@@ -222,6 +220,8 @@ RewindableExecutionSession {
   private forkApplied = false;
   private revision = 0;
   private snapshot: ProviderSessionSnapshot;
+  /** Latest commands/skills pushed over `_kiro.dev/commands/available`; read by the coordinator's command discovery. */
+  #commandSnapshot: readonly SlashCommand[] | undefined;
 
   constructor(
     private readonly plugin: ProviderHost,
@@ -309,6 +309,10 @@ RewindableExecutionSession {
   onEvent(listener: (event: ProviderSessionEvent) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  getCommandSnapshot(): readonly SlashCommand[] | undefined {
+    return this.#commandSnapshot;
   }
 
   dispose(): Promise<void> {
@@ -814,7 +818,7 @@ RewindableExecutionSession {
     if (isTurnCompleted(notification.update)) return;
     const result = active.normalizer.normalize(notification.update);
     if (result.metadata?.type === 'commands') {
-      this.options.commandCatalog?.setCommandSnapshot([...result.metadata.commands]);
+      this.#commandSnapshot = [...result.metadata.commands];
       return;
     }
     if (result.metadata?.type === 'config_options') {
@@ -1284,7 +1288,7 @@ RewindableExecutionSession {
     }
   }
 
-  private emitPermissionMode(permissionMode: PermissionMode): void {
+  private emitPermissionMode(permissionMode: string): void {
     const event: ProviderSessionEvent = {
       permissionMode,
       scope: {

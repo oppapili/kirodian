@@ -1,4 +1,3 @@
-import { nextToolbarId, runToolbarAction, ToolbarMenu, type ToolbarMenuGroup } from '@/shared/toolbar/ToolbarMenu';
 import type { ProviderModelSelectorLock } from '@/core/providers/types';
 import { createProviderIconSvg } from '@/shared/icons';
 import { nextToolbarId, runToolbarAction, ToolbarMenu, type ToolbarMenuGroup } from '@/shared/toolbar/ToolbarMenu';
