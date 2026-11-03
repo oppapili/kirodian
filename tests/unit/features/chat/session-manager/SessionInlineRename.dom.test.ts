@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 
 import { fireEvent, waitFor, within } from '@testing-library/dom';
+import { axe } from 'jest-axe';
 import { Notice } from 'obsidian';
 
 import { SessionInlineRename } from '@/features/chat/session-manager/SessionInlineRename';
@@ -18,7 +19,7 @@ function setup(currentTitle = 'Original title', rename = jest.fn().mockResolvedV
   const onFinished = jest.fn();
   const inlineRename = new SessionInlineRename();
   inlineRename.begin(item, { currentTitle, rename, onFinished });
-  const input = within(item).getByRole('textbox') as HTMLInputElement;
+  const input = within(item).getByRole('textbox', { name: 'Conversation title' }) as HTMLInputElement;
   return { container, item, input, inlineRename, rename, onFinished };
 }
 
@@ -28,8 +29,14 @@ describe('SessionInlineRename', () => {
     jest.clearAllMocks();
   });
 
-  it('replaces the row title with a focused editor holding the current title', () => {
-    const { item, input } = setup('Test Title');
+  it('replaces the row title with a named, focused editor holding the current title', async () => {
+    const { item } = renderRow('Test Title');
+    new SessionInlineRename().begin(item, {
+      currentTitle: 'Test Title', rename: jest.fn(), onFinished: jest.fn(),
+    });
+
+    expect((await axe(item, { runOnly: { type: 'rule', values: ['label'] } })).violations).toEqual([]);
+    const input = within(item).getByRole('textbox', { name: 'Conversation title' }) as HTMLInputElement;
 
     expect(item.querySelector('.claudian-history-item-title')).toBeNull();
     expect(input.value).toBe('Test Title');
@@ -101,6 +108,60 @@ describe('SessionInlineRename', () => {
 
     expect(inlineRename.cancel()).toBe(true);
     expect(input.value).toBe('Original title');
+  });
+
+  it('can cancel the unfocused editor after a failed rename without retrying the failed title', async () => {
+    const { input, inlineRename, rename, onFinished } = setup(
+      'Original title', jest.fn().mockRejectedValue(new Error('disk full')),
+    );
+    input.value = 'Failed title';
+    input.blur();
+    await waitFor(() => expect(Notice).toHaveBeenCalledWith('Failed to rename conversation'));
+    expect(onFinished).not.toHaveBeenCalled();
+    expect(document.activeElement).not.toBe(input);
+
+    expect(inlineRename.cancel()).toBe(true);
+
+    await waitFor(() => expect(onFinished).toHaveBeenCalledTimes(1));
+    expect(input.value).toBe('Original title');
+    expect(rename).toHaveBeenCalledTimes(1);
+    expect(inlineRename.cancel()).toBe(false);
+  });
+
+  it('does not cancel or resubmit a rename that is already being saved', async () => {
+    let resolveRename!: () => void;
+    const rename = jest.fn(() => new Promise<void>(resolve => { resolveRename = resolve; }));
+    const { input, inlineRename, onFinished } = setup('Original title', rename);
+    input.value = 'Saving title';
+    input.blur();
+    expect(rename).toHaveBeenCalledTimes(1);
+
+    expect(inlineRename.cancel()).toBe(false);
+    expect(input.value).toBe('Saving title');
+    expect(onFinished).not.toHaveBeenCalled();
+
+    resolveRename();
+    await waitFor(() => expect(onFinished).toHaveBeenCalledTimes(1));
+    expect(rename).toHaveBeenCalledTimes(1);
+    expect(inlineRename.cancel()).toBe(false);
+  });
+
+  it('allows retrying the edited title after a failed rename', async () => {
+    const rename = jest.fn()
+      .mockRejectedValueOnce(new Error('disk full'))
+      .mockResolvedValueOnce(undefined);
+    const { input, onFinished } = setup('Original title', rename);
+    input.value = 'Failed title';
+    input.blur();
+    await waitFor(() => expect(Notice).toHaveBeenCalledTimes(1));
+
+    input.focus();
+    input.value = 'Retry title';
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(onFinished).toHaveBeenCalledTimes(1));
+    expect(rename.mock.calls).toEqual([['Failed title'], ['Retry title']]);
+    expect(Notice).toHaveBeenCalledTimes(1);
   });
 
   it('reports a failed rename once', async () => {

@@ -201,6 +201,10 @@ export class ImageContextManager {
 
     const files = e.dataTransfer?.files;
     if (!files) return;
+    if (!this.enabled && Array.from(files).some(file => this.isImageFile(file))) {
+      new Notice(t('chat.images.unsupportedProvider'));
+      return;
+    }
 
     const generation = this.attachmentGeneration;
     for (let i = 0; i < files.length; i++) {
@@ -221,21 +225,34 @@ export class ImageContextManager {
     const items = e.clipboardData?.items;
     if (!items) return;
 
+    // Collect files before the first await: clipboard items are only readable
+    // while the paste event is being dispatched.
+    const files: File[] = [];
+    let hasImage = false;
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       if (item.type.startsWith('image/')) {
-        e.preventDefault();
+        hasImage = true;
         const file = item.getAsFile();
-        if (file) {
-          await this.addImageFromFile(file, 'paste');
-        }
-        return;
+        if (file) files.push(file);
       }
+    }
+    if (!hasImage) return;
+    e.preventDefault();
+    if (!this.enabled && files.length > 0) {
+      new Notice(t('chat.images.unsupportedProvider'));
+      return;
+    }
+
+    const generation = this.attachmentGeneration;
+    for (const file of files) {
+      if (this.destroyed || generation !== this.attachmentGeneration) return;
+      await this.addImageFromFile(file, 'paste');
     }
   }
 
   private isImageFile(file: File): boolean {
-    return file.type.startsWith('image/') && this.getMediaType(file.name) !== null;
+    return (!file.type || file.type.startsWith('image/')) && this.getMediaType(file.name) !== null;
   }
 
   private getMediaType(filename: string): ImageMediaType | null {

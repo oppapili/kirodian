@@ -2,6 +2,7 @@
 import '@/providers';
 
 import { createClaudianView } from '@test/helpers/features/chat/ClaudianViewHarness';
+import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
 import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { FakeSideBackend, type FakeSideSession } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { testDate } from '@test/helpers/testClock';
@@ -99,6 +100,7 @@ async function createView() {
     },
     getCommittedSettings: () => settings,
     getActiveEnvironmentVariables: () => '', getConversationSummary: (id: string) => conversations.get(id),
+    projects: createProjectsFake(),
     getConversationSync: (id: string) => conversations.get(id), getCachedConversation: (id: string) => conversations.get(id),
     getConversationById: async (id: string) => conversations.get(id), findConversationAcrossViews: () => null,
     getConversationList: () => [conversation], renameConversation: async () => {},

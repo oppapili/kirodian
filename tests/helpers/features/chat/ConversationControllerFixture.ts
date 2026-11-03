@@ -1,4 +1,5 @@
 import { createConversationPorts, createTestSession } from '@test/helpers/ConversationPorts';
+import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
 import { createMockEl } from '@test/helpers/MockElement';
 
 import type { ConversationControllerDeps } from '@/features/chat/conversation/ConversationController';
@@ -49,6 +50,8 @@ export function createConversationControllerDeps(
         lastActivityAt: Date.now(),
       }),
       getConversationById: jest.fn().mockResolvedValue(null),
+      getConversationSummary: jest.fn().mockReturnValue(null),
+      projects: createProjectsFake([]),
       updateConversation: jest.fn().mockResolvedValue(undefined),
       settings: {
         userName: '',
@@ -61,6 +64,8 @@ export function createConversationControllerDeps(
       renderMessages: jest.fn().mockReturnValue(createMockEl()),
       refreshBranchButtons: jest.fn(),
       refreshBranchButtonState: jest.fn(),
+      captureReadingAnchor: jest.fn(() => null),
+      restoreReadingAnchor: jest.fn(),
     } as any,
     subagentManager: {
       clear: jest.fn(),

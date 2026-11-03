@@ -65,6 +65,7 @@ export const DEFAULT_CLAUDIAN_SETTINGS: ClaudianSettings = {
   skillsSynced: false,
   sessionManagerOrganization: 'list',
   sessionManagerSort: 'last-updated',
+  projectSort: 'last-updated',
   sessionAutoArchiveAfter: 'off',
   pinnedLinkedContentPaths: [],
 

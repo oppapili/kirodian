@@ -9,7 +9,6 @@ import {
 } from '../../core/providers/providerEnvironment';
 import type { ProviderHost } from '../../core/providers/ProviderHost';
 import { ProviderRegistry } from '../../core/providers/ProviderRegistry';
-import { DEFAULT_CHAT_PROVIDER_ID } from '../../core/providers/types';
 import type { EnvironmentScope, EnvSnippet } from '../../core/types';
 import { t } from '../../i18n/i18n';
 import { confirmDelete } from '../modals/ConfirmModal';
@@ -71,9 +70,11 @@ export class EnvSnippetModal extends Modal {
         const value = input.value.trim();
         if (value) {
           const parsed = parseContextLimit(value);
-          if (parsed !== null) {
-            contextLimits[modelId] = parsed;
+          if (parsed === null) {
+            new Notice(t('settings.customContextLimits.invalid'));
+            return;
           }
+          contextLimits[modelId] = parsed;
         }
       }
 
@@ -121,11 +122,7 @@ export class EnvSnippetModal extends Modal {
       contextLimitsContainer.removeClass('claudian-hidden');
 
       const existingLimits = this.snippet?.contextLimits ?? this.plugin.settings.customContextLimits ?? {};
-      const existingAliases =
-        this.snippet?.modelAliases ??
-        (ProviderRegistry.getChatUIConfig(DEFAULT_CHAT_PROVIDER_ID).customModelAliases?.get(
-          this.plugin.settings,
-        ) ?? {});
+      const existingAliases = this.snippet?.modelAliases ?? (ProviderRegistry.getChatUIConfig('claude').customModelAliases?.get(this.plugin.settings) ?? {});
 
       contextLimitsContainer.createDiv({
         text: t('settings.customModelOverrides.name'),
@@ -202,14 +199,14 @@ export class EnvSnippetModal extends Modal {
     const cancelBtn = buttonContainer.createEl('button', {
       text: t('settings.envSnippets.modal.cancel'),
       cls: 'claudian-cancel-btn',
-      attr: { type: 'button' }
+      attr: { type: 'button' },
     });
     cancelBtn.addEventListener('click', () => this.close());
 
     const saveBtn = buttonContainer.createEl('button', {
       text: this.snippet ? t('settings.envSnippets.modal.update') : t('settings.envSnippets.modal.save'),
       cls: 'claudian-save-btn',
-      attr: { type: 'button' }
+      attr: { type: 'button' },
     });
     saveBtn.addEventListener('click', () => saveSnippet());
 
@@ -292,7 +289,7 @@ export class EnvSnippetManager {
 
       const restoreBtn = actionsEl.createEl('button', {
         cls: 'claudian-settings-action-btn',
-        attr: { 'aria-label': t('settings.envSnippets.insert'), type: 'button' },
+        attr: { type: 'button', 'aria-label': t('settings.envSnippets.insert') },
       });
       setIcon(restoreBtn, 'clipboard-paste');
       restoreBtn.addEventListener('click', () => {
@@ -307,7 +304,7 @@ export class EnvSnippetManager {
 
       const editBtn = actionsEl.createEl('button', {
         cls: 'claudian-settings-action-btn',
-        attr: { 'aria-label': t('common.edit') },
+        attr: { type: 'button', 'aria-label': t('common.edit') },
       });
       setIcon(editBtn, 'pencil');
       editBtn.addEventListener('click', () => {
@@ -316,7 +313,7 @@ export class EnvSnippetManager {
 
       const deleteBtn = actionsEl.createEl('button', {
         cls: 'claudian-settings-action-btn claudian-settings-delete-btn',
-        attr: { 'aria-label': t('common.delete') },
+        attr: { type: 'button', 'aria-label': t('common.delete') },
       });
       setIcon(deleteBtn, 'trash-2');
       deleteBtn.addEventListener('click', () => {
@@ -386,7 +383,7 @@ export class EnvSnippetManager {
       // Explicit empty aliases clear the aliases for this snippet's model IDs.
       if (snippet.modelAliases) {
         const modelIds = ProviderRegistry.getCustomModelIds(parseEnvironmentVariables(snippet.envVars));
-        const modelAliases = ProviderRegistry.getChatUIConfig(DEFAULT_CHAT_PROVIDER_ID).customModelAliases;
+        const modelAliases = ProviderRegistry.getChatUIConfig('claude').customModelAliases;
         const nextAliases = modelAliases?.get(settings) ?? {};
         for (const modelId of modelIds) {
           const alias = snippet.modelAliases[modelId]?.trim();
