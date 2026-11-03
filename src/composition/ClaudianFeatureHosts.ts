@@ -2,7 +2,6 @@ import type { App } from 'obsidian';
 
 import type { ConversationRepository } from '@/app/conversations/ConversationRepository';
 import type { ConversationService } from '@/app/conversations/ConversationService';
-import type { SessionSnapshotStore } from '@/app/conversations/SessionSnapshotStore';
 import type { ChatModelSelectionCoordinator } from '@/app/settings/ChatModelSelectionCoordinator';
 import type { EnvironmentSettingsService } from '@/app/settings/EnvironmentSettingsService';
 import type { SettingsCoordinator } from '@/app/settings/SettingsCoordinator';
@@ -21,6 +20,7 @@ import type {
 import type { ChatFeatureHost, ChatSessionRuntimes } from '@/features/chat/ChatFeatureHost';
 import type { ClaudianView } from '@/features/chat/ClaudianView';
 import type { ConversationLifecycle } from '@/features/chat/conversation/ConversationLifecycle';
+import type { SessionMessagingService, SessionToolBinding } from '@/features/chat/session-messaging/SessionMessagingService';
 import type { SessionRuntimePool } from '@/features/chat/sessions/SessionRuntimePool';
 import type { ZenModeSource } from '@/features/chat/zen/types';
 import type { ZenModeController } from '@/features/chat/zen/ZenModeController';
@@ -43,10 +43,10 @@ export interface FeatureHostDomains {
 
 export interface ChatFeatureHostDomains extends FeatureHostDomains {
   readonly sessionRuntimes: SessionRuntimePool;
+  readonly sessionMessaging: SessionMessagingService;
   readonly conversations: ConversationService;
   readonly executionPersistence: ConversationRepository;
   readonly chatModelSelection: ChatModelSelectionCoordinator;
-  readonly sessionSnapshots: SessionSnapshotStore;
   readonly conversationLifecycle: ConversationLifecycle;
   readonly zenMode: Pick<ZenModeController, 'register'>;
 }
@@ -121,12 +121,8 @@ export class ClaudianChatFeatureHost extends ClaudianFeatureHost implements Chat
     this.conversationLifecycle = domains.conversationLifecycle;
   }
 
-  writeSessionSnapshot(conversationId: string, markdown: string): Promise<string> {
-    return this.domains.sessionSnapshots.write(conversationId, markdown);
-  }
-
-  getSessionSnapshotDirectory(): string {
-    return this.domains.sessionSnapshots.directory;
+  bindSessionTools(conversationId: string): SessionToolBinding {
+    return this.domains.sessionMessaging.bindSessionTools(conversationId);
   }
 
   createConversation(options?: {
@@ -159,6 +155,10 @@ export class ClaudianChatFeatureHost extends ClaudianFeatureHost implements Chat
 
   renameConversation(id: string, title: string): Promise<void> {
     return this.domains.conversations.renameConversation(id, title);
+  }
+
+  completeConversationTitleGeneration(id: string, expectedTitle: string, title: string | null): Promise<void> {
+    return this.domains.conversations.completeConversationTitleGeneration(id, expectedTitle, title);
   }
 
   setLinkedContentPinned(contentPath: string, isPinned: boolean): Promise<void> {

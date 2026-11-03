@@ -41,6 +41,13 @@ function resolveImageFile(
   imagePath: string,
   options: Required<ReplaceImageEmbedsOptions>
 ): TFile | null {
+  // With a note context, resolve the embed through Obsidian's note-relative
+  // link resolution before the configured media-folder fallback.
+  if (options.sourcePath) {
+    const resolved = app.metadataCache.getFirstLinkpathDest(imagePath, options.sourcePath);
+    if (resolved) return resolved;
+  }
+
   let file = getVaultFileByPath(app, imagePath);
   if (file) return file;
 
@@ -50,10 +57,11 @@ function resolveImageFile(
     if (file) return file;
   }
 
-  const resolved = app.metadataCache.getFirstLinkpathDest(imagePath, options.sourcePath);
-  if (resolved) return resolved;
+  if (options.sourcePath) {
+    return null;
+  }
 
-  return null;
+  return app.metadataCache.getFirstLinkpathDest(imagePath, options.sourcePath);
 }
 
 

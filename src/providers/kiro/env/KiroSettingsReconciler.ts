@@ -32,8 +32,6 @@ export function computeKiroEnvironmentHash(settings: Record<string, unknown>): s
 }
 
 export const kiroSettingsReconciler: ProviderSettingsReconciler = {
-  environmentSessionPolicy: 'reload',
-
   invalidateConversationSessions: () => [],
 
   reconcileModelWithEnvironment(settings) {
@@ -48,7 +46,9 @@ export const kiroSettingsReconciler: ProviderSettingsReconciler = {
 
     clearCurrentKiroCatalog(settings);
     updateKiroProviderSettings(settings, { environmentHash });
-    return { changed: true, invalidatedConversations: [] };
+    // Kiro recycles its process and session/loads the same native session on
+    // environment changes rather than invalidating conversations.
+    return { changed: true, invalidatedConversations: [], sessionPolicy: 'reload' };
   },
 
   normalizeModelVariantSettings(settings): boolean {

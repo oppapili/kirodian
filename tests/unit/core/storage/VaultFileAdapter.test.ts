@@ -170,34 +170,6 @@ describe('VaultFileAdapter', () => {
     });
   });
 
-  describe('deleteFolder', () => {
-    it('deletes folder when it exists', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.rmdir = jest.fn().mockResolvedValue(undefined);
-
-      await vaultAdapter.deleteFolder('empty-folder');
-
-      expect(mockAdapter.exists).toHaveBeenCalledWith('empty-folder');
-      expect(mockAdapter.rmdir).toHaveBeenCalledWith('empty-folder', false);
-    });
-
-    it('does nothing when folder does not exist', async () => {
-      mockAdapter.exists.mockResolvedValue(false);
-      mockAdapter.rmdir = jest.fn();
-
-      await vaultAdapter.deleteFolder('nonexistent-folder');
-
-      expect(mockAdapter.rmdir).not.toHaveBeenCalled();
-    });
-
-    it('silently handles rmdir error (non-empty folder)', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.rmdir = jest.fn().mockRejectedValue(new Error('Directory not empty'));
-
-      await expect(vaultAdapter.deleteFolder('non-empty-folder')).resolves.toBeUndefined();
-    });
-  });
-
   describe('listFiles', () => {
     it('lists files in existing folder', async () => {
       mockAdapter.exists.mockResolvedValue(true);
@@ -229,41 +201,6 @@ describe('VaultFileAdapter', () => {
       });
 
       const result = await vaultAdapter.listFiles('folder');
-
-      expect(result).toEqual([]);
-    });
-  });
-
-  describe('listFolders', () => {
-    it('lists folders in existing directory', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.list.mockResolvedValue({
-        files: ['file.md'],
-        folders: ['folder1', 'folder2'],
-      });
-
-      const result = await vaultAdapter.listFolders('folder');
-
-      expect(result).toEqual(['folder1', 'folder2']);
-    });
-
-    it('returns empty array when folder does not exist', async () => {
-      mockAdapter.exists.mockResolvedValue(false);
-
-      const result = await vaultAdapter.listFolders('folder');
-
-      expect(result).toEqual([]);
-      expect(mockAdapter.list).not.toHaveBeenCalled();
-    });
-
-    it('returns empty array when no folders exist', async () => {
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.list.mockResolvedValue({
-        files: ['file.md'],
-        folders: [],
-      });
-
-      const result = await vaultAdapter.listFolders('folder');
 
       expect(result).toEqual([]);
     });
@@ -879,13 +816,15 @@ describe('VaultFileAdapter', () => {
       await fs.rm(vaultPath, { recursive: true, force: true });
     });
 
-    it('creates a relative folder link and reports it as linked to the target', async () => {
+    it('creates a native folder link and reports it as linked to the target', async () => {
       await fs.mkdir(path.join(vaultPath, '.agents/skills'), { recursive: true });
 
       await files.createFolderLink('.claude/skills', '.agents/skills');
 
       expect(await fs.readlink(path.join(vaultPath, '.claude/skills'))).toBe(
-        path.join('..', '.agents', 'skills'),
+        process.platform === 'win32'
+          ? path.join(vaultPath, '.agents', 'skills')
+          : path.join('..', '.agents', 'skills'),
       );
       await expect(files.inspectFolderLink('.claude/skills', '.agents/skills')).resolves.toBe('linked');
     });

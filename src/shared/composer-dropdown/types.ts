@@ -13,6 +13,11 @@ export interface ComposerInputElement extends HTMLElement {
   setCommandResolver?: (resolver: ComposerCommandResolver | null) => void;
   /** Completed chips are not editable completion queries. */
   isChipRange?: (from: number, to: number) => boolean;
+  /**
+   * Whether the collapsed caret is on the first (`up`) or last (`down`) rendered row, counting soft
+   * wraps. Null when the input cannot measure its layout.
+   */
+  isCaretOnEdgeRow?: (direction: 'up' | 'down') => boolean | null;
   /** Element currently exposed as the textbox; popup relationships belong on it. Defaults to the input itself. */
   getAccessibleTextbox?: () => HTMLElement;
 }
@@ -39,21 +44,6 @@ export interface ComposerDropdownValueItem {
   readonly value?: unknown;
 }
 
-export interface ComposerDropdownFolderItem {
-  readonly className?: string;
-  readonly detail?: string;
-  readonly disabled?: boolean;
-  readonly icon?: string;
-  readonly id: string;
-  readonly inputPrefix?: string;
-  readonly kind: 'folder';
-  readonly label: string;
-  load(
-    query: string,
-    signal: AbortSignal,
-  ): Promise<readonly ComposerDropdownItem[]> | readonly ComposerDropdownItem[];
-}
-
 export interface ComposerDropdownStatusItem {
   readonly className?: string;
   readonly detail?: string;
@@ -65,7 +55,6 @@ export interface ComposerDropdownStatusItem {
 
 export type ComposerDropdownItem =
   | ComposerDropdownValueItem
-  | ComposerDropdownFolderItem
   | ComposerDropdownStatusItem;
 
 export type ComposerSelectionAction =

@@ -70,7 +70,7 @@ function createRenderer(
   const el = messagesEl ?? createMockEl();
   const comp = createMockComponent();
   const plugin = {
-    app: {},
+    app: { keymap: { pushScope: () => {}, popScope: () => {} } },
     settings: { mediaFolder: '', ...settings },
   };
   return {
@@ -178,11 +178,12 @@ describe('MessageRenderer', () => {
     const msgEl = messagesEl.children[0];
     expect(msgEl.hasClass('claudian-message-assistant')).toBe(true);
 
-    // The content div should have both content rendering and an interrupt indicator
+    // The content div should have both content rendering and an interrupt indicator.
+    // The interrupt label renders as a `.claudian-interrupted` span appended via
+    // appendInterruptLabel into its own text block.
     const contentEl = msgEl.children[0];
-    const lastChild = contentEl.children[contentEl.children.length - 1];
-    const interruptedEl = lastChild.children[0];
-    expect(interruptedEl.hasClass('claudian-interrupted')).toBe(true);
+    const interruptedEl = contentEl.querySelector('.claudian-interrupted')!;
+    expect(interruptedEl).not.toBeNull();
     expect(interruptedEl.textContent).toBe('Interrupted');
   });
 

@@ -25,6 +25,7 @@ import {
   type ProviderConfigMap,
   type SessionManagerOrganization,
   type StoredChatModelSelection,
+  type StoredInlineEditModelSelection,
   type ZenModePosition,
 } from '../../core/types/settings';
 import { DEFAULT_CLAUDIAN_SETTINGS } from './defaultSettings';
@@ -433,6 +434,15 @@ function isHiddenProviderId(providerId: ProviderId): boolean {
     && ProviderRegistry.isHidden(providerId);
 }
 
+function normalizeStoredInlineEditModelSelection(
+  value: unknown,
+): StoredInlineEditModelSelection | null {
+  const selection = normalizeStoredChatModelSelection(value);
+  if (!selection) return null;
+  const reasoning = trimStoredString((value as Record<string, unknown>).reasoning);
+  return reasoning ? { ...selection, reasoning } : selection;
+}
+
 function migrateLegacyChatModelSelection(
   stored: Record<string, unknown>,
 ): StoredChatModelSelection | null {
@@ -549,6 +559,7 @@ export class ClaudianSettingsStorage {
       sessionManagerOrganization,
       pinnedLinkedContentPaths,
       lastSelectedChatModel,
+      inlineEditModel: normalizeStoredInlineEditModelSelection(stored.inlineEditModel),
     };
 
     const merged = {

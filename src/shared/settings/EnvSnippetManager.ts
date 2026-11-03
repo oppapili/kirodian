@@ -104,6 +104,8 @@ export class EnvSnippetModal extends Modal {
 
     const renderContextLimitFields = () => {
       if (!contextLimitsContainer) return;
+      const draftLimits = new Map([...contextLimitInputs].map(([id, input]) => [id, input.value]));
+      const draftAliases = new Map([...modelAliasInputs].map(([id, input]) => [id, input.value]));
       contextLimitsContainer.empty();
       contextLimitInputs.clear();
       modelAliasInputs.clear();
@@ -144,7 +146,7 @@ export class EnvSnippetModal extends Modal {
           placeholder: t('settings.customModelAliases.placeholder'),
           cls: 'claudian-snippet-alias-input',
         });
-        aliasInput.value = existingAliases[modelId] ?? '';
+        aliasInput.value = draftAliases.get(modelId) ?? existingAliases[modelId] ?? '';
         aliasInput.setAttribute('aria-label', `Alias for ${modelId}`);
         aliasInput.setAttribute('aria-description', t('settings.customModelAliases.ariaDescription'));
         modelAliasInputs.set(modelId, aliasInput);
@@ -154,7 +156,8 @@ export class EnvSnippetModal extends Modal {
           placeholder: '200k',
           cls: 'claudian-snippet-limit-input',
         });
-        input.value = existingLimits[modelId] ? formatContextLimit(existingLimits[modelId]) : '';
+        input.value = draftLimits.get(modelId)
+          ?? (existingLimits[modelId] ? formatContextLimit(existingLimits[modelId]) : '');
         input.setAttribute('aria-label', `Context window for ${modelId}`);
         contextLimitInputs.set(modelId, input);
       }
@@ -338,9 +341,14 @@ export class EnvSnippetManager {
       this.scope,
       (snippet) => {
         void (async (): Promise<void> => {
-          await this.plugin.mutateSettings((settings) => {
-            settings.envSnippets.push(snippet);
-          });
+          try {
+            await this.plugin.mutateSettings((settings) => {
+              settings.envSnippets.push(snippet);
+            });
+          } catch {
+            new Notice('Could not complete environment snippet save');
+            return;
+          }
           this.render();
           new Notice(`Environment snippet "${snippet.name}" saved`);
         })();
@@ -409,12 +417,17 @@ export class EnvSnippetManager {
         void (async (): Promise<void> => {
           const exists = this.plugin.settings.envSnippets.some(s => s.id === snippet.id);
           if (exists) {
-            await this.plugin.mutateSettings((settings) => {
-              const index = settings.envSnippets.findIndex(s => s.id === snippet.id);
-              if (index !== -1) {
-                settings.envSnippets[index] = updatedSnippet;
-              }
-            });
+            try {
+              await this.plugin.mutateSettings((settings) => {
+                const index = settings.envSnippets.findIndex(s => s.id === snippet.id);
+                if (index !== -1) {
+                  settings.envSnippets[index] = updatedSnippet;
+                }
+              });
+            } catch {
+              new Notice('Could not complete environment snippet update');
+              return;
+            }
             this.render();
             new Notice(`Environment snippet "${updatedSnippet.name}" updated`);
           }

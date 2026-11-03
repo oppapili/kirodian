@@ -294,7 +294,8 @@ it('keeps the explicit send shortcut focused inside the editor', () => {
 it('lets image attachment handling consume image paste before the rich editor inserts fallback text', () => {
   const parent = document.body.createDiv({ cls: 'claudian-input-wrapper' });
   const editor = createEditor(parent);
-  const images = new ImageContextManager(parent, editor.element, {});
+  const keymap = { pushScope: jest.fn(), popScope: jest.fn() } as never;
+  const images = new ImageContextManager(keymap, parent, editor.element, {});
   editor.element.value = 'Keep this';
   editor.element.focus();
   const clipboardData = {

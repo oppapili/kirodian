@@ -1,6 +1,7 @@
 export interface MockElement {
   tagName: string;
   children: MockElement[];
+  childNodes: MockElement[];
   style: Record<string, string>;
   dataset: Record<string, string>;
   scrollLeft: number;
@@ -200,6 +201,11 @@ export function createMockEl(tag = 'div'): any {
   const element: MockElement = {
     tagName: tag.toUpperCase(),
     children,
+    // These mocks only hold element children, so childNodes mirrors children for DOM APIs
+    // (e.g. Array.from(el.childNodes)) that the real elements expose.
+    get childNodes() {
+      return children;
+    },
     style,
     dataset,
     scrollLeft: 0,

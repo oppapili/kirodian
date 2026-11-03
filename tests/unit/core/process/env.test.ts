@@ -4,18 +4,28 @@ import type * as pathType from 'path';
 const fs = jest.requireActual<typeof fsType>('fs');
 const path = jest.requireActual<typeof pathType>('path');
 
+import { parsePathEntries } from '@/core/process/cliPath';
 import * as env from '@/core/process/env';
 
 const {
   cliPathRequiresNode,
   findNodeDirectory,
   findNodeExecutable,
+  findNodeExecutables,
   getEnhancedPath,
   parseEnvironmentVariables,
 } = env;
 
 const isWindows = process.platform === 'win32';
 const SEP = isWindows ? ';' : ':';
+
+/** Narrow `fs.accessSync` boundary: listed candidates are executable, all others fail admission. */
+function mockExecuteAccess(...runnablePaths: string[]): void {
+  jest.spyOn(fs, 'accessSync').mockImplementation(((p: fsType.PathLike) => {
+    if (runnablePaths.includes(String(p))) return;
+    throw Object.assign(new Error(`EACCES: permission denied, access '${String(p)}'`), { code: 'EACCES' });
+  }) as typeof fs.accessSync);
+}
 
 describe('parseEnvironmentVariables', () => {
   it('parses simple KEY=VALUE pairs', () => {
@@ -208,18 +218,69 @@ describe('getEnhancedPath', () => {
       delete process.env.ASDF_DIR;
     });
 
-    it('includes FNM_MULTISHELL_PATH when set', () => {
-      process.env.FNM_MULTISHELL_PATH = '/tmp/fnm_multishell';
-      const result = getEnhancedPath();
-      expect(result).toContain('/tmp/fnm_multishell');
-      delete process.env.FNM_MULTISHELL_PATH;
+    describe('fnm aliases (Unix)', () => {
+      if (isWindows) return;
+
+      it('includes default Node.js bins without the fnm shell hook', () => {
+        delete process.env.XDG_DATA_HOME;
+        process.env.FNM_DIR = '/custom/fnm';
+        process.env.HOME = '/fake/home';
+        const entries = parsePathEntries(getEnhancedPath());
+        expect(entries).toEqual(expect.arrayContaining([
+          '/custom/fnm/aliases/default/bin',
+          '/fake/home/.local/share/fnm/aliases/default/bin',
+          '/fake/home/.fnm/aliases/default/bin',
+          ...(process.platform === 'darwin' ? ['/fake/home/Library/Application Support/fnm/aliases/default/bin'] : []),
+        ]));
+      });
     });
 
-    it('includes FNM_DIR when set', () => {
-      process.env.FNM_DIR = '/custom/fnm';
-      const result = getEnhancedPath();
-      expect(result).toContain('/custom/fnm');
-      delete process.env.FNM_DIR;
+    describe('other Node.js and CLI managers (Unix)', () => {
+      if (isWindows) return;
+
+      const managerVariables = ['NODENV_ROOT', 'PROTO_HOME', 'PNPM_HOME', 'N_PREFIX', 'NVS_HOME', 'XDG_DATA_HOME'];
+
+      it('includes default locations without shell variables', () => {
+        for (const key of managerVariables) delete process.env[key];
+        process.env.HOME = '/fake/home';
+        const entries = parsePathEntries(getEnhancedPath());
+        expect(entries).toEqual(expect.arrayContaining([
+          '/fake/home/.local/share/pi-node/current/bin',
+          '/fake/home/.nodenv/shims',
+          '/fake/home/.proto/shims',
+          '/fake/home/.proto/bin',
+          '/fake/home/.local/share/pnpm',
+          '/fake/home/.nvs/default/bin',
+          '/fake/home/.nix-profile/bin',
+          '/nix/var/nix/profiles/default/bin',
+          '/run/current-system/sw/bin',
+          '/opt/local/bin',
+          '/home/linuxbrew/.linuxbrew/bin',
+          ...(process.platform === 'darwin' ? ['/fake/home/Library/pnpm'] : []),
+        ]));
+      });
+
+      it('follows manager home variables', () => {
+        process.env.HOME = '/fake/home';
+        process.env.XDG_DATA_HOME = '/xdg';
+        process.env.NODENV_ROOT = '/custom/nodenv';
+        process.env.PROTO_HOME = '/custom/proto';
+        process.env.PNPM_HOME = '/custom/pnpm';
+        process.env.N_PREFIX = '/custom/n';
+        process.env.NVS_HOME = '/custom/nvs';
+        const entries = parsePathEntries(getEnhancedPath());
+        expect(entries).toEqual(expect.arrayContaining([
+          '/xdg/pi-node/current/bin',
+          '/xdg/pnpm',
+          '/custom/nodenv/shims',
+          '/custom/proto/shims',
+          '/custom/proto/bin',
+          '/custom/pnpm',
+          '/custom/n/bin',
+          '/custom/nvs/default/bin',
+        ]));
+        expect(entries).not.toContain('/fake/home/.nodenv/shims');
+      });
     });
 
     it('includes NVM_BIN when set', () => {
@@ -353,6 +414,22 @@ describe('getEnhancedPath', () => {
           expect(result).not.toContain('v20.10.0');
         }
       );
+
+      it('resolves a custom v-prefixed alias through its alias file', () => {
+        delete process.env.NVM_BIN;
+        process.env.NVM_DIR = '/custom/nvm';
+        mockNvm({
+          nvmDir: '/custom/nvm',
+          aliasFiles: {
+            '/custom/nvm/alias/default': 'vault-node',
+            '/custom/nvm/alias/vault-node': 'v24.16.0',
+          },
+          versions: ['v24.16.0'],
+        });
+
+        const entries = parsePathEntries(getEnhancedPath());
+        expect(entries).toContain('/custom/nvm/versions/node/v24.16.0/bin');
+      });
     });
   });
 
@@ -367,6 +444,7 @@ describe('getEnhancedPath', () => {
       jest.spyOn(fs, 'statSync').mockImplementation(
         p => ({ isFile: () => String(p) === nodePath }) as fsType.Stats
       );
+      mockExecuteAccess(nodePath);
       return nodePath;
     }
 
@@ -431,6 +509,7 @@ describe('getEnhancedPath', () => {
       jest.spyOn(fs, 'statSync').mockImplementation(
         p => ({ isFile: () => String(p) === nodePath }) as fsType.Stats
       );
+      mockExecuteAccess(nodePath);
     }
 
     it('adds CLI directory to PATH when it contains node (Unix nvm)', () => {
@@ -478,6 +557,23 @@ describe('getEnhancedPath', () => {
       expect(result).not.toContain(cliDir);
     });
 
+    it('does not add a CLI directory whose sibling node lacks execute access', () => {
+      if (isWindows) return;
+
+      const cliDir = '/custom/bin';
+      const cliPath = path.join(cliDir, 'cli.js');
+      const nodePath = path.join(cliDir, 'node');
+      jest.spyOn(fs, 'existsSync').mockImplementation(p => String(p) === nodePath);
+      jest.spyOn(fs, 'statSync').mockImplementation(
+        p => ({ isFile: () => String(p) === nodePath }) as fsType.Stats
+      );
+      mockExecuteAccess();
+
+      process.env.PATH = '/usr/bin';
+      const result = getEnhancedPath(undefined, cliPath);
+      expect(result.split(SEP)).not.toContain(cliDir);
+    });
+
     it('CLI directory has higher priority than fallback node search', () => {
       if (isWindows) return;
 
@@ -490,6 +586,7 @@ describe('getEnhancedPath', () => {
       jest.spyOn(fs, 'statSync').mockImplementation(
         p => ({ isFile: () => String(p) === nodePath }) as fsType.Stats
       );
+      mockExecuteAccess(nodePath);
 
       process.env.PATH = '/usr/bin';
       const result = getEnhancedPath(undefined, cliPath);
@@ -663,6 +760,7 @@ describe('findNodeDirectory', () => {
     jest.spyOn(fs, 'statSync').mockImplementation(
       () => ({ isFile: () => true }) as fsType.Stats
     );
+    mockExecuteAccess(preferredNode, fallbackNode);
 
     process.env.PATH = fallbackDir;
 
@@ -679,9 +777,54 @@ describe('findNodeDirectory', () => {
     jest.spyOn(fs, 'statSync').mockImplementation(
       () => ({ isFile: () => true }) as fsType.Stats
     );
+    mockExecuteAccess(preferredNode);
 
     const result = findNodeExecutable(preferredDir);
     expect(result).toBe(preferredNode);
+  });
+
+  it('skips inaccessible and non-executable candidates in favor of a later usable one', () => {
+    if (isWindows) return;
+
+    const brokenNode = '/broken/bin/node';
+    const badNode = '/bad/bin/node';
+    const goodNode = '/good/bin/node';
+    jest.spyOn(fs, 'existsSync').mockImplementation(p => {
+      const candidate = String(p);
+      return candidate === brokenNode || candidate === badNode || candidate === goodNode;
+    });
+    jest.spyOn(fs, 'statSync').mockImplementation(((p: fsType.PathLike) => {
+      if (String(p) === brokenNode) {
+        throw Object.assign(new Error('EACCES: permission denied, stat'), { code: 'EACCES' });
+      }
+      return { isFile: () => true } as fsType.Stats;
+    }) as typeof fs.statSync);
+    mockExecuteAccess(goodNode);
+
+    process.env.PATH = '';
+    const search = `/broken/bin${SEP}/bad/bin${SEP}/good/bin`;
+    expect(findNodeDirectory(search)).toBe('/good/bin');
+    expect(findNodeExecutable(search)).toBe(goodNode);
+  });
+
+  it('reports no Node executable when every candidate lacks execute access', () => {
+    if (isWindows) return;
+
+    const firstNode = '/first/bin/node';
+    const secondNode = '/second/bin/node';
+    jest.spyOn(fs, 'existsSync').mockImplementation(p => {
+      const candidate = String(p);
+      return candidate === firstNode || candidate === secondNode;
+    });
+    jest.spyOn(fs, 'statSync').mockImplementation(
+      () => ({ isFile: () => true }) as fsType.Stats
+    );
+    mockExecuteAccess();
+
+    process.env.PATH = '';
+    const search = `/first/bin${SEP}/second/bin`;
+    expect(findNodeDirectory(search)).toBeNull();
+    expect(findNodeExecutables(search)).toEqual([]);
   });
 });
 
@@ -748,6 +891,44 @@ describe('getExtraBinaryPaths (Windows branches)', () => {
     expect(result).toContain('nvm');
   });
 
+  it('includes fnm default Node.js aliases without the PowerShell hook', () => {
+    process.env.APPDATA = '/mock/AppData/Roaming';
+    process.env.LOCALAPPDATA = '/mock/AppData/Local';
+    process.env.HOME = '/mock/home';
+    process.env.FNM_DIR = '/mock/fnm';
+    const entries = loadWithWindowsPlatform().getEnhancedPath().split(';');
+    expect(entries).toEqual(expect.arrayContaining([
+      '/mock/fnm/aliases/default',
+      '/mock/AppData/Roaming/fnm/aliases/default',
+      '/mock/AppData/Local/fnm/aliases/default',
+    ].map(entry => path.normalize(entry))));
+    expect(entries).not.toContain(path.join('/mock/fnm', 'aliases', 'default', 'bin'));
+  });
+
+  it('includes pnpm, proto, nvs, Yarn, and WinGet locations', () => {
+    for (const key of ['PNPM_HOME', 'PROTO_HOME', 'NVS_HOME']) delete process.env[key];
+    process.env.LOCALAPPDATA = '/mock/AppData/Local';
+    process.env.USERPROFILE = '/mock/home';
+    process.env.HOME = '/mock/home';
+    let entries = loadWithWindowsPlatform().getEnhancedPath().split(';');
+    expect(entries).toEqual(expect.arrayContaining([
+      '/mock/AppData/Local/pnpm',
+      '/mock/home/.proto/shims',
+      '/mock/home/.proto/bin',
+      '/mock/AppData/Local/nvs/default',
+      '/mock/AppData/Local/Yarn/bin',
+      '/mock/AppData/Local/Microsoft/WinGet/Links',
+    ].map(entry => path.normalize(entry))));
+
+    process.env.PNPM_HOME = '/custom/pnpm';
+    process.env.PROTO_HOME = '/custom/proto';
+    process.env.NVS_HOME = '/custom/nvs';
+    entries = loadWithWindowsPlatform().getEnhancedPath().split(';');
+    expect(entries).toEqual(expect.arrayContaining([
+      '/custom/pnpm', path.join('/custom/proto', 'shims'), path.join('/custom/proto', 'bin'), path.join('/custom/nvs', 'default'),
+    ]));
+  });
+
   it('includes VOLTA_HOME/bin when set', () => {
     process.env.VOLTA_HOME = '/mock/volta';
     process.env.HOME = '/mock/home';
@@ -762,31 +943,6 @@ describe('getExtraBinaryPaths (Windows branches)', () => {
     const mod = loadWithWindowsPlatform();
     const result = mod.getEnhancedPath();
     expect(result).toContain('.volta');
-  });
-
-  it('includes FNM_MULTISHELL_PATH when set', () => {
-    process.env.FNM_MULTISHELL_PATH = '/mock/fnm/multishell';
-    process.env.HOME = '/mock/home';
-    const mod = loadWithWindowsPlatform();
-    const result = mod.getEnhancedPath();
-    expect(result).toContain('/mock/fnm/multishell');
-  });
-
-  it('includes FNM_DIR when set', () => {
-    process.env.FNM_DIR = '/mock/fnm/dir';
-    process.env.HOME = '/mock/home';
-    const mod = loadWithWindowsPlatform();
-    const result = mod.getEnhancedPath();
-    expect(result).toContain('/mock/fnm/dir');
-  });
-
-  it('falls back to LOCALAPPDATA/fnm when FNM_DIR not set', () => {
-    delete process.env.FNM_DIR;
-    process.env.LOCALAPPDATA = '/mock/AppData/Local';
-    process.env.HOME = '/mock/home';
-    const mod = loadWithWindowsPlatform();
-    const result = mod.getEnhancedPath();
-    expect(result).toContain('fnm');
   });
 
   it('includes ChocolateyInstall/bin when set', () => {
@@ -959,6 +1115,7 @@ describe('environment variable parsing edge cases', () => {
 it('does not reopen a CLI whose directory already supplies Node', () => {
   const exists = jest.spyOn(fs, 'existsSync').mockReturnValue(true);
   const stat = jest.spyOn(fs, 'statSync').mockReturnValue({ isFile: () => true } as fsType.Stats);
+  mockExecuteAccess('/cli/node');
   const open = jest.spyOn(fs, 'openSync').mockImplementation(() => { throw new Error('unnecessary read'); });
   try {
     getEnhancedPath(undefined, '/cli/claude');

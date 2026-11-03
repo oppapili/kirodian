@@ -3,7 +3,6 @@ import { testClock } from '@test/helpers/testClock';
 import { Notice, TFile, TFolder } from 'obsidian';
 
 import type { ConversationRepository } from '@/app/conversations/ConversationRepository';
-import { SessionSnapshotStore } from '@/app/conversations/SessionSnapshotStore';
 import { PinnedLinkedContentPathCoordinator } from '@/app/settings/PinnedLinkedContentPathCoordinator';
 import type { ConversationPersistenceStore } from '@/app/storage/ConversationPersistenceStore';
 import type { SessionMetadataReadResult } from '@/app/storage/SessionStorage';
@@ -18,6 +17,7 @@ import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCo
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import { type ClaudianSettings, type SessionMetadata, VIEW_TYPE_CLAUDIAN } from '@/core/types';
 import { ZenModeController } from '@/features/chat/zen/ZenModeController';
+import { registerBuiltInProviders } from '@/providers';
 import { computeKiroEnvironmentHash } from '@/providers/kiro/env/KiroSettingsReconciler';
 import {
   getKiroProviderSettings,
@@ -366,34 +366,6 @@ describe('ClaudianPlugin', () => {
       await new Promise(resolve => setTimeout(resolve, 5));
       await (plugin as any).sessionInputCleanup;
       expect(files.has(inputPath)).toBe(mode !== 'run');
-    });
-
-    it('defers snapshot maintenance, aborts it on unload, and joins it before shutdown', async () => {
-      let entered!: () => void;
-      const started = new Promise<void>(resolve => { entered = resolve; });
-      let release!: () => void;
-      const gate = new Promise<void>(resolve => { release = resolve; });
-      let signal: AbortSignal | undefined;
-      const sweep = jest.spyOn(SessionSnapshotStore.prototype, 'sweep').mockImplementation(async received => {
-        signal = received;
-        entered();
-        await gate;
-      });
-      try {
-        await plugin.onload();
-        expect(sweep).not.toHaveBeenCalled();
-        for (const [ready] of mockApp.workspace.onLayoutReady.mock.calls) ready();
-        await started;
-        plugin.onunload();
-        expect(signal?.aborted).toBe(true);
-        let stopped = false;
-        const shutdown = (plugin as any).applicationShutdownPromise.then(() => { stopped = true; });
-        await Promise.resolve();
-        expect(stopped).toBe(false);
-        release();
-        await shutdown;
-        expect(stopped).toBe(true);
-      } finally { release(); sweep.mockRestore(); }
     });
 
     it('joins an admitted input deletion on unload and leaves remaining inputs for the next launch', async () => {
@@ -1249,7 +1221,7 @@ describe('ClaudianPlugin', () => {
         plugin.settings,
         { providerTransitionOwner: true },
       );
-    });
+    }, 15000);
 
     it('does not initialize a cold provider for transition-owner CLI resolution', async () => {
       await plugin.onload();
@@ -1266,6 +1238,15 @@ describe('ClaudianPlugin', () => {
         providerTransitionOwner: true,
       })).rejects.toThrow('requires initialized workspace services');
       expect(initialize).not.toHaveBeenCalled();
+    }, 15000);
+
+    // The transition-owner cases above mutate the global ProviderWorkspaceRegistry
+    // for 'kiro' (setServices/register) without restoring it. Left polluted, a
+    // later plugin.onload() in the same worker can hang on a broken kiro workspace
+    // under CI test sharding. Rebuild the built-in registration after each case.
+    afterEach(() => {
+      ProviderWorkspaceRegistry.clear();
+      registerBuiltInProviders();
     });
 
     it('recovers the committed environment before surfacing a post-commit publication failure', async () => {

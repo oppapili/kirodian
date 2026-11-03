@@ -5,6 +5,7 @@
  */
 
 import type { ProviderExecutionContext, ProviderSelectionSnapshot, ProviderSessionReference } from '@/core/execution/ProviderExecutionRequest';
+import { decodeSessionMessage } from '@/core/session-tools/sessionMessageEnvelope';
 
 import { appendBrowserContext } from './browserContext';
 import { appendCanvasContext } from './canvasContext';
@@ -61,8 +62,16 @@ function extractContentBeforeXMLContext(text: string): string | undefined {
   return undefined;
 }
 
+/** The text a user message shows: its display text, else its content without injected context. */
+export function getUserDisplayText(message: { content: string; displayContent?: string }): string {
+  return message.displayContent ?? extractUserDisplayContent(message.content) ?? message.content;
+}
+
 export function extractUserDisplayContent(text: string): string | undefined {
   if (!text) return undefined;
+
+  const sessionMessage = decodeSessionMessage(text);
+  if (sessionMessage) return sessionMessage.text;
 
   const xmlDisplayContent = extractContentBeforeXMLContext(text);
   if (xmlDisplayContent !== undefined) {
@@ -86,6 +95,10 @@ export function extractUserDisplayContent(text: string): string | undefined {
  */
 export function extractUserQuery(prompt: string): string {
   if (!prompt) return '';
+
+  // Match the live display body, which is compared against this native form.
+  const sessionMessage = decodeSessionMessage(prompt);
+  if (sessionMessage) return extractUserQuery(sessionMessage.text);
 
   // Try to extract content before XML context
   const extracted = extractContentBeforeXMLContext(prompt);
@@ -121,13 +134,12 @@ export function appendContextFiles(prompt: string, files: string[]): string {
 export function appendSessionReferences(
   prompt: string,
   references?: readonly ProviderSessionReference[],
-  mapPath: (path: string) => string = path => path,
 ): string {
   if (!references?.length) return prompt;
   const entries = references.map(reference => {
     const attributes = {
       title: reference.title, id: reference.id, provider: reference.providerId,
-      updated: reference.updatedAt, path: mapPath(reference.snapshotPath),
+      updated: reference.updatedAt,
     };
     return `<context_session ${Object.entries(attributes)
       .map(([name, value]) => `${name}="${escapePromptXMLAttribute(value)}"`).join(' ')} />`;

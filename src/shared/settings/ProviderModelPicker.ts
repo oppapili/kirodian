@@ -40,6 +40,7 @@ export function renderProviderModelPicker(
   let disposed = false;
   const isLoading = () => options.getState().status === 'loading';
   let draggedModelId: string | null = null;
+  let renderingSelected = false;
 
   const summaryEl = pickerEl.createDiv({ cls: 'claudian-provider-model-picker-summary' });
   const selectedEl = pickerEl.createDiv({ cls: 'claudian-provider-model-picker-selected' });
@@ -133,7 +134,7 @@ export function renderProviderModelPicker(
     renderSelected();
   };
 
-  const renderSelected = (): void => {
+  const renderSelectedRows = (): void => {
     selectedEl.empty();
     const state = options.getState();
     if (state.selectedIds.length === 0) {
@@ -272,11 +273,11 @@ export function renderProviderModelPicker(
         type: 'text',
       });
       aliasInput.placeholder = defaultLabel;
-      aliasInput.value = state.aliases[model.id] ?? '';
+      aliasInput.value = aliasInput.defaultValue = state.aliases[model.id] ?? '';
       aliasInput.setAttribute('aria-label', t('settings.customModelAliases.ariaLabel', { model: defaultLabel }));
       aliasInput.setAttribute('aria-description', t('settings.customModelAliases.ariaDescription'));
       aliasInput.addEventListener('blur', () => {
-        void persistAlias(model.id, aliasInput.value);
+        if (!renderingSelected) void persistAlias(model.id, aliasInput.value);
       });
       aliasInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter') {
@@ -298,6 +299,39 @@ export function renderProviderModelPicker(
       removeButton.addEventListener('click', () => {
         void persistSelection({ type: 'set', modelId: model.id, selected: false });
       });
+    }
+  };
+
+  const renderSelected = (): void => {
+    if (disposed) return;
+    // Read current focus at render time, never from an earlier asynchronous action.
+    const active = selectedEl.contains(selectedEl.ownerDocument.activeElement)
+      ? selectedEl.ownerDocument.activeElement as HTMLElement : null;
+    const modelId = active?.closest('[data-model-id]')?.getAttribute('data-model-id');
+    const control = ['alias', 'drag', 'remove', 'clear'].find(kind =>
+      active?.classList.contains(`claudian-provider-model-picker-selected-${kind}`));
+    const input = control === 'alias' ? active as HTMLInputElement : null;
+    const draft = input && input.value !== input.defaultValue ? input.value : null;
+    const selection = input ? [input.selectionStart, input.selectionEnd, input.selectionDirection] as const : null;
+
+    // Native removal can blur a dirty input; a render must not commit its draft.
+    renderingSelected = true;
+    try {
+      renderSelectedRows();
+      const row = modelId ? [...selectedEl.querySelectorAll<HTMLElement>('[data-model-id]')]
+        .find(element => element.getAttribute('data-model-id') === modelId) : selectedEl;
+      const replacement = control
+        ? row?.querySelector<HTMLElement>(`.claudian-provider-model-picker-selected-${control}`) : null;
+      if (replacement?.isConnected && !disposed) {
+        if (control === 'alias' && selection) {
+          const alias = replacement as HTMLInputElement;
+          if (draft !== null) alias.value = draft;
+          alias.setSelectionRange(selection[0], selection[1], selection[2] ?? undefined);
+        }
+        replacement.focus({ preventScroll: true });
+      }
+    } finally {
+      renderingSelected = false;
     }
   };
 
@@ -360,6 +394,8 @@ export function renderProviderModelPicker(
     const models = state.models.filter(matchesFilter);
 
     if (models.length === 0) {
+      // The status above owns failed discovery; an empty-catalog hint would imply success.
+      if (state.status === 'failed' && state.models.length === 0) return;
       listEl.createDiv({
         cls: 'claudian-provider-model-picker-empty',
         text: isLoading()

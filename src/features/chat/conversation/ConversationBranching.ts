@@ -1,7 +1,7 @@
 import { Notice } from 'obsidian';
 
 import type { ConversationBranchResult } from '@/core/execution';
-import { extractUserDisplayContent } from '@/core/prompt/promptContext';
+import { getUserDisplayText } from '@/core/prompt/promptContext';
 import type { ChatMessage } from '@/core/types';
 import type { ComposerDraft, ComposerDraftController } from '@/features/chat/composer/ComposerDraftController';
 import type { ChatExecutionCoordinator } from '@/features/chat/execution/ChatExecutionCoordinator';
@@ -48,6 +48,14 @@ export class ConversationBranching {
     return this.#state.kind !== 'idle';
   }
 
+  /** The transcript the user sees: a preview shows only the messages before the edited prompt. */
+  get visibleMessages(): readonly ChatMessage[] {
+    const { messages } = this.deps.state;
+    if (this.#state.kind !== 'preview') return messages;
+    const index = messages.indexOf(this.#state.draft.message);
+    return index < 0 ? messages : messages.slice(0, index);
+  }
+
   /** Forgets branch state when the tab loads another conversation or a new chat. */
   reset(): void {
     this.#state = { kind: 'idle' };
@@ -81,7 +89,7 @@ export class ConversationBranching {
     if (!branchMessageId) {
       this.#state = { kind: 'preview', draft: { conversationId, message, previousDraft,
         scrollTop: (this.deps.getMessagesEl()?.scrollTop ?? 0) } };
-      const content = message.displayContent ?? extractUserDisplayContent(message.content) ?? message.content;
+      const content = getUserDisplayText(message);
       this.deps.renderTranscript(messages.slice(0, messages.indexOf(message)), false);
       drafts.restore('main', { content, images: message.images }, { focus: true, notify: true });
       return;

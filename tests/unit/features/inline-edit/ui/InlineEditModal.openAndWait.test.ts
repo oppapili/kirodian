@@ -20,11 +20,8 @@ function createDeferred(): { promise: Promise<void>; resolve: () => void } {
 
 function createInertInlineEditService() {
   return {
-    cancel: jest.fn(),
-    continueConversation: jest.fn(),
-    editText: jest.fn(),
-    resetConversation: jest.fn(),
-    setModelOverride: jest.fn(),
+    send: jest.fn(),
+    end: jest.fn(),
   };
 }
 
@@ -185,6 +182,12 @@ describe('InlineEditModal - openAndWait', () => {
       createElement: (tagName: string) => createMockEl(tagName),
       addEventListener: jest.fn(),
       removeEventListener: jest.fn(),
+      // The merged composer installs its accept/reject key handler on the document's
+      // defaultView, so the fake document exposes one with the window listener API.
+      defaultView: {
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      },
     };
 
     try {
@@ -201,6 +204,7 @@ describe('InlineEditModal - openAndWait', () => {
         settings: {
           hiddenCommands: [],
         },
+        getActiveEnvironmentVariables: () => ({}),
       } as any;
       plugin.providerHost = plugin;
       const editor = {} as any;
@@ -230,6 +234,7 @@ describe('InlineEditModal - openAndWait', () => {
           },
         },
         dispatch,
+        focus: jest.fn(),
         dom: {
           ownerDocument: (global as any).document,
           addEventListener: jest.fn(),
@@ -294,6 +299,12 @@ describe('InlineEditModal - openAndWait', () => {
       createElement: (tagName: string) => createMockEl(tagName),
       addEventListener: jest.fn(),
       removeEventListener: jest.fn(),
+      // The merged composer installs its accept/reject key handler on the document's
+      // defaultView, so the fake document exposes one with the window listener API.
+      defaultView: {
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      },
     };
 
     try {
@@ -307,11 +318,8 @@ describe('InlineEditModal - openAndWait', () => {
         },
       } as any;
       const inlineEditService = {
-        cancel: jest.fn(),
-        continueConversation: jest.fn(),
-        editText: jest.fn(),
-        resetConversation: jest.fn(),
-        setModelOverride: jest.fn(),
+        send: jest.fn().mockResolvedValue({ success: true, editedText: 'done' }),
+        end: jest.fn(),
       };
       const providerSpy = jest
         .spyOn(ProviderRegistry, 'createInlineEditService')
@@ -327,6 +335,7 @@ describe('InlineEditModal - openAndWait', () => {
           },
         },
         getActiveModelSelection: () => ({ providerId: 'kiro', model: 'kiro:claude-sonnet-4' }),
+        getActiveEnvironmentVariables: () => ({}),
         getConversationSync: jest.fn().mockReturnValue(null),
         getView: jest.fn().mockReturnValue({
           getActiveTab: jest.fn().mockReturnValue({
@@ -364,6 +373,7 @@ describe('InlineEditModal - openAndWait', () => {
           },
         },
         dispatch,
+        focus: jest.fn(),
         dom: {
           ownerDocument: (global as any).document,
           addEventListener: jest.fn(),
@@ -391,7 +401,13 @@ describe('InlineEditModal - openAndWait', () => {
       await Promise.resolve();
 
       expect(providerSpy).toHaveBeenCalledWith(plugin, 'kiro');
-      expect(inlineEditService.setModelOverride).toHaveBeenCalledWith('kiro:claude-sonnet-4');
+
+      // The merged service applies the model per request via send(request, { model }),
+      // so the active blank-tab draft model reaches it when the edit runs.
+      widgetRef.inputEl.value = 'Improve the statement';
+      await widgetRef.generate();
+      expect(inlineEditService.send).toHaveBeenCalledTimes(1);
+      expect(inlineEditService.send.mock.calls[0][1].model).toBe('kiro:claude-sonnet-4');
 
       widgetRef.reject();
       await expect(resultPromise).resolves.toEqual({ decision: 'reject' });
@@ -409,6 +425,12 @@ describe('InlineEditModal - openAndWait', () => {
       createElement: (tagName: string) => createMockEl(tagName),
       addEventListener: jest.fn(),
       removeEventListener: jest.fn(),
+      // The merged composer installs its accept/reject key handler on the document's
+      // defaultView, so the fake document exposes one with the window listener API.
+      defaultView: {
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      },
     };
 
     try {
@@ -422,11 +444,8 @@ describe('InlineEditModal - openAndWait', () => {
         },
       } as any;
       const inlineEditService = {
-        cancel: jest.fn(),
-        continueConversation: jest.fn(),
-        editText: jest.fn(),
-        resetConversation: jest.fn(),
-        setModelOverride: jest.fn(),
+        send: jest.fn().mockResolvedValue({ success: true, editedText: 'done' }),
+        end: jest.fn(),
       };
       const providerSpy = jest
         .spyOn(ProviderRegistry, 'createInlineEditService')
@@ -444,6 +463,7 @@ describe('InlineEditModal - openAndWait', () => {
           },
         },
         getActiveModelSelection: () => ({ providerId: 'kiro', model: conversation.selectedModel }),
+        getActiveEnvironmentVariables: () => ({}),
         getConversationSync: jest.fn().mockReturnValue(conversation),
         getView: jest.fn().mockReturnValue({
           getActiveTab: jest.fn().mockReturnValue({
@@ -481,6 +501,7 @@ describe('InlineEditModal - openAndWait', () => {
           },
         },
         dispatch,
+        focus: jest.fn(),
         dom: {
           ownerDocument: (global as any).document,
           addEventListener: jest.fn(),
@@ -508,7 +529,13 @@ describe('InlineEditModal - openAndWait', () => {
       await Promise.resolve();
 
       expect(providerSpy).toHaveBeenCalledWith(plugin, 'kiro');
-      expect(inlineEditService.setModelOverride).toHaveBeenCalledWith('kiro:claude-sonnet-4');
+
+      // The merged service applies the model per request via send(request, { model }),
+      // so the bound conversation model reaches it when the edit runs.
+      widgetRef.inputEl.value = 'Improve the statement';
+      await widgetRef.generate();
+      expect(inlineEditService.send).toHaveBeenCalledTimes(1);
+      expect(inlineEditService.send.mock.calls[0][1].model).toBe('kiro:claude-sonnet-4');
 
       widgetRef.reject();
       await expect(resultPromise).resolves.toEqual({ decision: 'reject' });
@@ -527,6 +554,12 @@ describe('InlineEditModal - openAndWait', () => {
       createElement: (tagName: string) => createMockEl(tagName),
       addEventListener: jest.fn(),
       removeEventListener: jest.fn(),
+      // The merged composer installs its accept/reject key handler on the document's
+      // defaultView, so the fake document exposes one with the window listener API.
+      defaultView: {
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      },
     };
 
     try {
@@ -547,6 +580,7 @@ describe('InlineEditModal - openAndWait', () => {
         settings: {
           hiddenCommands: [],
         },
+        getActiveEnvironmentVariables: () => ({}),
       } as any;
       plugin.providerHost = plugin;
       const editor = {} as any;
@@ -576,6 +610,7 @@ describe('InlineEditModal - openAndWait', () => {
           },
         },
         dispatch,
+        focus: jest.fn(),
         dom: {
           ownerDocument: (global as any).document,
           addEventListener: jest.fn(),
@@ -602,22 +637,20 @@ describe('InlineEditModal - openAndWait', () => {
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
-      const editTextMock = jest.fn().mockResolvedValue({
+      const sendMock = jest.fn().mockResolvedValue({
         success: true,
         clarification: 'Need more detail',
       });
       widgetRef.inlineEditService = {
-        editText: editTextMock,
-        continueConversation: jest.fn(),
-        cancel: jest.fn(),
-        resetConversation: jest.fn(),
+        send: sendMock,
+        end: jest.fn(),
       };
 
       widgetRef.inputEl.value = 'Please check @notes/a.md and @notes/a.md.';
       await widgetRef.generate();
 
-      expect(editTextMock).toHaveBeenCalledTimes(1);
-      expect(editTextMock.mock.calls[0][0].contextFiles).toEqual(['notes/a.md']);
+      expect(sendMock).toHaveBeenCalledTimes(1);
+      expect(sendMock.mock.calls[0][0].contextFiles).toEqual(['notes/a.md']);
 
       widgetRef.reject();
       await expect(resultPromise).resolves.toEqual({ decision: 'reject' });
@@ -634,6 +667,12 @@ describe('InlineEditModal - openAndWait', () => {
       createElement: (tagName: string) => createMockEl(tagName),
       addEventListener: jest.fn(),
       removeEventListener: jest.fn(),
+      // The merged composer installs its accept/reject key handler on the document's
+      // defaultView, so the fake document exposes one with the window listener API.
+      defaultView: {
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      },
     };
 
     try {
@@ -653,6 +692,7 @@ describe('InlineEditModal - openAndWait', () => {
         settings: {
           hiddenCommands: [],
         },
+        getActiveEnvironmentVariables: () => ({}),
       } as any;
       plugin.providerHost = plugin;
       const editor = {} as any;
@@ -682,6 +722,7 @@ describe('InlineEditModal - openAndWait', () => {
           },
         },
         dispatch,
+        focus: jest.fn(),
         dom: {
           ownerDocument: (global as any).document,
           addEventListener: jest.fn(),
@@ -708,22 +749,20 @@ describe('InlineEditModal - openAndWait', () => {
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
-      const editTextMock = jest.fn().mockResolvedValue({
+      const sendMock = jest.fn().mockResolvedValue({
         success: true,
         clarification: 'Need more detail',
       });
       widgetRef.inlineEditService = {
-        editText: editTextMock,
-        continueConversation: jest.fn(),
-        cancel: jest.fn(),
-        resetConversation: jest.fn(),
+        send: sendMock,
+        end: jest.fn(),
       };
 
       widgetRef.inputEl.value = 'Please check @notes/my note.md.';
       await widgetRef.generate();
 
-      expect(editTextMock).toHaveBeenCalledTimes(1);
-      expect(editTextMock.mock.calls[0][0].contextFiles).toEqual(['notes/my note.md']);
+      expect(sendMock).toHaveBeenCalledTimes(1);
+      expect(sendMock.mock.calls[0][0].contextFiles).toEqual(['notes/my note.md']);
 
       widgetRef.reject();
       await expect(resultPromise).resolves.toEqual({ decision: 'reject' });
@@ -740,6 +779,12 @@ describe('InlineEditModal - openAndWait', () => {
       createElement: (tagName: string) => createMockEl(tagName),
       addEventListener: jest.fn(),
       removeEventListener: jest.fn(),
+      // The merged composer installs its accept/reject key handler on the document's
+      // defaultView, so the fake document exposes one with the window listener API.
+      defaultView: {
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      },
     };
 
     try {
@@ -757,6 +802,7 @@ describe('InlineEditModal - openAndWait', () => {
           hiddenCommands: [],
           mediaFolder: '',
         },
+        getActiveEnvironmentVariables: () => ({}),
       } as any;
       plugin.providerHost = plugin;
       const editor = {} as any;
@@ -786,6 +832,7 @@ describe('InlineEditModal - openAndWait', () => {
           },
         },
         dispatch,
+        focus: jest.fn(),
         dom: {
           ownerDocument: (global as any).document,
           addEventListener: jest.fn(),
@@ -865,6 +912,12 @@ describe('InlineEditModal - openAndWait', () => {
       createElement: (tagName: string) => createMockEl(tagName),
       addEventListener: jest.fn(),
       removeEventListener: jest.fn(),
+      // The merged composer installs its accept/reject key handler on the document's
+      // defaultView, so the fake document exposes one with the window listener API.
+      defaultView: {
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      },
     };
 
     try {
@@ -882,6 +935,7 @@ describe('InlineEditModal - openAndWait', () => {
           hiddenCommands: [],
           mediaFolder: '',
         },
+        getActiveEnvironmentVariables: () => ({}),
       } as any;
       plugin.providerHost = plugin;
       const editor = {} as any;
@@ -911,6 +965,7 @@ describe('InlineEditModal - openAndWait', () => {
           },
         },
         dispatch,
+        focus: jest.fn(),
         dom: {
           ownerDocument: (global as any).document,
           addEventListener: jest.fn(),
@@ -1066,6 +1121,12 @@ describe('InlineEditModal - openAndWait', () => {
       createElement: (tagName: string) => createMockEl(tagName),
       addEventListener: jest.fn(),
       removeEventListener: jest.fn(),
+      // The merged composer installs its accept/reject key handler on the document's
+      // defaultView, so the fake document exposes one with the window listener API.
+      defaultView: {
+        addEventListener: jest.fn(),
+        removeEventListener: jest.fn(),
+      },
     };
 
     try {
@@ -1083,6 +1144,7 @@ describe('InlineEditModal - openAndWait', () => {
           hiddenCommands: [],
           mediaFolder: '',
         },
+        getActiveEnvironmentVariables: () => ({}),
       } as any;
       plugin.providerHost = plugin;
       const editor = {
@@ -1126,6 +1188,7 @@ describe('InlineEditModal - openAndWait', () => {
           },
         },
         dispatch,
+        focus: jest.fn(),
         dom: {
           ownerDocument: (global as any).document,
           addEventListener: jest.fn(),
@@ -1146,13 +1209,11 @@ describe('InlineEditModal - openAndWait', () => {
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
       widgetRef.inlineEditService = {
-        editText: jest.fn().mockResolvedValue({
+        send: jest.fn().mockResolvedValue({
           success: true,
           editedText: newMarkdown,
         }),
-        continueConversation: jest.fn(),
-        cancel: jest.fn(),
-        resetConversation: jest.fn(),
+        end: jest.fn(),
       };
 
       widgetRef.inputEl.value = 'Improve the statement';

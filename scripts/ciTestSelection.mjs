@@ -31,7 +31,9 @@ const fileConsumers = [
     ...styleSuites,
     'tests/unit/features/chat/tabs/TabAttentionStyles.test.ts',
     'tests/unit/features/chat/navigation/NavigationSidebar.dom.test.ts',
+    'tests/unit/features/chat/rendering/MessageRenderer.codeFences.dom.test.ts',
   ]],
+  [/^src\/style\/base\/visibility\.css$/, ['tests/integration/features/chat/composer/PromptHistoryNavigation.dom.test.ts']],
 ];
 const scriptConsumers = new Map(suites.scriptTests.flatMap(file => [
   [file, file], [file.replace('.test.mjs', '.mjs'), file],
@@ -39,7 +41,7 @@ const scriptConsumers = new Map(suites.scriptTests.flatMap(file => [
 const globalInputs = new Set([
   'src/main.ts', 'tests/setupWindow.ts', 'scripts/ciTestSelection.mjs',
   'scripts/run-tests.js', 'scripts/run-jest.js', 'scripts/run-cross-platform-tests.js',
-  'scripts/testSuites.cjs', 'tests/tsconfig.json',
+  'scripts/testSuites.cjs',
 ]);
 
 export function selectCiTests({ changes, relatedTests, eventName }) {

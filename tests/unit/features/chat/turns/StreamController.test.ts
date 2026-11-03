@@ -326,7 +326,7 @@ describe('StreamController - Text Content', () => {
 
     it('scans for deferred math and diagrams only when a text render runs', async () => {
       const mathSpy = jest.spyOn(markdownMath, 'hasStreamingMathDelimiters');
-      const mermaidSpy = jest.spyOn(displayOnlyCodeFences, 'hasMermaidFence');
+      const mermaidSpy = jest.spyOn(displayOnlyCodeFences, 'hasDeferredDiagramFence');
       try {
         deps.state.currentTextEl = createMockEl();
         controller.setTabActive(false);
@@ -1537,7 +1537,7 @@ describe('StreamController - Text Content', () => {
 
     it('does not scan collapsed thinking deltas for deferred math or diagrams', async () => {
       const mathSpy = jest.spyOn(markdownMath, 'hasStreamingMathDelimiters');
-      const mermaidSpy = jest.spyOn(displayOnlyCodeFences, 'hasMermaidFence');
+      const mermaidSpy = jest.spyOn(displayOnlyCodeFences, 'hasDeferredDiagramFence');
       try {
         const msg = createTestMessage();
         for (let i = 0; i < 20; i += 1) {

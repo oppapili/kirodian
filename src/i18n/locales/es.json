@@ -1,5 +1,6 @@
 {
   "common": {
+    "inputSuggestions": "Sugerencias de entrada",
     "save": "Guardar",
     "cancel": "Cancelar",
     "delete": "Eliminar",
@@ -9,7 +10,8 @@
     "error": "Error",
     "confirm": "Confirmar",
     "refresh": "Actualizar",
-    "inputSuggestions": "Sugerencias de entrada"
+    "retry": "Reintentar",
+    "none": "Ninguno"
   },
   "chat": {
     "promptSuggestionHint": "Tab para aceptar",
@@ -52,9 +54,14 @@
     "quote": {
       "buttonLabel": "Citar"
     },
+    "codeBlock": {
+      "copyAriaLabel": "Copiar código {language}",
+      "copied": "¡Copiado!"
+    },
     "sideChat": {
       "title": "Chat lateral",
       "collapse": "Contraer",
+      "fullHeight": "Altura completa",
       "discard": "Descartar",
       "statusPreparing": "Preparando",
       "statusQueued": "{count} en cola",
@@ -73,8 +80,7 @@
       "mainOnlyCommand": "/{command} solo está disponible en el chat principal.",
       "startFailed": "No se pudo iniciar el chat lateral: {error}",
       "queued": "Añadido a la cola del chat lateral.",
-      "busySide": "El chat lateral aún está respondiendo. Espera a que termine.",
-      "fullHeight": "Altura completa"
+      "busySide": "El chat lateral aún está respondiendo. Espera a que termine."
     },
     "zen": {
       "regionLabel": "Chat de Claudian",
@@ -91,15 +97,251 @@
       "toolCompleted": "{tool} · completado",
       "toolFailed": "{tool} · falló",
       "toolBlocked": "{tool} · bloqueado"
+    },
+    "composer": {
+      "placeholder": "Pide cambios, menciona archivos con @, ejecuta /comandos",
+      "message": "Mensaje",
+      "dropImage": "Suelta una imagen aquí",
+      "moreContext": "Mostrar {count} elementos de contexto más",
+      "showLess": "Mostrar menos",
+      "moreItems": "+{count} más"
+    },
+    "worked": "Trabajo realizado",
+    "taskNotification": "Notificación de tarea",
+    "copyMessage": "Copiar mensaje",
+    "renderFailed": "No se pudo mostrar el contenido del mensaje.",
+    "interruptedHint": "· ¿Qué debería hacer Kirodian en su lugar?",
+    "sessions": {
+      "empty": "No hay conversaciones",
+      "noMatch": "No hay sesiones coincidentes",
+      "resume": "Reanudar conversación",
+      "loading": "Cargando conversación…",
+      "current": "Sesión actual",
+      "loadFailed": "No se pudo cargar la conversación"
+    },
+    "linkedContent": {
+      "label": "Contenido vinculado:",
+      "choices": "Opciones de contenido vinculado",
+      "noMatch": "No hay archivos o carpetas coincidentes",
+      "missing": "Contenido ausente",
+      "path": "Contenido vinculado: {path}",
+      "missingPath": "Contenido vinculado: {path}. Contenido ausente",
+      "noContent": "Sin contenido vinculado",
+      "missingNotice": "Falta el contenido vinculado: {path}",
+      "openFailed": "No se pudo abrir el contenido vinculado: {error}"
+    },
+    "questions": {
+      "title": "Pregunta",
+      "submit": "Enviar",
+      "review": "Revisa tus respuestas",
+      "ready": "¿Listo para enviar tus respuestas?",
+      "sending": "Enviando…",
+      "submitAnswers": "Enviar respuestas",
+      "notAnswered": "Sin respuesta",
+      "customAnswer": "Escribe tu respuesta…",
+      "secret": "Introduce el valor secreto…",
+      "editAnswer": "Editar respuesta a {question}",
+      "waiting": "Esperando respuesta…",
+      "noOptions": "No hay opciones registradas",
+      "sendFailed": "No se pudo enviar la respuesta. Inténtalo de nuevo.",
+      "answerBelow": "Responde en el panel de preguntas de abajo.",
+      "expired": "La pregunta ha caducado.",
+      "notSent": "La respuesta no se envió. Inténtalo de nuevo.",
+      "unsupportedReply": "Esta pregunta no puede aceptar esa respuesta.",
+      "uncertainDelivery": "No se pudo confirmar la entrega de la respuesta. No se volvió a poner en cola para evitar enviarla dos veces.",
+      "differentConversation": "Esta pregunta pertenece a otra conversación.",
+      "sideUnavailable": "Esta conversación lateral ya no está disponible."
+    },
+    "tools": {
+      "calls": "Llamadas a herramientas",
+      "output": "Salida",
+      "noResult": "Sin resultado",
+      "noMatches": "No se encontraron coincidencias",
+      "tasksUpdated": "Tareas actualizadas",
+      "noChanges": "Sin cambios",
+      "moreLines": "… {count} líneas más",
+      "moreCharacters": "… {count} caracteres más",
+      "running": "En ejecución…",
+      "noOutput": "Sin salida",
+      "status": {
+        "running": "Estado: en ejecución",
+        "completed": "Estado: completado",
+        "error": "Estado: error",
+        "cancelled": "Estado: cancelado",
+        "blocked": "Estado: bloqueado"
+      },
+      "inProgress": "Estado: en curso",
+      "writing": "Escribiendo…",
+      "done": "HECHO",
+      "errorResult": "ERROR",
+      "tasks": "Tareas",
+      "taskProgress": "Tareas {completed}/{total}",
+      "taskProgressLabel": "Tareas ({completed}/{total})",
+      "changes": "Cambios: +{added} -{removed}",
+      "fileDeleted": "Archivo eliminado",
+      "noTextDiff": "No hay diferencias de texto disponibles",
+      "patch": "parche",
+      "files": "{count} archivos",
+      "file": "archivo",
+      "enteringPlan": "Entrando en modo de planificación",
+      "planComplete": "Plan completado",
+      "messageAgent": "Enviar mensaje al agente",
+      "listDestinations": "Listar destinos",
+      "messageSession": "Enviar mensaje a la sesión",
+      "stopSession": "Detener sesión",
+      "readSession": "Leer sesión",
+      "continueAgent": "Continuar agente",
+      "listAgents": "Listar agentes",
+      "interruptAgent": "Interrumpir agente",
+      "allAgents": "Todos los agentes",
+      "commandPlaceholder": "comando",
+      "filesPlaceholder": "archivos",
+      "patternPlaceholder": "patrón",
+      "toolsPlaceholder": "herramientas",
+      "agentCount": "{count} agente",
+      "agentCountPlural": "{count} agentes"
+    },
+    "citations": {
+      "memoryUsed": "Memoria utilizada",
+      "source": "{count} fuente",
+      "sources": "{count} fuentes"
+    },
+    "web": {
+      "findInPage": "Buscar en la página",
+      "openPage": "Abrir página",
+      "urlUnavailable": "URL no disponible",
+      "clickLink": "Hacer clic en el enlace {id}",
+      "pattern": "Patrón: {pattern}",
+      "query": "Consulta: {query}",
+      "altQuery": "Consulta alternativa: {query}",
+      "search": "Buscar en la web",
+      "moreQueries": "… {count} consultas más",
+      "clickInPage": "Hacer clic en el enlace {id} en {url}",
+      "open": "Abrir {url}",
+      "find": "Buscar «{pattern}»",
+      "inPage": "{action} en {url}",
+      "operations": "{count} operaciones web",
+      "searchTerm": "búsqueda"
+    },
+    "permissionMode": {
+      "label": "Modo de permisos",
+      "current": "Modo de permisos: {mode}",
+      "changeFailed": "No se pudo cambiar el modo de permisos",
+      "claude": {},
+      "codex": {}
+    },
+    "thinking": {
+      "active": "Pensando {seconds}s…",
+      "completed": "Pensó durante {seconds}s",
+      "label": "Razonamiento"
+    },
+    "suggestions": {
+      "loading": "Cargando…",
+      "noMatches": "Sin coincidencias",
+      "loadFailed": "No se pudieron cargar las sugerencias",
+      "retryHint": "Escribe de nuevo para reintentar",
+      "providerLoading": "Cargando comandos del proveedor…",
+      "providerRetry": "Reintentar la detección de comandos del proveedor"
+    },
+    "approval": {
+      "title": "Se requiere permiso",
+      "question": "¿Permitir esta acción?",
+      "deny": "Denegar",
+      "allowOnce": "Permitir una vez",
+      "alwaysAllow": "Permitir siempre",
+      "mcpRequest": "Solicitud MCP",
+      "mcpServer": "Servidor MCP: {server}",
+      "decline": "Rechazar",
+      "allow": "Permitir",
+      "cancelRequest": "Cancelar esta solicitud.",
+      "declineRequest": "Rechazar esta solicitud.",
+      "acceptRequest": "Aceptar esta solicitud.",
+      "fileChange": "Cambio de archivo",
+      "fileChangeReason": "Cambio de archivo: {reason}",
+      "permissionRequest": "Solicitud de permiso",
+      "permissionReason": "Solicitud de permiso: {reason}",
+      "networkAccess": "Permitir acceso {protocol} a {host}",
+      "execute": "Ejecutar: {command}",
+      "executeCommand": "Ejecutar comando",
+      "allowSimilar": "Permitir comandos similares",
+      "execPolicy": "Aprobar y guardar un cambio de la política de ejecución.",
+      "host": "host",
+      "allowHost": "Permitir {host} en esta sesión",
+      "denyHost": "Denegar {host} en esta sesión",
+      "allowRule": "Aplicar una regla de permiso para {host}.",
+      "denyRule": "Aplicar una regla de denegación para {host}.",
+      "details": "Detalles de aprobación de {tool}",
+      "unexpectedSelection": "Selección de aprobación inesperada: «{value}»",
+      "runCommand": "Ejecutar comando: {pattern}",
+      "readFile": "Leer archivo: {pattern}",
+      "writeFile": "Escribir en archivo: {pattern}",
+      "editFile": "Editar archivo: {pattern}",
+      "searchFiles": "Buscar archivos que coincidan con: {pattern}",
+      "searchContent": "Buscar contenido que coincida con: {pattern}",
+      "unknownPattern": "(desconocido)"
+    },
+    "disclosure": {
+      "expand": "{label} - haz clic para expandir",
+      "collapse": "{label} - haz clic para contraer"
+    },
+    "removeItem": "Quitar {item}",
+    "agent": "Agente: {agent}",
+    "images": {
+      "unsupportedProvider": "Este proveedor no admite imágenes adjuntas.",
+      "tooLarge": "La imagen supera el límite de {size}.",
+      "unsupportedType": "Tipo de imagen no compatible.",
+      "attachFailed": "No se pudo adjuntar la imagen.",
+      "label": "Imagen",
+      "numbered": "Imagen {number}",
+      "attachment": "Imagen adjunta: {name} · {size}",
+      "fileNotFound": "{message} (Archivo no encontrado)",
+      "permissionDenied": "{message} (Permiso denegado)",
+      "preview": "Vista previa de imagen: {name}",
+      "closePreview": "Cerrar vista previa de imagen"
+    },
+    "pi": {},
+    "sessionMessage": {
+      "undelivered": "No se pudieron entregar los mensajes de {senders}.",
+      "fromLabel": "De la sesión:"
+    },
+    "sessionTools": {
+      "noSessions": "No hay sesiones",
+      "thisSession": "Esta sesión",
+      "truncated": "Hay más sesiones sin mostrar",
+      "recipient": "Destinatario",
+      "model": "Modelo",
+      "reasoning": "Razonamiento",
+      "message": "Mensaje",
+      "openSession": "Abrir la sesión {sessionId}",
+      "openProviderSession": "Abrir la sesión de {provider} {sessionId}",
+      "sessionMissing": "Esa sesión ya no existe.",
+      "openFailed": "No se pudo abrir la sesión: {message}",
+      "openUnavailable": "Las sesiones no se pueden abrir desde aquí.",
+      "providersIncluded": "Se incluyeron los proveedores y modelos disponibles",
+      "newSession": "Nueva sesión",
+      "session": "Sesión",
+      "turns": "Turnos",
+      "turnRange": "{from}–{to} de {total}",
+      "noTurns": "Ninguno aún",
+      "mode": "Entrega",
+      "modeSteer": "Dirigir el turno en curso",
+      "modeInterrupt": "Interrumpir el trabajo actual"
+    },
+    "navigation": {
+      "scrollToTop": "Desplazarse al principio",
+      "previousMessage": "Mensaje anterior",
+      "directory": "Índice de la conversación",
+      "nextMessage": "Mensaje siguiente",
+      "scrollToBottom": "Desplazarse al final",
+      "emptyDirectory": "No hay prompts de usuario en esta conversación"
     }
   },
   "settings": {
-    "title": "Configuración de Kirodian",
     "tabs": {
       "general": "General",
       "providers": "Proveedores",
-      "claude": "Claude",
-      "skills": "Skills"
+      "skills": "Skills",
+      "claude": "Claude"
     },
     "providerSettings": {
       "unavailable": "Los ajustes del proveedor no están disponibles.",
@@ -151,39 +393,14 @@
       "name": "Requerir Command/Ctrl+Enter para enviar",
       "desc": "Cuando está activado, Enter inserta un salto de línea. Command+Enter envía en macOS; Ctrl+Enter envía en Windows y Linux."
     },
-    "hotkeys": "Atajos de teclado",
-    "inlineEditHotkey": {
-      "name": "Edición en línea"
-    },
-    "openChatHotkey": {
-      "name": "Abrir chat"
-    },
-    "newSessionHotkey": {
-      "name": "Reemplazar conversación actual"
-    },
-    "newTabHotkey": {
-      "name": "Nuevo"
-    },
-    "closeTabHotkey": {
-      "name": "Cerrar pestaña"
-    },
-    "slashCommands": {
-      "name": "Comandos y habilidades",
-      "desc": "Administra comandos y habilidades a nivel de vault almacenados en .claude/commands/ y .claude/skills/. Activados por /nombre."
-    },
-    "hiddenSlashCommands": {
-      "name": "Comandos y habilidades ocultos",
-      "desc": "Oculta comandos y habilidades específicos del menú desplegable. Útil para ocultar entradas de Claude Code que no son relevantes para Kirodian. Ingresa los nombres sin la barra inicial, uno por línea.",
-      "placeholder": "commit\nbuild\ntest"
-    },
     "safety": "Seguridad",
     "loadUserSettings": {
       "name": "Cargar configuración de usuario de Claude Code",
       "desc": "Carga la configuración de Claude Code a nivel de usuario desde ~/.claude: settings.json, skills, comandos, agentes y plugins. Si está deshabilitado, solo está disponible la configuración a nivel de bóveda. Si está habilitado, las reglas de permisos del usuario pueden eludir el modo seguro."
     },
-    "claudeSafeMode": {
-      "name": "Modo seguro",
-      "desc": "Modo de permisos usado cuando el interruptor Seguro está activo."
+    "codexSandbox": {
+      "name": "Sandbox",
+      "desc": "Acceso a archivos en los modos Aprobar por mí y Pedir aprobación. Solo lectura pide aprobación antes de cada edición; Acceso completo lo ignora."
     },
     "environment": "Entorno",
     "sharedEnvironment": {
@@ -268,6 +485,10 @@
       "name": "Diferir renderizado matemático durante streaming",
       "desc": "Mostrar LaTeX sin procesar mientras se transmite la respuesta y renderizar las fórmulas una vez al completar cada bloque de texto."
     },
+    "pluginRenderedFenceLanguages": {
+      "name": "Lenguajes de bloques de código renderizados por plugins",
+      "desc": "Lenguajes de bloques de código, uno por línea, que se pasan al plugin que los renderiza en las notas (por ejemplo, vega-lite). Se renderizan cuando termina la respuesta. Los demás bloques de código siempre se muestran como código."
+    },
     "expandFileEditsByDefault": {
       "name": "Expandir ediciones de archivo por defecto",
       "desc": "Mostrar los diffs de Write y Edit expandidos cuando aparecen por primera vez."
@@ -312,9 +533,9 @@
     },
     "providerEnablement": {
       "name": "Activar {provider}",
-      "desc": "Hacer que los modelos de {provider} activados estén disponibles para conversaciones nuevas. Las sesiones existentes se conservan al desactivar el proveedor.",
       "lastProviderWarning": "Debe haber al menos un proveedor habilitado para que Kirodian funcione.",
-      "noModelsWarning": "No hay modelos de {provider} activados. Ve a Modelos más abajo y activa al menos uno."
+      "noModelsWarning": "No hay modelos de {provider} activados. Ve a Modelos más abajo y activa al menos uno.",
+      "desc": "Hacer que los modelos de {provider} activados estén disponibles para conversaciones nuevas. Las sesiones existentes se conservan al desactivar el proveedor."
     },
     "modelPicker": {
       "name": "Modelos visibles",
@@ -346,22 +567,24 @@
       "stale": "El catálogo de modelos de {provider} está desactualizado. Haz clic en Descubrir para actualizarlo."
     },
     "claude": {
-      "promptSuggestions": {
-        "name": "Sugerencias de prompts",
-        "desc": "Mostrar el siguiente prompt predicho por Claude en el campo vacío. Cada sugerencia es una solicitud adicional a Claude tras cada turno y puede agotar tus límites de uso más rápido."
+      "promptSuggestions": {},
+      "responseStyle": {}
+    },
+    "codex": {
+      "installationMethod": {},
+      "cliPath": {
+        "validation": {}
       },
-      "configuration": "Configuración",
-      "responseStyle": {
-        "name": "Estilo de respuesta",
-        "desc": "Estilo de salida de Claude Code para las respuestas, incluidos los estilos personalizados. «Configuración de Claude Code» sigue tu configuración de Claude Code. La lista se actualiza al refrescar los modelos o al iniciar un chat.",
-        "default": "Predeterminado",
-        "inherit": "Configuración de Claude Code"
-      }
+      "wslDistroOverride": {},
+      "safeMode": {},
+      "responseStyle": {},
+      "responseVerbosity": {},
+      "reasoningSummary": {},
+      "ultraEffort": {},
+      "environment": {}
     },
     "agentSkills": {
-      "sectionTitle": "Skills",
       "sharedExpectation": "Manage shared skills in .agents/skills/ for compatible providers.",
-      "sharedExpectationKiro": "Manage Kiro skills in .kiro/skills/ (kiro-cli does not read .agents/skills/).",
       "noSkills": "No shared skills configured. Click + to create one.",
       "skillBadge": "skill",
       "diagnosticsTitle": "Skills que requieren atención",
@@ -395,10 +618,70 @@
         "title": "Eliminar skill compartido",
         "description": "Toda la carpeta del skill, incluidos scripts, referencias y recursos, se moverá a la papelera.",
         "confirm": "Mover a la papelera"
-      }
+      },
+      "sectionTitle": "Skills",
+      "sharedExpectationKiro": "Manage Kiro skills in .kiro/skills/ (kiro-cli does not read .agents/skills/)."
+    },
+    "opencode": {
+      "environment": {},
+      "migrationNotice": {}
+    },
+    "pi": {
+      "environment": {},
+      "models": {}
+    },
+    "grok": {
+      "environment": {}
+    },
+    "deepseek": {
+      "installation": {},
+      "codeMode": {},
+      "presetPlugins": {},
+      "environment": {}
     },
     "skills": {
-      "droppedFrontmatterWarning": "Al guardar solo se conservan el nombre y la descripción. Se eliminarán estas claves y el comportamiento de los proveedores puede cambiar: {keys}"
+      "subTabs": {},
+      "status": {},
+      "actions": {},
+      "commands": {},
+      "droppedFrontmatterWarning": "Al guardar solo se conservan el nombre y la descripción. Se eliminarán estas claves y el comportamiento de los proveedores puede cambiar: {keys}",
+      "hidden": {},
+      "sync": {
+        "pros": {},
+        "cons": {},
+        "problems": {},
+        "options": {}
+      }
+    },
+    "title": "Configuración de Kirodian",
+    "hotkeys": "Atajos de teclado",
+    "inlineEditHotkey": {
+      "name": "Edición en línea"
+    },
+    "openChatHotkey": {
+      "name": "Abrir chat"
+    },
+    "newSessionHotkey": {
+      "name": "Reemplazar conversación actual"
+    },
+    "newTabHotkey": {
+      "name": "Nuevo"
+    },
+    "closeTabHotkey": {
+      "name": "Cerrar pestaña"
+    },
+    "slashCommands": {
+      "name": "Comandos y habilidades",
+      "desc": "Administra comandos y habilidades a nivel de vault almacenados en .claude/commands/ y .claude/skills/. Activados por /nombre."
+    },
+    "hiddenSlashCommands": {
+      "name": "Comandos y habilidades ocultos",
+      "desc": "Oculta comandos y habilidades específicos del menú desplegable. Útil para ocultar entradas de Claude Code que no son relevantes para Kirodian. Ingresa los nombres sin la barra inicial, uno por línea.",
+      "placeholder": "commit\nbuild\ntest"
+    },
+    "claudeSafeMode": {
+      "name": "Modo seguro",
+      "desc": "Modo de permisos usado cuando el interruptor Seguro está activo."
     }
   }
 }

@@ -8,13 +8,11 @@ import type { ComposerPromptSuggestion } from '@/features/chat/composer/Composer
 import type { FileContextManager } from '@/features/chat/composer/FileContextManager';
 import type { ImageContextManager } from '@/features/chat/composer/ImageContextManager';
 import type { MainChatComposerDropdown } from '@/features/chat/composer/MainChatComposerDropdown';
+import type { PromptHistoryNavigation } from '@/features/chat/composer/PromptHistoryNavigation';
 import type { ContextUsageMeter } from '@/features/chat/composer/toolbar/ContextUsageMeter';
-import type { EffortSelector } from '@/features/chat/composer/toolbar/EffortSelector';
-import type { ModelSelector } from '@/features/chat/composer/toolbar/ModelSelector';
 import type { ModeSelector } from '@/features/chat/composer/toolbar/ModeSelector';
 import type { PermissionToggle } from '@/features/chat/composer/toolbar/PermissionToggle';
 import type { ServiceTierToggle } from '@/features/chat/composer/toolbar/ServiceTierToggle';
-import type { ToolbarMenus } from '@/features/chat/composer/toolbar/ToolbarMenu';
 import type { ConversationController } from '@/features/chat/conversation/ConversationController';
 import type { ChatExecutionCoordinator } from '@/features/chat/execution/ChatExecutionCoordinator';
 import type { BuiltInCommandController } from '@/features/chat/input/BuiltInCommandController';
@@ -34,6 +32,9 @@ import type { TabIdentity } from '@/features/chat/tabs/TabIdentity';
 import type { TabSession } from '@/features/chat/tabs/TabSession';
 import type { StreamController } from '@/features/chat/turns/StreamController';
 import type { ComposerInputElement } from '@/shared/composer-dropdown/types';
+import type { EffortSelector } from '@/shared/toolbar/EffortSelector';
+import type { ModelSelector } from '@/shared/toolbar/ModelSelector';
+import type { ToolbarMenus } from '@/shared/toolbar/ToolbarMenu';
 
 /**
  * Read-only projection of TabManager-owned membership and liveness. Collaborators that
@@ -79,6 +80,7 @@ export interface TabControllers {
   readonly inputController: InputController;
   readonly builtInCommandController: BuiltInCommandController;
   readonly navigationController: NavigationController;
+  readonly promptHistoryNavigation: PromptHistoryNavigation;
   /** Owner of this tab's single temporary side chat and composer destination. */
   readonly sideChatController: SideChatController;
 }

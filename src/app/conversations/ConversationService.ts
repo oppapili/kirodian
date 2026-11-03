@@ -70,14 +70,24 @@ export class ConversationService {
     this.notifyConversationListChanged();
   }
 
+  async completeConversationTitleGeneration(id: string, expectedTitle: string, title: string | null): Promise<void> {
+    await this.deps.repository.completeTitleGeneration(id, expectedTitle, title);
+    this.notifyConversationListChanged();
+  }
+
   async updateConversation(id: string, updates: ConversationMutablePatch): Promise<void> {
     await this.deps.repository.update(id, updates);
     this.notifyConversationListChanged();
   }
 
-  async setConversationPinned(id: string, isPinned: boolean): Promise<void> {
-    await this.deps.repository.setPinned(id, isPinned);
-    this.notifyConversationListChanged();
+  async updateSelectedModelIf(
+    ...args: Parameters<ConversationRepository['updateSelectedModelIf']>
+  ): Promise<boolean> {
+    const committed = await this.deps.repository.updateSelectedModelIf(...args);
+    if (committed) {
+      try { this.notifyConversationListChanged(); } catch { /* Metadata and admission already committed. */ }
+    }
+    return committed;
   }
 
   async setConversationsPinned(ids: readonly string[], isPinned: boolean): Promise<void> {

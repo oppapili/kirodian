@@ -121,6 +121,12 @@ export interface ChatMessage {
   isAutomaticResponse?: boolean;
   /** Previous transcript segment of this response, retained across history copies. */
   responseContinuationOf?: string;
+  /**
+   * Native turn this message belongs to: the provider's turn ID in history, the event
+   * scope's turn in live output. Opaque, compared only for equality. A turn may display
+   * as several messages (notifications, compaction); a user message still bounds it.
+   */
+  turnId?: string;
   toolCalls?: ToolCallInfo[];
   contentBlocks?: ContentBlock[];
   linkedContentPath?: string;
@@ -144,12 +150,38 @@ export interface ChatMessage {
   treeBranches?: readonly string[];
   /** Provider-native assistant message identifier used for rewind/fork checkpoints. */
   assistantMessageId?: string;
+  /** Sender of a user message delivered from another Claudian session; set live and on history replay. */
+  sessionMessage?: SessionMessageSender;
+}
+
+export interface SessionMessageSender {
+  /** Sender session title at delivery time. */
+  readonly from: string;
+  /** Sender conversation id. */
+  readonly sessionId: string;
 }
 
 export function isCanonicalUserMessage(message: ChatMessage): boolean {
   return message.role === 'user'
     && !message.isInterrupt
     && !message.isRebuiltContext;
+}
+
+/**
+ * Messages a history loader displayed one interrupted native turn as: all carry the
+ * turn's provenance (by default its first message's), and none keeps the completion
+ * a split gave it.
+ */
+export function settleInterruptedTurn(
+  segments: readonly ChatMessage[],
+  automatic = segments[0]?.isAutomaticResponse === true,
+): void {
+  segments.forEach(segment => {
+    segment.isAutomaticResponse = automatic ? true : undefined;
+    segment.durationSeconds = undefined;
+    segment.completedAt = undefined;
+    segment.turnStats = undefined;
+  });
 }
 
 /** Persisted conversation with messages and session state. */

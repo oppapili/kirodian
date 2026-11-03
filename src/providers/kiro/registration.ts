@@ -23,7 +23,6 @@ export const kiroProviderRegistration: ProviderModule = {
   createExecutionBackend: (plugin) => {
     const workspace = getKiroWorkspaceServices();
     return new KiroExecutionBackend(plugin, {
-      commandCatalog: workspace.commandCatalog,
       modelCatalogCoordinator: workspace.modelCatalogCoordinator,
     });
   },

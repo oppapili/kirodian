@@ -20,7 +20,9 @@ export {
   type ImageAttachment,
   type ImageMediaType,
   isCanonicalUserMessage,
+  type SessionMessageSender,
   type SessionMetadata,
+  settleInterruptedTurn,
   type StreamChunk,
   type TurnStats,
   type UsageInfo,
@@ -31,19 +33,17 @@ export { type ProviderId } from './provider';
 // Settings and command types
 export {
   type ApprovalDecision,
-  type AuxiliaryContinuityReset,
   type ClaudianSettings,
   type EnvironmentScope,
   type EnvSnippet,
   type HostnameCLIPaths,
   type KeyboardNavigationSettings,
-  type LegacyLinkedContentSettingsInput,
-  type PermissionMode,
   type SessionAutoArchiveAfter,
   type SessionManagerOrganization,
   type SessionManagerSort,
   type SlashCommand,
   type StoredChatModelSelection,
+  type StoredInlineEditModelSelection,
   type ZenModePosition,
 } from './settings';
 

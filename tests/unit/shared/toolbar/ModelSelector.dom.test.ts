@@ -4,10 +4,10 @@ import '@/providers';
 
 import { fireEvent, within } from '@testing-library/dom';
 
-import { ModelSelector } from '@/features/chat/composer/toolbar/ModelSelector';
-import type { ToolbarCallbacks } from '@/features/chat/composer/toolbar/types';
 import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 import { kiroChatUIConfig } from '@/providers/kiro/ui/KiroChatUIConfig';
+import { ModelSelector } from '@/shared/toolbar/ModelSelector';
+import type { ModelPickerCallbacks } from '@/shared/toolbar/types';
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
@@ -46,7 +46,7 @@ it('renders saved model order top-to-bottom through the real provider UI config'
   const selector = new ModelSelector(host, {
     getSettings: () => settings,
     getUIConfig: () => kiroChatUIConfig,
-  } as unknown as ToolbarCallbacks);
+  } as unknown as ModelPickerCallbacks);
   fireEvent.click(within(host).getByRole('button', { name: /^Model: haiku/ }));
   const labels = () => within(host).getAllByRole('option').map(node => node.textContent);
   // Rendered through the real kiro UI config; its selection-aware ordering.

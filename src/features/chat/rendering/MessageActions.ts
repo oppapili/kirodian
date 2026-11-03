@@ -89,13 +89,16 @@ export class MessageActions {
     this.appendTimestamp(msgEl, msg.timestamp);
   }
 
-  /** The response toolbar copies the final answer, leaving per-block copy inside history. */
+  /**
+   * The response toolbar copies and forks from the final answer, leaving per-block
+   * copy inside history. A response without an answer (interrupted) offers neither.
+   */
   decorateResponse(
     msgEl: HTMLElement,
     contentEl: HTMLElement,
     msg: ChatMessage,
     messages: ChatMessage[],
-    copyText: string,
+    answer: string | null,
   ): void {
     const toolbar = this.#getOrCreateToolbar(msgEl);
     toolbar.empty();
@@ -104,8 +107,8 @@ export class MessageActions {
         child.querySelector('.claudian-text-copy-btn')?.remove();
       }
     }
-    if (copyText.trim()) this.addTextCopyButton(toolbar, copyText);
-    if (this.callbacks.fork && msg.assistantMessageId
+    if (answer?.trim()) this.addTextCopyButton(toolbar, answer);
+    if (answer !== null && this.callbacks.fork && msg.assistantMessageId
       && (this.getCapabilities().forkMode !== 'full-session' || messages.at(-1)?.id === msg.id)) {
       this.#addForkButton(msgEl, msg.id);
     }
@@ -161,7 +164,7 @@ export class MessageActions {
     const copyBtn = textEl.createEl('button', {
       cls: 'claudian-text-copy-btn',
       attr: {
-        'aria-label': 'Copy message',
+        'aria-label': t('chat.copyMessage'),
         type: 'button',
       },
     });
@@ -215,7 +218,7 @@ export class MessageActions {
       () => text,
       () => {
         copyBtn.empty();
-        copyBtn.setText('Copied!');
+        copyBtn.setText(t('chat.codeBlock.copied'));
         copyBtn.classList.add('copied');
       },
       () => {
@@ -288,7 +291,7 @@ export class MessageActions {
       attr: { type: 'button' },
     });
     setIcon(copyBtn, 'copy');
-    copyBtn.setAttribute('aria-label', 'Copy message');
+    copyBtn.setAttribute('aria-label', t('chat.copyMessage'));
     this.#bindCopy(copyBtn, content);
   }
 

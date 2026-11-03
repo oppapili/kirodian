@@ -1,7 +1,12 @@
 const crossPlatformTests = [
+  // Filesystem, path, URI, and platform-policy regressions need native hosts even without a subprocess.
+  'tests/unit/core/process/env.test.ts',
+  'tests/unit/core/storage/VaultFileAdapter.test.ts',
   'tests/integration/core/process/ProcessProbe.test.ts',
   'tests/integration/core/process/ManagedStdioProcess.test.ts',
   'tests/integration/core/process/cliBinaryLocator.test.ts',
+  'tests/integration/core/process/loginShellPath.test.ts',
+  'tests/integration/core/session-tools/LoopbackSessionToolServer.test.ts',
 ];
 
 const scriptTests = [

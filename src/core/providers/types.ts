@@ -1,12 +1,9 @@
-import type { CursorContext } from '@/core/prompt/editorContext';
-
 import type {
   ProviderExecutionBackend,
   ProviderExecutionTransitionScope,
 } from '../execution';
 import type {
   AskUserAnswers,
-  AuxiliaryContinuityReset,
   Conversation,
   SessionMetadata,
   SlashCommand,
@@ -112,18 +109,33 @@ export interface ProviderSettingsStorageAdapter {
 
 export type ProviderEnvironmentSessionPolicy = 'invalidate' | 'reload';
 
-export interface ProviderSettingsReconciler {
-  /** Defaults to `invalidate` for backward compatibility. */
-  environmentSessionPolicy?: ProviderEnvironmentSessionPolicy;
+export interface ProviderEnvironmentReconciliation {
+  changed: boolean;
+  invalidatedConversations: Conversation[];
+  /** How this change treats conversation bindings; `invalidate` when omitted. */
+  sessionPolicy?: ProviderEnvironmentSessionPolicy;
+}
 
+export interface ProviderSettingsReconciler {
   handleEnvironmentChange?(settings: Record<string, unknown>): boolean;
 
+  /**
+   * Clears resumable native bindings only. History locators must survive as
+   * recovery-only state, readable while their native store remains trusted.
+   */
   invalidateConversationSessions(conversations: Conversation[]): Conversation[];
+
+  /**
+   * Whether invalidation deliberately keeps this conversation's binding live (its native
+   * store is unaffected), so a session still running for it keeps its execution authority.
+   * `invalidateConversationSessions` must leave exactly these conversations untouched.
+   */
+  preservesConversationSession?(conversation: Conversation): boolean;
 
   reconcileModelWithEnvironment(
     settings: Record<string, unknown>,
     conversations: Conversation[],
-  ): { changed: boolean; invalidatedConversations: Conversation[] };
+  ): ProviderEnvironmentReconciliation;
 
   normalizeModelVariantSettings?(settings: Record<string, unknown>): boolean;
 }
@@ -145,25 +157,6 @@ export interface SessionMetadataScanResult {
   complete: boolean;
   /** Files that were read successfully but did not contain valid session metadata. */
   invalidMetadataCount: number;
-}
-
-// ---------------------------------------------------------------------------
-// Provider-owned workspace sub-interfaces
-//
-// These remain here as standalone types so app-level settings/chat code can
-// depend on stable provider workspace contracts without importing concrete
-// provider implementations. They are NOT part of the provider-facing host
-// storage contract (`ProviderHostStorage`).
-// ---------------------------------------------------------------------------
-
-export interface AppCommandStorage {
-  save(command: SlashCommand): Promise<void>;
-  delete(name: string): Promise<void>;
-}
-
-export interface AppSkillStorage {
-  save(skill: SlashCommand): Promise<void>;
-  delete(name: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -542,9 +535,19 @@ export interface ProviderConversationHistoryService {
   /** Projects provider state for storage without changing live state or native history. */
   buildPersistedProviderState?(
     conversation: ProviderHistoryInput,
-    /** Preserve existing history state instead of rebuilding it from unloaded messages. */
-    options?: { preserveProviderState?: boolean },
+    options?: {
+      /** Preserve existing history state instead of rebuilding it from unloaded messages. */
+      preserveProviderState?: boolean;
+      /** Locates native history so the projection can omit what it already holds; resolve only when needed. */
+      getNativeHistory?: () => { vaultPath: string | null; pathContext?: ProviderHistoryPathContext };
+    },
   ): Record<string, unknown> | undefined;
+  /** Whether stored state duplicates native history, so rewriting its projection would shrink it. */
+  hasRedundantPersistedState?(
+    conversation: ProviderHistoryInput,
+    vaultPath: string | null,
+    pathContext?: ProviderHistoryPathContext,
+  ): boolean;
 }
 
 export interface ProviderSubagentHistoryRequest {
@@ -697,48 +700,5 @@ export interface TitleGenerationService {
     userMessage: string,
     callback: TitleGenerationCallback
   ): Promise<void>;
-  cancel(): void;
-}
-
-// -- Inline edit --
-
-export type InlineEditMode = 'selection' | 'cursor';
-
-export interface InlineEditSelectionRequest {
-  mode: 'selection';
-  instruction: string;
-  notePath: string;
-  selectedText: string;
-  startLine?: number;
-  lineCount?: number;
-  contextFiles?: string[];
-}
-
-export interface InlineEditCursorRequest {
-  mode: 'cursor';
-  instruction: string;
-  notePath: string;
-  cursorContext: CursorContext;
-  contextFiles?: string[];
-}
-
-export type InlineEditRequest = InlineEditSelectionRequest | InlineEditCursorRequest;
-
-export interface InlineEditOutcome {
-  success: boolean;
-  resetRequired?: false;
-  editedText?: string;
-  insertedText?: string;
-  clarification?: string;
-  error?: string;
-}
-
-export type InlineEditResult = InlineEditOutcome | AuxiliaryContinuityReset;
-
-export interface InlineEditService {
-  setModelOverride?(model?: string): void;
-  resetConversation(): void;
-  editText(request: InlineEditRequest): Promise<InlineEditResult>;
-  continueConversation(message: string, contextFiles?: string[]): Promise<InlineEditResult>;
   cancel(): void;
 }

@@ -14,12 +14,7 @@ const time = testDate().getTime();
 function setup() {
   const native = createHarness();
   const fixture = createFixture({ getExecutionCoordinator: () => native.coordinator, getTabProviderId: () => 'kiro' });
-  const write = jest.fn().mockResolvedValue('/tmp/claudian-sessions/snapshot.md');
-  Object.assign(fixture.plugin, {
-    writeSessionSnapshot: write,
-    getSessionSnapshotDirectory: () => '/tmp/claudian-sessions',
-    findConversationAcrossViews: () => null,
-  });
+  Object.assign(fixture.plugin, { findConversationAcrossViews: () => null });
   fixture.plugin.getConversationById.mockResolvedValue({
     id, title: 'Current title', providerId: 'kiro', createdAt: time, lastActivityAt: time,
     sessionId: 'native-source', messages: [
@@ -27,7 +22,7 @@ function setup() {
       { id: 'a', role: 'assistant', content: 'final answer', timestamp: time },
     ],
   } as never);
-  return { ...fixture, native, write };
+  return { ...fixture, native };
 }
 
 beforeEach(() => {
@@ -52,28 +47,27 @@ it.each([false, true])('resolves current titles once and carries snapshots throu
     await fixture.controller.sendMessage();
     if (queued) {
       await releaseTurn();
-      fixture.controller.resumeQueuedTurnAfterIntentAdmission();
+      fixture.controller.queue.scheduleContinuation();
       await new Promise(resolve => setTimeout(resolve, 20));
     }
     const request = fixture.native.backends.get('kiro')!.sessions.flatMap(session => session.requests)[0];
     expect(request.input).toEqual([{ type: 'text', text: 'Use @"Current title" and @"Current title"' }]);
     expect(request.context?.sessionReferences).toEqual([{
-      id, title: 'Current title', providerId: 'kiro', updatedAt: new Date(time).toISOString(), snapshotPath: '/tmp/claudian-sessions/snapshot.md',
+      id, title: 'Current title', providerId: 'kiro', updatedAt: new Date(time).toISOString(),
     }]);
-    expect(request.configuration.readableRoots).toEqual(['/tmp/claudian-sessions']);
-    expect(fixture.write).toHaveBeenCalledTimes(1);
-    expect(fixture.write.mock.calls[0][1]).toContain('## T1 user\nverbatim prompt\n\n## T1 assistant\nfinal answer');
+    // Mentions are id references the agent reads with the read-session tool; no snapshot file is written and no extra readable root is granted.
+    expect(request.configuration).not.toHaveProperty('readableRoots');
+    expect(fixture.plugin.getConversationById).toHaveBeenCalledTimes(1);
     const user = fixture.state.messages.find(message => message.role === 'user');
     expect(user?.displayContent).toBe('Use @"Current title" and @"Current title"');
     expect(user?.executionInput?.context?.sessionReferences).toEqual(request.context?.sessionReferences);
   } finally { await fixture.native.coordinator.dispose(); await fixture.native.registry.dispose(); }
 });
 
-it.each(['hydrate', 'write'])('preserves the original token draft when %s fails', async failure => {
+it('preserves the original token draft when the session cannot be loaded', async () => {
   const fixture = setup();
   try {
-    if (failure === 'hydrate') fixture.plugin.getConversationById.mockResolvedValue(null);
-    else fixture.write.mockRejectedValue(new Error('disk full'));
+    fixture.plugin.getConversationById.mockResolvedValue(null);
     fixture.input.value = token;
     await fixture.controller.sendMessage();
     expect(fixture.input.value).toBe(token);
@@ -96,19 +90,6 @@ it('does not send to a replaced conversation while hydration is pending', async 
   expect(fixture.input.value).toBe(token);
   expect(fixture.native.backends.get('kiro')!.sessions).toHaveLength(0);
   await fixture.native.coordinator.dispose(); await fixture.native.registry.dispose();
-});
-
-it('uses hydrated repository history while an open source tab is still loading', async () => {
-  const fixture = setup();
-  await fixture.native.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'kiro' });
-  Object.assign(fixture.plugin, { findConversationAcrossViews: () => ({ tabId: 'source-tab', view: {
-    getTabManager: () => ({ getTab: () => ({ conversationId: id, hydrationState: 'loading', state: { messages: [], isStreaming: false } }) }),
-  } }) });
-  try {
-    fixture.input.value = token;
-    await fixture.controller.sendMessage();
-    expect(fixture.write.mock.calls[0][1]).toContain('## T1 user\nverbatim prompt');
-  } finally { await fixture.native.coordinator.dispose(); await fixture.native.registry.dispose(); }
 });
 
 it('restores a plain follow-up queued during failed snapshot preparation', async () => {
@@ -148,9 +129,9 @@ it('cancels and drains queued snapshot preparation before tab shutdown finishes'
   expect(stopped).toBe(false);
   gate.resolve(source);
   await Promise.all([sending, draining]);
-  expect(fixture.write).not.toHaveBeenCalled();
   expect(fixture.state.queuedMessage).toBeNull();
   expect(fixture.input.value).toBe(token);
+  expect(fixture.native.backends.get('kiro')!.sessions).toHaveLength(0);
   await fixture.native.coordinator.dispose(); await fixture.native.registry.dispose();
 });
 
@@ -242,7 +223,7 @@ it.each(['withdraw', 'cancel', 'initialization'])('restores token text and refre
     await releaseTurn();
     fixture.deps.ensureExecutionInitialized = async () => true;
     await fixture.controller.sendMessage();
-    expect(fixture.write).toHaveBeenCalledTimes(2);
+    expect(fixture.plugin.getConversationById).toHaveBeenCalledTimes(2);
     const request = fixture.native.backends.get('kiro')!.sessions.flatMap(session => session.requests)[0];
     expect(request.input).toEqual([{ type: 'text', text: '@"Current title"' + suffix }]);
     expect(request.context?.sessionReferences?.[0].id).toBe(id);
@@ -262,7 +243,7 @@ it.each(['cancel', 'withdraw', 'discard', 'shutdown', 'replacement'] as const)(
       fixture.input.value = token;
       await fixture.controller.sendMessage();
       await releaseTurn();
-      fixture.controller.resumeQueuedTurnAfterIntentAdmission();
+      fixture.controller.queue.scheduleContinuation();
       switch (action) {
         case 'cancel': fixture.controller.cancelStreaming(); break;
         case 'withdraw': fixture.controller.queue.withdrawToComposer(); break;

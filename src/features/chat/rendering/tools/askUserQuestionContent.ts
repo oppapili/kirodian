@@ -5,6 +5,7 @@ import type {
   ToolCallInfo,
 } from '@/core/types';
 import { contentFallback } from '@/features/chat/rendering/tools/toolContentPrimitives';
+import { t } from '@/i18n/i18n';
 
 function formatAnswer(raw: unknown): string {
   if (Array.isArray(raw)) return raw.join(', ');
@@ -28,21 +29,24 @@ function renderAskUserQuestionResult(container: HTMLElement, toolCall: ToolCallI
   const questions = toolCall.input.questions as AskUserQuestionItem[] | undefined;
   const answers = resolveAskUserAnswers(toolCall);
   if (!questions || !Array.isArray(questions) || !answers) return false;
-  if (!questions.some(question => (question.id && question.id in answers) || question.question in answers)) return false;
-  if (toolCall.input.replyMode === 'user-message' && !questions.every(question => (question.id && question.id in answers) || question.question in answers)) return false;
+  const answered = (question: AskUserQuestionItem): boolean =>
+    Boolean(question.id && Object.hasOwn(answers, question.id)) || Object.hasOwn(answers, question.question);
+  if (!questions.some(answered)) return false;
+  if (toolCall.input.replyMode === 'user-message' && !questions.every(answered)) return false;
   container.empty();
 
   const reviewEl = container.createDiv({ cls: 'claudian-ask-review' });
   for (let i = 0; i < questions.length; i++) {
     const q = questions[i];
     const answer = formatAnswer(
-      (q.id ? answers[q.id] : undefined) ?? answers[q.question]
+      (q.id && Object.hasOwn(answers, q.id) ? answers[q.id] : undefined)
+        ?? (Object.hasOwn(answers, q.question) ? answers[q.question] : undefined)
     );
     const pairEl = reviewEl.createDiv({ cls: 'claudian-ask-review-pair' });
     const bodyEl = pairEl.createDiv({ cls: 'claudian-ask-review-body' });
     bodyEl.createDiv({ text: q.question, cls: 'claudian-ask-review-q-text' });
     bodyEl.createDiv({
-      text: answer || 'Not answered',
+      text: answer || t('chat.questions.notAnswered'),
       cls: answer ? 'claudian-ask-review-a-text' : 'claudian-ask-review-empty',
     });
   }
@@ -80,14 +84,14 @@ function renderAskUserQuestionFallback(container: HTMLElement, toolCall: ToolCal
     : [];
 
   if (questions.length === 0) {
-    contentFallback(container, initialText || toolCall.result || 'Waiting for answer...');
+    contentFallback(container, initialText || toolCall.result || t('chat.questions.waiting'));
     return;
   }
 
   if (initialText || toolCall.result) {
     container.createDiv({
       cls: 'claudian-ask-review-prompt',
-      text: initialText || toolCall.result || 'Waiting for answer...',
+      text: initialText || toolCall.result || t('chat.questions.waiting'),
     });
   }
 
@@ -99,7 +103,7 @@ function renderAskUserQuestionFallback(container: HTMLElement, toolCall: ToolCal
     bodyEl.createDiv({ text: question.question, cls: 'claudian-ask-review-q-text' });
 
     if (!Array.isArray(question.options) || question.options.length === 0) {
-      bodyEl.createDiv({ cls: 'claudian-ask-review-empty', text: 'No options recorded' });
+      bodyEl.createDiv({ cls: 'claudian-ask-review-empty', text: t('chat.questions.noOptions') });
       continue;
     }
 
@@ -118,7 +122,7 @@ export function renderAskUserQuestionContent(container: HTMLElement, tool: ToolC
   container.addClass('claudian-tool-content-ask');
   if (renderAskUserQuestionResult(container, tool)) return;
   const prompt = tool.input.replyMode === 'user-message'
-    ? tool.questionStatus === 'pending' ? 'Answer in the question panel below.' : 'Question expired.'
-    : pending ? 'Waiting for answer...' : undefined;
+    ? tool.questionStatus === 'pending' ? t('chat.questions.answerBelow') : t('chat.questions.expired')
+    : pending ? t('chat.questions.waiting') : undefined;
   renderAskUserQuestionFallback(container, tool, prompt);
 }
