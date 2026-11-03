@@ -115,7 +115,7 @@ describe('SessionBrowser session metadata popover', () => {
     document.body.append(container);
     controller.renderHistoryDropdown(container, {
       onSelectConversation: jest.fn().mockResolvedValue(undefined), showMetadataPopover: true,
-      getProviderIcon: () => OPENAI_PROVIDER_ICON, getModelLabel: () => 'GPT-5.1 Codex',
+      getProviderIcon: () => KIRO_PROVIDER_ICON, getModelLabel: () => 'Claude Sonnet 4',
     });
     const content = container.querySelector<HTMLElement>('.claudian-history-item-content')!;
     expect(content.getAttribute('tabindex')).toBe('0');

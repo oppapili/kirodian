@@ -6,7 +6,7 @@ import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ProviderCapabilities, ProviderConversationHistoryService, ProviderRegistration } from '@/core/providers/types';
 import { ComposerDraftController } from '@/features/chat/composer/ComposerDraftController';
-import { captureLatestCompletedForkSource, findLatestForkCheckpoint } from '@/features/chat/sessions/SessionForkSource';
+import { captureLatestCompletedForkSource, findLatestForkCheckpoint, type LiveForkSourceOwner } from '@/features/chat/sessions/SessionForkSource';
 import { SideChatController } from '@/features/chat/side-chat/SideChatController';
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 
@@ -55,6 +55,7 @@ export function createHarness(options: {
   subagentAdapter?: ProviderRegistration['subagentAdapter'];
   taskResultInterpreter?: ProviderRegistration['taskResultInterpreter'];
   supportsFork?: boolean;
+  supportsForkDuringTurn?: boolean;
   checkpoint?: string | null;
   settings?: Record<string, unknown>;
   supportsEphemeralFork?: boolean;
@@ -67,7 +68,7 @@ export function createHarness(options: {
   ProviderRegistry.register('kiro', {
     formatQuestionReply: options.formatQuestionReply,
     getConversationCapabilities: options.getConversationCapabilities,
-    capabilities: { providerId: 'kiro', supportsFork: options.supportsFork ?? true, supportsEphemeralSessions: true, supportsEphemeralFork: options.supportsEphemeralFork, forkMode: options.forkMode },
+    capabilities: { providerId: 'kiro', supportsFork: options.supportsFork ?? true, supportsEphemeralSessions: true, supportsEphemeralFork: options.supportsEphemeralFork, supportsForkDuringTurn: options.supportsForkDuringTurn, forkMode: options.forkMode },
     modelPolicy: ProviderRegistry.getModelPolicy('kiro'),
     chatUIConfig: ProviderRegistry.getChatUIConfig('kiro'),
     createExecutionBackend: () => backend,
@@ -113,8 +114,9 @@ export function createHarness(options: {
     executionCoordinator: { resolveForkSource: async () => ({ resumeAt: checkpoint, sessionId: 'main-session' }) },
     id: 'tab-1',
     providerId: 'kiro',
+    settledTranscriptEnd: (entries: readonly unknown[]) => entries.length,
     state: { isRewinding: false, isStreaming: false, messages },
-  } as unknown as AssembledTabRuntime;
+  } as unknown as AssembledTabRuntime & LiveForkSourceOwner;
 
   const app = { vault: { adapter: { basePath: '/vault' }, getFiles: () => [] } };
   const settings = options.settings ?? {};
