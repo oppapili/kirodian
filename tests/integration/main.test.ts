@@ -17,6 +17,7 @@ import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCo
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import { type ClaudianSettings, type SessionMetadata, VIEW_TYPE_CLAUDIAN } from '@/core/types';
 import { ZenModeController } from '@/features/chat/zen/ZenModeController';
+import { registerBuiltInProviders } from '@/providers';
 import { computeKiroEnvironmentHash } from '@/providers/kiro/env/KiroSettingsReconciler';
 import {
   getKiroProviderSettings,
@@ -1220,7 +1221,7 @@ describe('ClaudianPlugin', () => {
         plugin.settings,
         { providerTransitionOwner: true },
       );
-    });
+    }, 15000);
 
     it('does not initialize a cold provider for transition-owner CLI resolution', async () => {
       await plugin.onload();
@@ -1237,6 +1238,15 @@ describe('ClaudianPlugin', () => {
         providerTransitionOwner: true,
       })).rejects.toThrow('requires initialized workspace services');
       expect(initialize).not.toHaveBeenCalled();
+    }, 15000);
+
+    // The transition-owner cases above mutate the global ProviderWorkspaceRegistry
+    // for 'kiro' (setServices/register) without restoring it. Left polluted, a
+    // later plugin.onload() in the same worker can hang on a broken kiro workspace
+    // under CI test sharding. Rebuild the built-in registration after each case.
+    afterEach(() => {
+      ProviderWorkspaceRegistry.clear();
+      registerBuiltInProviders();
     });
 
     it('recovers the committed environment before surfacing a post-commit publication failure', async () => {
