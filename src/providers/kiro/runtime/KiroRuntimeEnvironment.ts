@@ -1,12 +1,14 @@
 import { getEnhancedPath, parseEnvironmentVariables } from '@/core/process/env';
 
-import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
-
+/**
+ * Build the Kiro subprocess environment from the already-resolved runtime
+ * environment text (shared plus Kiro-scoped). Runtime modules obtain this from
+ * `ProviderRuntimeHost.environmentText`, so this never reads the settings document.
+ */
 export function buildKiroRuntimeEnv(
-  settings: Record<string, unknown>,
+  environmentText: string,
   cliPath: string,
 ): NodeJS.ProcessEnv {
-  const environmentText = getRuntimeEnvironmentText(settings, 'kiro');
   const configuredEnvironment = parseEnvironmentVariables(environmentText);
 
   return {

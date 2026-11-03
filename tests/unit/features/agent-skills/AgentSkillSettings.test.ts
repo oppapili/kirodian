@@ -205,4 +205,3 @@ describe('AgentSkillSettings repair of flagged packages', () => {
     expect(vault.trashed).toEqual(['.agents/skills/broken']);
   });
 });
-

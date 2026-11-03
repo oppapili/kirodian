@@ -1,8 +1,7 @@
-import type { ProviderHost } from '../../../core/providers/ProviderHost';
+import type { ProviderRuntimeHost } from '../../../core/providers/ProviderRuntimeHost';
 import type { ProviderTransitionOwnerContext } from '../../../core/providers/types';
-import { getVaultPath } from '../../../utils/path';
 import type { KiroAgentMode } from '../execution/KiroSessionModeMetadata';
-import { getKiroProviderSettings } from '../settings';
+import { isKiroProviderEnabled } from '../settings';
 import type { KiroAgentDirectories } from './KiroAgentModelLock';
 import {
   type KiroCatalogCommandRunner,
@@ -210,7 +209,7 @@ export class KiroAgentCatalogService implements KiroAgentCatalogServiceLike {
   private readonly runner: KiroCatalogCommandRunner;
 
   constructor(
-    private readonly plugin: ProviderHost,
+    private readonly host: ProviderRuntimeHost,
     private readonly options: KiroAgentCatalogServiceOptions = {},
   ) {
     this.runner = options.runner ?? new SpawnKiroCatalogCommandRunner();
@@ -220,20 +219,17 @@ export class KiroAgentCatalogService implements KiroAgentCatalogServiceLike {
     signal?: AbortSignal,
     ownerContext?: ProviderTransitionOwnerContext,
   ): Promise<KiroAgentCatalogDiscoveryResult> {
-    if (!getKiroProviderSettings(this.plugin.settings).enabled) {
+    if (!isKiroProviderEnabled(this.host.config)) {
       return { kind: 'skipped', reason: 'provider-disabled' };
     }
 
     try {
-      const command = await this.plugin.getResolvedProviderCliPath(
-        'kiro',
-        ownerContext,
-      ) ?? 'kiro-cli';
+      const command = await this.host.resolveCliPath(ownerContext) ?? 'kiro-cli';
       const commandResult = await this.runner.run({
         args: ['agent', 'list'],
         command,
-        cwd: getVaultPath(this.plugin.app) ?? process.cwd(),
-        env: buildKiroRuntimeEnv(this.plugin.settings, command),
+        cwd: this.host.workingDirectory ?? process.cwd(),
+        env: buildKiroRuntimeEnv(this.host.environmentText, command),
         signal,
         timeoutMs: this.options.agentCommandTimeoutMs ?? AGENT_COMMAND_TIMEOUT_MS,
       });

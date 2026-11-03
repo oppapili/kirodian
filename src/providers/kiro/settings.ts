@@ -113,6 +113,17 @@ export function normalizeKiroCatalogSnapshot(value: unknown): KiroCatalogSnapsho
   };
 }
 
+/**
+ * Whether the Kiro provider is enabled, read from its own provider configuration
+ * (e.g. `ProviderRuntimeHost.config`) without touching the application settings
+ * document, so provider runtime modules stay within their architecture boundary.
+ */
+export function isKiroProviderEnabled(config: Readonly<Record<string, unknown>>): boolean {
+  return typeof config.enabled === 'boolean'
+    ? config.enabled
+    : DEFAULT_KIRO_PROVIDER_SETTINGS.enabled;
+}
+
 export function getKiroProviderSettings(
   settings: Record<string, unknown>,
 ): KiroProviderSettings {

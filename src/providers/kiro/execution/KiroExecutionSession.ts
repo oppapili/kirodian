@@ -57,6 +57,7 @@ import {
 } from '../normalization/kiroToolNormalization';
 import { waitForKiroCancelDelivery } from '../runtime/KiroCancelDelivery';
 import type { KiroModelCatalogCoordinator } from '../runtime/KiroModelCatalogCoordinator';
+import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
 import { buildKiroRuntimeEnv } from '../runtime/KiroRuntimeEnvironment';
 import { KiroSessionNotificationMirrorDeduplicator } from '../runtime/KiroSessionNotificationMirrorDeduplicator';
 import {
@@ -494,7 +495,7 @@ RewindableExecutionSession {
     const native = this.options.nativeFactory.create({
       command,
       cwd: this.config.workingDirectory,
-      env: buildKiroRuntimeEnv(this.plugin.settings, command),
+      env: buildKiroRuntimeEnv(getRuntimeEnvironmentText(this.plugin.settings, 'kiro'), command),
       requestPermission: (request, signal) => {
         const policy = this.active?.request.toolPolicy.kind;
         if (policy === 'passive' || policy === 'read-only') {
@@ -1094,7 +1095,7 @@ RewindableExecutionSession {
           this.config.workingDirectory,
         ),
         // Kiro resolves its session roots from its own runtime env (KIRO_HOME).
-        environment: buildKiroRuntimeEnv(this.plugin.settings, ''),
+        environment: buildKiroRuntimeEnv(getRuntimeEnvironmentText(this.plugin.settings, 'kiro'), ''),
       },
     );
     if (sessionDirectory) {

@@ -3,19 +3,18 @@ import { createHash } from 'node:crypto';
 
 import crossSpawn from 'cross-spawn';
 
+import { parseEnvironmentVariables } from '../../../core/process/env';
 import {
   resolveWindowsCmdShimSpawnSpec,
   terminateSpawnedProcess,
 } from '../../../core/process/windowsCmdShim';
-import { getRuntimeEnvironmentVariables } from '../../../core/providers/providerEnvironment';
-import type { ProviderHost } from '../../../core/providers/ProviderHost';
+import type { ProviderRuntimeHost } from '../../../core/providers/ProviderRuntimeHost';
 import type { ProviderTransitionOwnerContext } from '../../../core/providers/types';
-import { getVaultPath } from '../../../utils/path';
 import {
   type KiroDiscoveredModel,
   normalizeKiroDiscoveredModels,
 } from '../models';
-import { getKiroProviderSettings } from '../settings';
+import { isKiroProviderEnabled } from '../settings';
 import { buildKiroRuntimeEnv } from './KiroRuntimeEnvironment';
 
 const FINGERPRINT_VERSION = '1';
@@ -157,7 +156,7 @@ export class KiroModelCatalogService implements KiroModelCatalogServiceLike {
   private readonly runner: KiroCatalogCommandRunner;
 
   constructor(
-    private readonly plugin: ProviderHost,
+    private readonly host: ProviderRuntimeHost,
     private readonly options: KiroModelCatalogServiceOptions = {},
   ) {
     this.runner = options.runner ?? new SpawnKiroCatalogCommandRunner();
@@ -175,7 +174,7 @@ export class KiroModelCatalogService implements KiroModelCatalogServiceLike {
     signal?: AbortSignal,
     ownerContext?: ProviderTransitionOwnerContext,
   ): Promise<KiroModelCatalogDiscoveryResult> {
-    if (!getKiroProviderSettings(this.plugin.settings).enabled) {
+    if (!isKiroProviderEnabled(this.host.config)) {
       return { kind: 'skipped', reason: 'provider-disabled' };
     }
 
@@ -229,15 +228,12 @@ export class KiroModelCatalogService implements KiroModelCatalogServiceLike {
   private async resolveCommandContext(
     ownerContext?: ProviderTransitionOwnerContext,
   ): Promise<KiroResolvedCatalogCommandContext> {
-    const command = await this.plugin.getResolvedProviderCliPath(
-      'kiro',
-      ownerContext,
-    ) ?? 'kiro-cli';
-    const configuredEnvironment = getRuntimeEnvironmentVariables(this.plugin.settings, 'kiro');
+    const command = await this.host.resolveCliPath(ownerContext) ?? 'kiro-cli';
+    const configuredEnvironment = parseEnvironmentVariables(this.host.environmentText);
     return {
       command,
-      cwd: getVaultPath(this.plugin.app) ?? process.cwd(),
-      env: buildKiroRuntimeEnv(this.plugin.settings, command),
+      cwd: this.host.workingDirectory ?? process.cwd(),
+      env: buildKiroRuntimeEnv(this.host.environmentText, command),
       environmentKeys: Object.keys(configuredEnvironment),
     };
   }

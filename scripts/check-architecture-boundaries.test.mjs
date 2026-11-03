@@ -224,34 +224,14 @@ test('providers avoid root app imports', () => {
  * Listed explicitly so a new provider module is runtime until it is reviewed into this set.
  */
 const PROVIDER_DOCUMENT_WRAPPERS = new Set([
-  'src/providers/claude/ClaudeModelPolicy.ts',
-  'src/providers/claude/env/ClaudeSettingsReconciler.ts',
-  'src/providers/claude/runtime/ClaudeCLIResolver.ts',
-  'src/providers/claude/settings.ts',
-  'src/providers/codex/CodexModelPolicy.ts',
-  'src/providers/codex/env/CodexSettingsReconciler.ts',
-  'src/providers/codex/runtime/CodexCLIResolver.ts',
-  'src/providers/codex/settings.ts',
-  'src/providers/deepseek/DeepSeekModelPolicy.ts',
-  'src/providers/deepseek/app/DeepSeekCommandLoader.ts',
-  'src/providers/deepseek/env/DeepSeekSettingsReconciler.ts',
-  'src/providers/deepseek/runtime/DeepSeekCLIResolver.ts',
-  'src/providers/deepseek/settings.ts',
-  'src/providers/grok/GrokModelPolicy.ts',
-  'src/providers/grok/app/GrokCommandLoader.ts',
-  'src/providers/grok/env/GrokSettingsReconciler.ts',
-  'src/providers/grok/runtime/GrokCLIResolver.ts',
-  'src/providers/grok/settings.ts',
-  'src/providers/opencode/OpencodeModelPolicy.ts',
-  'src/providers/opencode/app/OpencodeCommandLoader.ts',
-  'src/providers/opencode/env/OpencodeSettingsReconciler.ts',
-  'src/providers/opencode/runtime/OpencodeCLIResolver.ts',
-  'src/providers/opencode/settings.ts',
-  'src/providers/pi/PiModelPolicy.ts',
-  'src/providers/pi/app/PiCommandLoader.ts',
-  'src/providers/pi/env/PiSettingsReconciler.ts',
-  'src/providers/pi/runtime/PiCLIResolver.ts',
-  'src/providers/pi/settings.ts',
+  'src/providers/kiro/env/KiroSettingsReconciler.ts',
+  'src/providers/kiro/execution/KiroExecutionBackend.ts',
+  'src/providers/kiro/execution/KiroExecutionSession.ts',
+  'src/providers/kiro/runtime/KiroAgentCatalogCoordinator.ts',
+  'src/providers/kiro/runtime/KiroCLIResolver.ts',
+  'src/providers/kiro/runtime/KiroModelCatalogCoordinator.ts',
+  'src/providers/kiro/runtime/KiroModels.ts',
+  'src/providers/kiro/settings.ts',
 ]);
 
 /**
@@ -516,7 +496,7 @@ test('every listed document wrapper exists and reaches the settings document', (
 
 test('the provider runtime boundary detects indirect Obsidian access', () => {
   const options = { reachesObsidian: findObsidianValueReach(), obsidianBoundExports: createObsidianBoundExports() };
-  const file = path.join(providersRoot, 'claude', 'runtime', 'BoundaryFixture.ts');
+  const file = path.join(providersRoot, 'kiro', 'runtime', 'BoundaryFixture.ts');
   const inspect = source => inspectProviderRuntimeSource(file, source, options);
   const forbidden = [
     "import { getVaultPath } from '@/utils/path';\nexport const cwd = (host: { app: never }) => getVaultPath(host.app);",
@@ -525,7 +505,7 @@ test('the provider runtime boundary detects indirect Obsidian access', () => {
     "export function cwd({ app: obsidian }: Record<string, unknown>) { return obsidian; }",
     "export function cwd(host: Record<string, unknown>) { return host['app']; }",
     "import { Notice } from 'obsidian';\nexport const warn = (message: string) => new Notice(message);",
-    "import { claudeChatUIConfig } from '../ui/ClaudeChatUIConfig';\nexport const config = claudeChatUIConfig;",
+    "import { kiroChatUIConfig } from '../ui/KiroChatUIConfig';\nexport const config = kiroChatUIConfig;",
     "import * as paths from '@/utils/path';\nexport const cwd = paths.getVaultPath;",
     "import * as paths from '@/utils/path';\nexport const { getVaultPath } = paths;",
     "export { getVaultPath } from '@/utils/path';",
