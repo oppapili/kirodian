@@ -8,7 +8,8 @@
     "clearAll": "すべてクリア",
     "error": "エラー",
     "confirm": "確認",
-    "refresh": "更新"
+    "refresh": "更新",
+    "inputSuggestions": "入力候補"
   },
   "chat": {
     "promptSuggestionHint": "Tab で採用",
@@ -72,7 +73,8 @@
       "mainOnlyCommand": "/{command} はメインチャットでのみ使用できます。",
       "startFailed": "サイドチャットを開始できませんでした：{error}",
       "queued": "サイドチャットのキューに追加しました。",
-      "busySide": "サイドチャットが応答中です。完了までお待ちください。"
+      "busySide": "サイドチャットが応答中です。完了までお待ちください。",
+      "fullHeight": "全高表示"
     },
     "zen": {
       "regionLabel": "Claudian チャット",

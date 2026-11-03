@@ -4,6 +4,7 @@ import { getRuntimeEnvironmentVariables } from '@/core/providers/providerEnviron
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import type { ForkContext } from '@/features/chat/conversation/forkSourceTypes';
+import type { ChatSessionRuntime } from '@/features/chat/sessions/ChatSessionRuntime';
 import type { TabId } from '@/features/chat/tabs/ChatTab';
 import { chooseForkTarget } from '@/features/chat/tabs/forking/ForkTargetModal';
 import type { AssembledTabRuntime, TabMembershipView } from '@/features/chat/tabs/types';
@@ -15,14 +16,27 @@ export interface ForkTargetHost {
   readonly plugin: ChatFeatureHost;
   readonly membership: TabMembershipView;
   createTab(conversationId: string): Promise<AssembledTabRuntime | null>;
+  /**
+   * Shows the session in the wide viewer slot while `isValid` holds through its hydration;
+   * resolves to the tab showing it, if any.
+   */
+  showInViewer(
+    conversationId: string,
+    sourceTab: AssembledTabRuntime,
+    isValid: () => boolean,
+  ): Promise<AssembledTabRuntime | null>;
   discardTab(tabId: TabId): Promise<boolean>;
-  shouldForkToNewTab(): boolean;
+  /** `viewer` when the layout shows forks in its viewer slot, skipping the target prompt. */
+  forkTarget(): 'ask' | 'viewer';
+  rebind(tab: AssembledTabRuntime, conversationId: string, isCurrent: () => boolean): Promise<AssembledTabRuntime | null>;
 }
 
 type ForkSourceLease = {
   readonly latestMessageId?: string | null;
   readonly conversationId: string | null;
-  readonly tab: AssembledTabRuntime;
+  readonly session: ChatSessionRuntime;
+  readonly identityRevision: number;
+  readonly requestTab: AssembledTabRuntime;
 };
 
 function captureForkSourceLease(
@@ -32,17 +46,24 @@ function captureForkSourceLease(
   return {
     conversationId: context.sourceConversationId,
     latestMessageId: context.forkMode === 'full-session' ? context.messages.at(-1)?.id ?? null : undefined,
-    tab: sourceTab,
+    session: sourceTab.session.runtime,
+    identityRevision: sourceTab.session.runtime.identityRevision,
+    requestTab: sourceTab,
   };
 }
 
-function isForkSourceCurrent(host: ForkTargetHost, sourceLease: ForkSourceLease): boolean {
-  return host.membership.isTabAlive(sourceLease.tab)
-    && sourceLease.tab.conversationId === sourceLease.conversationId
-    && (sourceLease.latestMessageId === undefined || (
-      !sourceLease.tab.state.isStreaming
-      && sourceLease.tab.state.messages.at(-1)?.id === sourceLease.latestMessageId
+function isForkSourceCurrent(source: ForkSourceLease): boolean {
+  return !source.session.isDisposed
+    && source.session.identityRevision === source.identityRevision
+    && source.session.conversationId === source.conversationId
+    && (source.latestMessageId === undefined || (
+      !source.session.turns.isInFlight
+      && source.session.peekModel?.state.messages.at(-1)?.id === source.latestMessageId
     ));
+}
+
+function isForkRequestCurrent(host: ForkTargetHost, source: ForkSourceLease): boolean {
+  return isForkSourceCurrent(source) && host.membership.isTabAlive(source.requestTab);
 }
 
 async function deleteForkConversation(host: ForkTargetHost, conversationId: string): Promise<void> {
@@ -56,20 +77,19 @@ export async function openForkTarget(
   context: ForkContext,
 ): Promise<void> {
   const sourceLease = captureForkSourceLease(context, sourceTab);
-  if (!isForkSourceCurrent(host, sourceLease)) return;
+  if (!isForkRequestCurrent(host, sourceLease)) return;
 
-  const shouldForkToNewTab = host.shouldForkToNewTab();
-  const target = shouldForkToNewTab
-    ? 'new-tab'
-    : await chooseForkTarget(host.plugin.app);
-  if (!target || !isForkSourceCurrent(host, sourceLease)) return;
+  if (host.forkTarget() === 'viewer') {
+    await forkToViewer(host, context, sourceTab);
+    return;
+  }
+  const target = await chooseForkTarget(host.plugin.app);
+  if (!target || !isForkRequestCurrent(host, sourceLease)) return;
 
   if (target === 'new-tab') {
     const tab = await forkToNewTab(host, context, sourceTab);
     if (!tab) return;
-    if (!shouldForkToNewTab) {
-      new Notice(t('chat.fork.notice'));
-    }
+    new Notice(t('chat.fork.notice'));
   } else {
     const success = await forkInCurrentTab(host, context, sourceTab);
     if (!success) {
@@ -80,16 +100,40 @@ export async function openForkTarget(
   }
 }
 
+/** Shows the fork in the viewer slot; showing it may replace the source preview, which is intended. */
+async function forkToViewer(
+  host: ForkTargetHost,
+  context: ForkContext,
+  sourceTab: AssembledTabRuntime,
+): Promise<void> {
+  const sourceLease = captureForkSourceLease(context, sourceTab);
+  if (!isForkRequestCurrent(host, sourceLease)) return;
+  const conversationId = await createForkConversation(host, context, sourceLease);
+  if (!conversationId) return;
+  if (!isForkRequestCurrent(host, sourceLease)) {
+    await deleteForkConversation(host, conversationId);
+    return;
+  }
+  let shown: AssembledTabRuntime | null = null;
+  try {
+    // The source session must stay current until the fork is shown; the source tab itself may
+    // be the preview the fork replaces, so its liveness is not part of that check.
+    shown = await host.showInViewer(conversationId, sourceTab, () => isForkSourceCurrent(sourceLease));
+  } finally {
+    if (!shown) await deleteForkConversation(host, conversationId);
+  }
+}
+
 async function forkToNewTab(
   host: ForkTargetHost,
   context: ForkContext,
   sourceTab: AssembledTabRuntime,
 ): Promise<AssembledTabRuntime | null> {
   const sourceLease = captureForkSourceLease(context, sourceTab);
-  if (!isForkSourceCurrent(host, sourceLease)) return null;
+  if (!isForkRequestCurrent(host, sourceLease)) return null;
   const conversationId = await createForkConversation(host, context, sourceLease);
   if (!conversationId) return null;
-  if (!isForkSourceCurrent(host, sourceLease)) {
+  if (!isForkRequestCurrent(host, sourceLease)) {
     await deleteForkConversation(host, conversationId);
     return null;
   }
@@ -100,10 +144,10 @@ async function forkToNewTab(
       await deleteForkConversation(host, conversationId);
       return null;
     }
-    if (!isForkSourceCurrent(host, sourceLease)) {
+    if (!isForkRequestCurrent(host, sourceLease)) {
       if (
         host.membership.getTab(tab.id) === tab
-        && tab.session.userOwnershipRevision !== 0
+        && tab.session.isUserClaimed
       ) {
         return tab;
       }
@@ -129,27 +173,22 @@ async function forkInCurrentTab(
   sourceTab: AssembledTabRuntime,
 ): Promise<boolean> {
   const sourceLease = captureForkSourceLease(context, sourceTab);
-  if (!isForkSourceCurrent(host, sourceLease)) return false;
+  if (!isForkRequestCurrent(host, sourceLease)) return false;
   const conversationId = await createForkConversation(host, context, sourceLease);
   if (!conversationId) return false;
-  if (!isForkSourceCurrent(host, sourceLease)) {
+  if (!isForkRequestCurrent(host, sourceLease)) {
     await deleteForkConversation(host, conversationId);
     return false;
   }
   try {
-    await sourceTab.controllers.conversationController.switchTo(conversationId);
+    const target = await host.rebind(sourceTab, conversationId, () => isForkRequestCurrent(host, sourceLease));
+    if (target?.conversationId === conversationId && host.membership.isTabStateMutable(target)) return true;
   } catch (error) {
     await deleteForkConversation(host, conversationId);
     throw error;
   }
-  if (
-    !host.membership.isTabStateMutable(sourceTab)
-    || sourceTab.conversationId !== conversationId
-  ) {
-    await deleteForkConversation(host, conversationId);
-    return false;
-  }
-  return true;
+  await deleteForkConversation(host, conversationId);
+  return false;
 }
 
 async function createForkConversation(
@@ -164,7 +203,7 @@ async function createForkConversation(
     ...(context.linkedContentPath ? { linkedContentPath: context.linkedContentPath } : {}),
   });
 
-  if (!isForkSourceCurrent(host, sourceLease)) {
+  if (!isForkRequestCurrent(host, sourceLease)) {
     await deleteForkConversation(host, conversation.id);
     return null;
   }
@@ -192,7 +231,7 @@ async function createForkConversation(
           vaultPath,
         },
       );
-    if (!isForkSourceCurrent(host, sourceLease)) {
+    if (!isForkRequestCurrent(host, sourceLease)) {
       await deleteForkConversation(host, conversation.id);
       return null;
     }
@@ -201,7 +240,7 @@ async function createForkConversation(
       providerState: forkProviderState,
       ...(title && { title }),
     });
-    if (!isForkSourceCurrent(host, sourceLease)) {
+    if (!isForkRequestCurrent(host, sourceLease)) {
       await deleteForkConversation(host, conversation.id);
       return null;
     }

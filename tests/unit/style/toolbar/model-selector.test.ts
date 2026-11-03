@@ -133,7 +133,7 @@ describe('Toolbar popover styles', () => {
   it('shows every provider icon in the list in its brand colour and marks the selection with a light green tick only', () => {
     const toolbar = renderToolbar();
     const color = (selector: string) => style(toolbar.querySelector(selector)!).color;
-    const brand = 'var(--claudian-brand)';
+    const brand = 'var(--claudian-provider-logo)';
     // Only the icon is tinted; model names read as normal text.
     expect({
       selectedIcon: color('[aria-selected="true"] .claudian-model-provider-icon'),

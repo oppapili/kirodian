@@ -23,30 +23,28 @@ import { ImageContextManager } from '@/features/chat/composer/ImageContextManage
 import { MainChatComposerDropdown } from '@/features/chat/composer/MainChatComposerDropdown';
 import { installTextareaSizing } from '@/features/chat/composer/textareaSizing';
 import { createInputToolbar } from '@/features/chat/composer/toolbar/InputToolbar';
-import { LinkedContentController } from '@/features/chat/linked-content';
 import { NavigationSidebar } from '@/features/chat/navigation/NavigationSidebar';
+import { getSessionProviderId } from '@/features/chat/sessions/sessionProvider';
+import { getSessionCapabilities, getSessionChatUIConfig, getSessionSelectedModel, getSessionSettingsSnapshot, type SessionSettingsSnapshot, updateSessionProviderSettings, updateSessionReasoning } from '@/features/chat/sessions/sessionSettings';
 import type { SideChatController } from '@/features/chat/side-chat/SideChatController';
-import { getTabProviderId } from '@/features/chat/tabs/providerResolution';
 import type {
   PublishedTabRuntimeRef,
   TabRuntimeConstructionContext,
-  TabRuntimeShellBundle,
+  TabRuntimeCore,
 } from '@/features/chat/tabs/runtime/TabRuntimeConstruction';
-import { commitProvisionalTab } from '@/features/chat/tabs/TabLifecycle';
 import { TabModelSelectionCoordinator } from '@/features/chat/tabs/TabModelSelectionCoordinator';
 import { syncTabProviderServices } from '@/features/chat/tabs/tabProviderLifecycle';
-import { getBlankTabModelOptions, getTabCapabilities, getTabChatUIConfig, getTabSelectedModel, getTabSettingsSnapshot, type TabSettingsSnapshot, updateTabProviderSettings, updateTabReasoning } from '@/features/chat/tabs/tabProviderSettings';
+import { getBlankTabModelOptions } from '@/features/chat/tabs/tabProviderSettings';
 import { applyProviderUIGating, refreshTabProviderUI, syncComposerDropdownForProvider, updateTabPermissionMode, updateTabServiceTier } from '@/features/chat/tabs/tabProviderUI';
 import type {
   ProviderCatalogInfo,
-  TabServices,
   TabUIComponents,
 } from '@/features/chat/tabs/types';
 import { BRAND_NAME } from '@/i18n/constants';
 
 function buildContextManagers(
   options: TabRuntimeConstructionContext,
-  shell: TabRuntimeShellBundle,
+  core: TabRuntimeCore,
   contextTray: ComposerContextTray,
   infoRow: ComposerInfoRow,
   onUserModified: () => void,
@@ -55,28 +53,18 @@ function buildContextManagers(
   TabUIComponents,
   'fileContextManager' | 'imageContextManager' | 'linkedContentController'
 > {
-  const { dom } = shell;
+  const { dom } = core;
   const { plugin } = options;
   const fileContextManager = new FileContextManager(options.mentionDataProvider, {
     getConversationList: () => plugin.getConversationList(),
     getCurrentConversationId: () => runtimeRef.current()?.conversationId,
   });
   options.registerCleanup('tab file context manager', () => fileContextManager.destroy());
-  const linkedContentController = new LinkedContentController({
-    app: plugin.app,
-    getExcludedTags: () => plugin.settings.excludedTags,
-    getCachedVaultFiles: () => fileContextManager.getCachedVaultFiles(),
-    getCachedVaultFolders: () => fileContextManager.getCachedVaultFolders(),
+  const linkedContentController = core.session.runtime.model.linkedContentController;
+  options.registerCleanup('tab Linked content presentation', () => {
+    linkedContentController.unmountWelcome();
+    linkedContentController.unmountInfoRow();
   });
-  options.registerCleanup(
-    'tab Linked content controller',
-    () => linkedContentController.destroy(),
-  );
-  if (options.conversation?.id) {
-    linkedContentController.lock(options.conversation.linkedContentPath);
-  } else {
-    linkedContentController.resetAutoDraft();
-  }
   linkedContentController.mountInfoRow(infoRow);
   if (dom.welcomeEl) linkedContentController.mountWelcome(dom.welcomeEl);
   const imageContextManager = new ImageContextManager(
@@ -91,14 +79,15 @@ function buildContextManagers(
 }
 
 function buildComposerDropdown(
-  shell: TabRuntimeShellBundle,
+  core: TabRuntimeCore,
   providerId: ProviderId | null,
   fileContextManager: FileContextManager,
   options: TabRuntimeConstructionContext,
   getHiddenCommands?: () => Set<string>,
   catalogInfo?: ProviderCatalogInfo,
+  onVisibilityChange?: () => void,
 ): MainChatComposerDropdown {
-  const { dom } = shell;
+  const { dom } = core;
   const dropdown = new MainChatComposerDropdown(
     dom.inputContainerEl,
     dom.inputEl,
@@ -108,6 +97,7 @@ function buildComposerDropdown(
       hiddenCommands: getHiddenCommands?.() ?? new Set(),
       providerConfig: catalogInfo?.config,
       providerDiscovery: catalogInfo?.discovery,
+      onVisibilityChange,
     },
   );
   options.registerCleanup('tab composer dropdown', () => dropdown.destroy());
@@ -115,19 +105,18 @@ function buildComposerDropdown(
 }
 
 function buildInputToolbar(
-  shell: TabRuntimeShellBundle,
-  services: TabServices,
+  core: TabRuntimeCore,
   options: TabRuntimeConstructionContext,
   runtimeRef: PublishedTabRuntimeRef,
   onUserModified: () => void,
 ): ReturnType<typeof createInputToolbar> {
-  const { dom } = shell;
+  const { dom } = core;
   const { plugin } = options;
 
   const inputToolbar = dom.inputWrapper.createDiv({ cls: 'claudian-input-toolbar' });
 
   const blankTabUIConfigProxy = (): ProviderChatUIConfig => {
-    const baseConfig = getTabChatUIConfig(shell, plugin);
+    const baseConfig = getSessionChatUIConfig(core, plugin);
     return {
       ...baseConfig,
       getModelOptions: (settings: Record<string, unknown>) =>
@@ -141,22 +130,22 @@ function buildInputToolbar(
       return tab !== null && options.isRuntimeLive(tab);
     },
     readDraft: () => ({
-      providerId: shell.providerId,
-      model: shell.draftModel,
+      providerId: core.providerId,
+      model: core.draftModel,
     }),
     applyModel: (model) => {
-      shell.session.selectDraft(shell.providerId, model);
+      core.session.selectDraft(core.providerId, model);
     },
     applyProviderTarget: ({ providerId, model }) => {
-      shell.session.selectDraft(providerId, model);
-      syncTabProviderServices(shell, services);
+      core.session.selectDraft(providerId, model);
+      syncTabProviderServices(core, core.services);
       runtimeRef.requirePublished().ui.composerDropdown.clearProviderCatalog();
     },
     restoreDraft: ({ providerId, model }) => {
       const tab = runtimeRef.requirePublished();
-      shell.session.selectDraft(providerId, model);
-      syncTabProviderServices(shell, services);
-      syncComposerDropdownForProvider(tab, plugin, shell.providerCatalogResolver);
+      core.session.selectDraft(providerId, model);
+      syncTabProviderServices(core, core.services);
+      syncComposerDropdownForProvider(tab, plugin, core.providerCatalogResolver);
       refreshTabProviderUI(tab);
       applyProviderUIGating(tab, plugin);
     },
@@ -190,14 +179,14 @@ function buildInputToolbar(
 
   const toolbarComponents = createInputToolbar(inputToolbar, {
     getUIConfig: () => {
-      if (shell.conversationId === null) {
+      if (core.conversationId === null) {
         return blankTabUIConfigProxy();
       }
-      return getTabChatUIConfig(shell, plugin);
+      return getSessionChatUIConfig(core, plugin);
     },
-    getCapabilities: () => getTabCapabilities(shell, plugin),
+    getCapabilities: () => getSessionCapabilities(core, plugin),
     getSettings: () => {
-      const base = getTabSettingsSnapshot(shell, plugin);
+      const base = getSessionSettingsSnapshot(core.session.runtime, plugin);
       const sideSettings = getSelectedSideChat()?.runtime?.settings;
       if (!sideSettings) return base;
       return { ...base, ...sideSettings };
@@ -253,7 +242,7 @@ function buildInputToolbar(
         );
         if (!didCommit || !isSelectionTargetCurrent()) return;
 
-        syncComposerDropdownForProvider(tab, plugin, shell.providerCatalogResolver);
+        syncComposerDropdownForProvider(tab, plugin, core.providerCatalogResolver);
         onUserModified();
         options.onDraftModelChanged?.(tab, tab.draftModel);
         await uiConfig.prepareModelMetadata?.(
@@ -283,7 +272,7 @@ function buildInputToolbar(
       const request = modelSelection.beginRequest();
       const conversationId = tab.conversationId;
 
-      const uiConfig: ProviderChatUIConfig = getTabChatUIConfig(tab, plugin);
+      const uiConfig: ProviderChatUIConfig = getSessionChatUIConfig(tab, plugin);
       const normalizedModel = normalizeProviderModelSelection(
         boundProvider,
         plugin.settings,
@@ -293,7 +282,7 @@ function buildInputToolbar(
         plugin.settings,
         boundProvider,
         normalizedModel,
-      ) as TabSettingsSnapshot;
+      ) as SessionSettingsSnapshot;
 
       const isSelectionTargetCurrent = (): boolean => (
         options.isRuntimeLive(tab)
@@ -304,7 +293,7 @@ function buildInputToolbar(
       if (!isSelectionTargetCurrent()) return;
 
       // Sole writer of a bound conversation's model; blank-tab models change through session identity.
-      if (normalizedModel !== getTabSelectedModel(tab, plugin)) tab.ui.promptSuggestion.discard();
+      if (normalizedModel !== getSessionSelectedModel(tab, plugin)) tab.ui.promptSuggestion.discard();
       await plugin.updateConversation(conversationId, {
         selectedModel: normalizedModel,
       });
@@ -337,8 +326,8 @@ function buildInputToolbar(
         tab.ui.modeSelector.updateDisplay();
         return;
       }
-      await updateTabProviderSettings(tab, plugin, (settings) => {
-        getTabChatUIConfig(tab, plugin).applyModeSelection?.(mode, settings);
+      await updateSessionProviderSettings(tab.session.runtime, plugin, (settings) => {
+        getSessionChatUIConfig(tab, plugin).applyModeSelection?.(mode, settings);
       });
       tab.ui.modeSelector.updateDisplay();
       tab.ui.modeSelector.renderOptions();
@@ -352,7 +341,7 @@ function buildInputToolbar(
     onEffortLevelChange: async (effort: string) => {
       if (applySideSetting({ reasoning: effort })) return;
       const tab = runtimeRef.requirePublished();
-      await updateTabReasoning(tab, plugin, effort);
+      await updateSessionReasoning(tab.session.runtime, plugin, effort);
       onUserModified();
     },
     onServiceTierChange: async (serviceTier: string) => {
@@ -376,15 +365,14 @@ function buildInputToolbar(
 }
 
 export function buildTabRuntimeUI(
-  shell: TabRuntimeShellBundle,
-  services: TabServices,
+  core: TabRuntimeCore,
   options: TabRuntimeConstructionContext,
   runtimeRef: PublishedTabRuntimeRef,
 ): TabUIComponents {
-  const { dom } = shell;
+  const { dom } = core;
   const { plugin } = options;
   const onUserModified = (): void => {
-    commitProvisionalTab(runtimeRef.requirePublished());
+    runtimeRef.requirePublished().session.claimUserOwnership();
   };
   options.registerCleanup(
     'tab textarea sizing',
@@ -400,23 +388,24 @@ export function buildTabRuntimeUI(
   const infoRow = new ComposerInfoRow(dom.infoRowEl);
   options.registerCleanup('tab composer info row', () => infoRow.destroy());
 
-  const toolbar = buildInputToolbar(shell, services, options, runtimeRef, onUserModified);
+  const toolbar = buildInputToolbar(core, options, runtimeRef, onUserModified);
   const contextManagers = buildContextManagers(
     options,
-    shell,
+    core,
     contextTray,
     infoRow,
     onUserModified,
     runtimeRef,
   );
-  const catalogInfo = shell.providerCatalogResolver();
+  const catalogInfo = core.providerCatalogResolver();
   const composerDropdown = buildComposerDropdown(
-    shell,
-    getTabProviderId(shell, plugin),
+    core,
+    getSessionProviderId(core, plugin),
     contextManagers.fileContextManager,
     options,
     () => getHiddenCommandSet(plugin.settings),
     catalogInfo,
+    () => runtimeRef.current()?.ui.promptSuggestion.refresh(),
   );
   const navigationSidebar = new NavigationSidebar(
     dom.messagesWrapperEl,
@@ -429,7 +418,7 @@ export function buildTabRuntimeUI(
       const tab = runtimeRef.current();
       return !!tab && tab.controllers.sideChatController.destination === 'main'
         && !contextTray.hasContent
-        // The resume picker removes the input's aria-expanded instead of setting it.
+        && !composerDropdown.isVisible()
         && !tab.controllers.builtInCommandController.isResumeDropdownVisible();
     }, dom.inputContainerEl),
     contextTray,

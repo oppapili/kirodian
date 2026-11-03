@@ -8,7 +8,7 @@ import { PinnedLinkedContentPathCoordinator } from '@/app/settings/PinnedLinkedC
 import type { ConversationPersistenceStore } from '@/app/storage/ConversationPersistenceStore';
 import type { SessionMetadataReadResult } from '@/app/storage/SessionStorage';
 import { SessionStorage } from '@/app/storage/SessionStorage';
-import { SharedStorageService } from '@/app/storage/SharedStorageService';
+import type { SharedStorageService } from '@/app/storage/SharedStorageService';
 import type { ClaudianChatFeatureHost } from '@/composition/ClaudianFeatureHosts';
 import type { ClaudianViews } from '@/composition/ClaudianViews';
 import { getDeviceSessionsPath } from '@/core/bootstrap/storagePaths';
@@ -549,40 +549,6 @@ describe('ClaudianPlugin', () => {
         .toBe(restoredMetadata.title);
       expect(loadSourceSpy).toHaveBeenCalledWith(restoredMetadata.id);
       loadSourceSpy.mockRestore();
-    });
-
-    it('discards stale global tab state after a view-scoped restore succeeds', async () => {
-      const clearLegacyState = jest.spyOn(
-        SharedStorageService.prototype,
-        'clearTabManagerState',
-      ).mockResolvedValue(undefined);
-      (plugin.loadData as jest.Mock).mockResolvedValue({
-        tabManagerState: {
-          activeTabId: 'legacy-tab',
-          openTabs: [{ conversationId: null, tabId: 'legacy-tab' }],
-        },
-      });
-      mockApp.workspace.getLeavesOfType.mockReturnValue([{
-        getViewState: jest.fn().mockReturnValue({
-          state: {
-            tabWorkspace: {
-              version: 1,
-              activeTabId: 'view-tab',
-              openTabs: [{ conversationId: null, tabId: 'view-tab' }],
-            },
-          },
-        }),
-      }]);
-      await plugin.onload();
-
-      expect(clearLegacyState).toHaveBeenCalledTimes(1);
-      await expect(chatHostOf(plugin).claimLegacyTabManagerState()).resolves.toBeNull();
-      expect(clearLegacyState).toHaveBeenCalledTimes(1);
-
-      await chatHostOf(plugin).completeLegacyTabManagerStateMigration();
-
-      expect(clearLegacyState).toHaveBeenCalledTimes(1);
-      clearLegacyState.mockRestore();
     });
 
     it('publishes the remaining conversation metadata after layout readiness', async () => {
@@ -1557,7 +1523,7 @@ describe('ClaudianPlugin', () => {
         };
         return {
           getTabManager: () => manager,
-          isDualPaneMode: () => false,
+          getCompactTabManager: () => manager,
           prepareForPluginUnload: async () => undefined,
           manager,
         };
@@ -1576,15 +1542,13 @@ describe('ClaudianPlugin', () => {
       expect(chatHostOf(plugin).getView()).toBe(first.view);
     });
 
-    it('delegates New to the active dual-pane navigation policy', async () => {
+    it('delegates New to the focused view layout', async () => {
       await plugin.onload();
 
-      const handleNewConversationCommand = jest.fn().mockResolvedValue(true);
-      const createNewTab = jest.fn().mockResolvedValue(undefined);
+      const startNewConversation = jest.fn().mockResolvedValue(undefined);
       jest.spyOn(viewsOf(plugin), 'getView').mockReturnValue({
-        createNewTab,
         getTabManager: jest.fn().mockReturnValue({}),
-        handleNewConversationCommand,
+        startNewConversation,
       } as any);
 
       const command = getRegisteredCommand('new-tab');
@@ -1592,15 +1556,14 @@ describe('ClaudianPlugin', () => {
       expect(command.checkCallback(false)).toBe(true);
       await new Promise<void>((resolve) => setImmediate(resolve));
 
-      expect(handleNewConversationCommand).toHaveBeenCalledTimes(1);
-      expect(createNewTab).not.toHaveBeenCalled();
+      expect(startNewConversation).toHaveBeenCalledTimes(1);
     });
 
     it('keeps replace and close tab commands out of dual mode', async () => {
       await plugin.onload();
 
       jest.spyOn(viewsOf(plugin), 'getView').mockReturnValue({
-        isDualPaneMode: () => true,
+        getCompactTabManager: () => null,
         getTabManager: jest.fn().mockReturnValue({
           getActiveTab: jest.fn().mockReturnValue({ state: { isStreaming: false } }),
         }),
@@ -2009,13 +1972,32 @@ describe('ClaudianPlugin', () => {
   });
 
   describe('Linked content path events', () => {
+    async function detachedLinkedContentSession() {
+      mockApp.vault.getAbstractFileByPath = jest.fn().mockReturnValue(null);
+      const host = chatHostOf();
+      const conversation = await host.createConversation({ linkedContentPath: 'Projects/Old/Plan.md' });
+      const { attachment } = host.sessionRuntimes.acquire({ conversationId: conversation.id, providerId: conversation.providerId, draftModel: null }, { reveal: () => undefined });
+      const model = attachment.runtime.model;
+      await model.hydrate();
+      void attachment.runtime.turns.run(signal => new Promise<void>(resolve => signal.addEventListener('abort', () => resolve())));
+      host.sessionRuntimes.release(attachment);
+      const linked = model.linkedContentController;
+      jest.spyOn(linked, 'handleCreated');
+      jest.spyOn(linked, 'handleDeleted');
+      jest.spyOn(linked, 'handleRenamed');
+      return linked;
+    }
+
     it('coalesces vault refreshes while delivering every path event immediately', async () => {
       await plugin.onload();
-      const view = { handleLinkedContentCreated: jest.fn(), notifyConversationListChanged: jest.fn() };
+      const linked = await detachedLinkedContentSession();
+      const second = await detachedLinkedContentSession();
+      const view = { notifyConversationListChanged: jest.fn() };
       jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([view as any]);
       const listener = mockApp.vault.on.mock.calls.find((call: unknown[]) => call[0] === 'create')![1];
       for (let index = 0; index < 20; index++) listener(new (TFile as any)(`note-${index}.md`));
-      expect(view.handleLinkedContentCreated).toHaveBeenCalledTimes(20);
+      expect(linked.handleCreated).toHaveBeenCalledTimes(20);
+      expect(second.handleCreated).toHaveBeenCalledTimes(20);
       expect(view.notifyConversationListChanged).not.toHaveBeenCalled();
       await new Promise(resolve => window.setTimeout(resolve, 75));
       expect(view.notifyConversationListChanged).toHaveBeenCalledTimes(1);
@@ -2083,9 +2065,8 @@ describe('ClaudianPlugin', () => {
 
     it('invalidates open history projections when unpinned targets disappear or reappear', async () => {
       await plugin.onload();
+      const linked = await detachedLinkedContentSession();
       const view = {
-        handleLinkedContentCreated: jest.fn(),
-        handleLinkedContentDeleted: jest.fn(),
         notifyConversationListChanged: jest.fn(),
       };
       jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([view as any]);
@@ -2094,7 +2075,7 @@ describe('ClaudianPlugin', () => {
         new (TFile as any)('Notes/Unpinned.md'),
       );
 
-      expect(view.handleLinkedContentDeleted).toHaveBeenCalledWith(
+      expect(linked.handleDeleted).toHaveBeenCalledWith(
         'Notes/Unpinned.md',
         false,
       );
@@ -2107,7 +2088,7 @@ describe('ClaudianPlugin', () => {
       expect(createListener).toEqual(expect.any(Function));
       createListener(new (TFile as any)('Notes/Unpinned.md'));
 
-      expect(view.handleLinkedContentCreated).toHaveBeenCalledWith('Notes/Unpinned.md');
+      expect(linked.handleCreated).toHaveBeenCalledWith('Notes/Unpinned.md');
       await new Promise(resolve => window.setTimeout(resolve, 75));
       expect(view.notifyConversationListChanged).toHaveBeenCalledTimes(2);
     });
@@ -2128,8 +2109,8 @@ describe('ClaudianPlugin', () => {
 
     it('invalidates deleted targets even when pinned-settings cleanup fails', async () => {
       await plugin.onload();
+      const linked = await detachedLinkedContentSession();
       const view = {
-        handleLinkedContentDeleted: jest.fn(),
         notifyConversationListChanged: jest.fn(),
       };
       jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([view as any]);
@@ -2140,7 +2121,7 @@ describe('ClaudianPlugin', () => {
         new (TFile as any)('Notes/Unpinned.md'),
       )).rejects.toThrow('settings unavailable');
 
-      expect(view.handleLinkedContentDeleted).toHaveBeenCalledWith(
+      expect(linked.handleDeleted).toHaveBeenCalledWith(
         'Notes/Unpinned.md',
         false,
       );

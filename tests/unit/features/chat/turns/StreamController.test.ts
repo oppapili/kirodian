@@ -128,12 +128,18 @@ function restoreTestWindow(): void {
   });
 }
 
-type MockStreamControllerDeps = StreamControllerDeps & {
+type MockStreamControllerDeps = Omit<StreamControllerDeps, 'renderer' | 'getMessagesEl'> & {
   getProviderSessionId: () => string | null;
   /** The recovery shares the stream's provider, session, manager, and window ports. */
   historyRecovery: AsyncSubagentHistoryRecoveryDeps;
   /** The turn owner the presentation state derives its stream generation from. */
   turns: TurnCoordinator;
+  /**
+   * The mock always supplies a concrete renderer and messages element, so these
+   * ports are non-null here even though the production deps made them nullable.
+   */
+  renderer: NonNullable<StreamControllerDeps['renderer']>;
+  getMessagesEl: () => HTMLElement;
 };
 
 function createMockDeps(): MockStreamControllerDeps {
@@ -151,8 +157,8 @@ function createMockDeps(): MockStreamControllerDeps {
     getByTaskId: jest.fn().mockReturnValue(undefined),
     refreshAsyncSubagent: jest.fn(),
     hasPendingTask: jest.fn().mockReturnValue(false),
-    renderPendingTask: jest.fn().mockReturnValue(null),
-    renderPendingTaskFromTaskResult: jest.fn().mockReturnValue(null),
+    resolvePendingTask: jest.fn().mockReturnValue(null),
+    resolvePendingTaskFromTaskResult: jest.fn().mockReturnValue(null),
     getSyncSubagent: jest.fn().mockReturnValue(undefined),
     addSyncToolCall: jest.fn(),
     updateSyncToolResult: jest.fn(),
@@ -187,7 +193,6 @@ function createMockDeps(): MockStreamControllerDeps {
     turns,
     historyRecovery: {
       subagentManager,
-      getMessagesEl: () => messagesEl,
       getProviderId: () => deps.getProviderId?.() ?? 'kiro',
       getProviderSessionId: () => deps.getProviderSessionId?.() ?? null,
       loadSubagentFinalResult: jest.fn().mockResolvedValue(null),
@@ -1280,7 +1285,7 @@ describe('StreamController - Text Content', () => {
     it('routes provider child output and native completion payloads to the child tool', async () => {
       const msg = createTestMessage();
       const toolCall = { id: 'read', name: 'Read', input: {}, status: 'running', result: '' };
-      const child = { info: { id: 'parent', description: 'test', status: 'running', toolCalls: [toolCall] } };
+      const child = { id: 'parent', description: 'test', status: 'running', toolCalls: [toolCall] };
       (deps.subagentManager.getSyncSubagent as jest.Mock).mockReturnValue(child);
       const scope = { kind: 'requested' as const, sessionInstanceId: 's', executionId: 'e', turnId: 't', sequence: 1 };
       const toolScope = { kind: 'subagent' as const, subagentId: 'parent' };
@@ -1303,7 +1308,7 @@ describe('StreamController - Text Content', () => {
 
       const toolCall = { id: 'read-1', name: 'Read', input: {}, status: 'running' };
       (deps.subagentManager.getSyncSubagent as jest.Mock).mockReturnValueOnce({
-        info: { id: 'task-1', description: 'test', status: 'running', toolCalls: [toolCall] },
+        id: 'task-1', description: 'test', status: 'running', toolCalls: [toolCall],
       });
 
       await controller.handleStreamChunk(
@@ -1362,11 +1367,10 @@ describe('StreamController - Text Content', () => {
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
+      deps.state.currentThinkingBlock = { content: 'Let me think...', startTime: Date.now() };
       deps.state.currentThinkingState = {
-        content: 'Let me think...',
         container: createMockEl(),
         contentEl: createMockEl(),
-        startTime: Date.now(),
       } as any;
 
       await controller.finalizeCurrentThinkingBlock(msg);
@@ -1379,11 +1383,10 @@ describe('StreamController - Text Content', () => {
 
     it('should not add to contentBlocks when no thinking content', async () => {
       const msg = createTestMessage();
+      deps.state.currentThinkingBlock = { content: '', startTime: Date.now() };
       deps.state.currentThinkingState = {
-        content: '',
         container: createMockEl(),
         contentEl: createMockEl(),
-        startTime: Date.now(),
       } as any;
 
       await controller.finalizeCurrentThinkingBlock(msg);
@@ -1621,16 +1624,16 @@ describe('StreamController - Text Content', () => {
 
       // Configure manager: pending task exists but render returns null (error case)
       (deps.subagentManager.hasPendingTask as jest.Mock).mockReturnValueOnce(true);
-      (deps.subagentManager.renderPendingTask as jest.Mock).mockReturnValueOnce(null);
+      (deps.subagentManager.resolvePendingTask as jest.Mock).mockReturnValueOnce(null);
 
-      // Child chunk arrives - renderPendingTask returns null but shouldn't crash
+      // Child chunk arrives - resolvePendingTask returns null but shouldn't crash
       await controller.handleStreamChunk(
         { type: 'subagent_tool_use', id: 'read-1', name: 'Read', input: { file_path: 'test.md' }, subagentId: 'task-1' },
         msg
       );
 
       // Should not throw - manager handled errors internally
-      expect(deps.subagentManager.renderPendingTask).toHaveBeenCalledWith('task-1', deps.state.currentContentEl);
+      expect(deps.subagentManager.resolvePendingTask).toHaveBeenCalledWith('task-1', deps.state.currentContentEl);
     });
 
     it('should not crash stream when pending Task rendering returns null via tool_result', async () => {
@@ -1645,7 +1648,7 @@ describe('StreamController - Text Content', () => {
 
       // Configure manager: pending task exists but render returns null
       (deps.subagentManager.hasPendingTask as jest.Mock).mockReturnValueOnce(true);
-      (deps.subagentManager.renderPendingTaskFromTaskResult as jest.Mock).mockReturnValueOnce(null);
+      (deps.subagentManager.resolvePendingTaskFromTaskResult as jest.Mock).mockReturnValueOnce(null);
 
       // Tool result arrives - pending resolver returns null but stream should continue
       await controller.handleStreamChunk(
@@ -1654,7 +1657,7 @@ describe('StreamController - Text Content', () => {
       );
 
       // Should not throw - manager handled errors internally
-      expect(deps.subagentManager.renderPendingTaskFromTaskResult).toHaveBeenCalledWith(
+      expect(deps.subagentManager.resolvePendingTaskFromTaskResult).toHaveBeenCalledWith(
         'task-1',
         'Task completed',
         false,
@@ -1673,7 +1676,7 @@ describe('StreamController - Text Content', () => {
       );
 
       (deps.subagentManager.hasPendingTask as jest.Mock).mockReturnValueOnce(true);
-      (deps.subagentManager.renderPendingTaskFromTaskResult as jest.Mock).mockReturnValueOnce({
+      (deps.subagentManager.resolvePendingTaskFromTaskResult as jest.Mock).mockReturnValueOnce({
         mode: 'async',
         info: {
           id: 'task-1',
@@ -1693,7 +1696,7 @@ describe('StreamController - Text Content', () => {
         msg
       );
 
-      expect(deps.subagentManager.renderPendingTaskFromTaskResult).toHaveBeenCalledWith(
+      expect(deps.subagentManager.resolvePendingTaskFromTaskResult).toHaveBeenCalledWith(
         'task-1',
         '{"agent_id":"agent-1"}',
         false,
@@ -1731,14 +1734,14 @@ describe('StreamController - Text Content', () => {
 
       const providerPayload = { rawOutput: { isAsync: true, status: 'async_launched', agentId: 'agent-1' } };
       (deps.subagentManager.hasPendingTask as jest.Mock).mockReturnValueOnce(true);
-      (deps.subagentManager.renderPendingTaskFromTaskResult as jest.Mock).mockReturnValueOnce(null);
+      (deps.subagentManager.resolvePendingTaskFromTaskResult as jest.Mock).mockReturnValueOnce(null);
 
       await controller.handleStreamChunk(
         { type: 'tool_result', id: 'task-1', content: 'Launching...', providerPayload },
         msg
       );
 
-      expect(deps.subagentManager.renderPendingTaskFromTaskResult).toHaveBeenCalledWith(
+      expect(deps.subagentManager.resolvePendingTaskFromTaskResult).toHaveBeenCalledWith(
         'task-1',
         'Launching...',
         false,
@@ -1754,11 +1757,10 @@ describe('StreamController - Text Content', () => {
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
+      deps.state.currentThinkingBlock = { content: 'Let me think...', startTime: Date.now() };
       deps.state.currentThinkingState = {
-        content: 'Let me think...',
         container: createMockEl(),
         contentEl: createMockEl(),
-        startTime: Date.now(),
       } as any;
 
       await controller.handleStreamChunk({ type: 'text', content: 'Hello' }, msg);
@@ -1794,11 +1796,10 @@ describe('StreamController - Text Content', () => {
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
+      deps.state.currentThinkingBlock = { content: 'Reasoning...', startTime: Date.now() };
       deps.state.currentThinkingState = {
-        content: 'Reasoning...',
         container: createMockEl(),
         contentEl: createMockEl(),
-        startTime: Date.now(),
       } as any;
 
       await controller.handleStreamChunk(

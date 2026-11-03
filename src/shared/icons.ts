@@ -55,6 +55,7 @@ export const KIRO_PROVIDER_ICON: ProviderIconSvg = {
   ],
 };
 
+
 export interface CreateProviderIconSvgOptions {
   className?: string;
   dataProvider?: string;

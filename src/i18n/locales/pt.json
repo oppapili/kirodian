@@ -8,7 +8,8 @@
     "clearAll": "Limpar tudo",
     "error": "Erro",
     "confirm": "Confirmar",
-    "refresh": "Atualizar"
+    "refresh": "Atualizar",
+    "inputSuggestions": "Sugestões de entrada"
   },
   "chat": {
     "promptSuggestionHint": "Tab para aceitar",
@@ -72,7 +73,8 @@
       "mainOnlyCommand": "/{command} está disponível apenas na conversa principal.",
       "startFailed": "Não foi possível iniciar a conversa lateral: {error}",
       "queued": "Adicionado à fila da conversa lateral.",
-      "busySide": "A conversa lateral ainda está respondendo. Aguarde a conclusão."
+      "busySide": "A conversa lateral ainda está respondendo. Aguarde a conclusão.",
+      "fullHeight": "Altura total"
     },
     "zen": {
       "regionLabel": "Chat do Claudian",

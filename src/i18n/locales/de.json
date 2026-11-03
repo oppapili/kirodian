@@ -8,7 +8,8 @@
     "clearAll": "Alle löschen",
     "error": "Fehler",
     "confirm": "Bestätigen",
-    "refresh": "Aktualisieren"
+    "refresh": "Aktualisieren",
+    "inputSuggestions": "Eingabevorschläge"
   },
   "chat": {
     "promptSuggestionHint": "Mit Tab übernehmen",
@@ -72,7 +73,8 @@
       "mainOnlyCommand": "/{command} ist nur im Hauptchat verfügbar.",
       "startFailed": "Nebenchat konnte nicht gestartet werden: {error}",
       "queued": "Für den Nebenchat eingereiht.",
-      "busySide": "Der Nebenchat antwortet noch. Warte, bis er fertig ist."
+      "busySide": "Der Nebenchat antwortet noch. Warte, bis er fertig ist.",
+      "fullHeight": "Volle Höhe"
     },
     "zen": {
       "regionLabel": "Claudian-Chat",

@@ -8,7 +8,8 @@
     "clearAll": "清除全部",
     "error": "錯誤",
     "confirm": "確認",
-    "refresh": "重新整理"
+    "refresh": "重新整理",
+    "inputSuggestions": "輸入建議"
   },
   "chat": {
     "promptSuggestionHint": "按 Tab 接受",
@@ -72,7 +73,8 @@
       "mainOnlyCommand": "/{command} 僅能在主對話中使用。",
       "startFailed": "側邊對話啟動失敗：{error}",
       "queued": "已加入側聊佇列。",
-      "busySide": "側邊對話仍在回覆，請稍候。"
+      "busySide": "側邊對話仍在回覆，請稍候。",
+      "fullHeight": "全高顯示"
     },
     "zen": {
       "regionLabel": "Claudian 聊天",

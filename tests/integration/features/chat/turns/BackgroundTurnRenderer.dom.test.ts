@@ -1,6 +1,8 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
+import { createSessionModelStub } from '@test/helpers/ConversationPorts';
+import { enqueueTabSessionEvent } from '@test/helpers/features/chat/SessionEventsHarness';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { within } from '@testing-library/dom';
 import { axe } from 'jest-axe';
@@ -10,15 +12,16 @@ import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 import type { ChatMessage } from '@/core/types';
 import { ChatExecutionCoordinator } from '@/features/chat/execution/ChatExecutionCoordinator';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
+import { ChatSessionRuntime } from '@/features/chat/sessions/ChatSessionRuntime';
 import { ChatState } from '@/features/chat/state/ChatState';
 import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
 import { TabSession } from '@/features/chat/tabs/TabSession';
-import { enqueueTabSessionEvent } from '@/features/chat/tabs/TabSessionEvents';
 import { StreamController } from '@/features/chat/turns/StreamController';
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
 HTMLElement.prototype.removeClass = function (...classes) { this.classList.remove(...classes); };
+HTMLElement.prototype.hasClass = function (cls) { return this.classList.contains(cls); };
 beforeEach(() => {
   document.body.replaceChildren();
   jest.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
@@ -44,12 +47,18 @@ it.each([false, true])('keeps main-chat automatic work and later output on eithe
     resolveMissingProviderSession: async () => 'not_found',
     onSessionEvent: (event, context) => enqueueTabSessionEvent(tab, plugin, event, context),
   });
-  const session = new TabSession({ id: 'tab', conversationId: 'conversation', draftModel: null,
-    providerId: 'kiro', lifecycleState: 'ready' } as any, coordinator);
-  const tab = { state, renderer, session, executionCoordinator: coordinator, lifecycleState: 'ready',
-    ui: { promptSuggestion: { discard() {} } },
-    dom: { contentEl: messagesEl }, services: { subagentManager: subagents },
-    controllers: { streamController: stream, conversationController: { save: async () => undefined } } } as any;
+  const runtime = new ChatSessionRuntime(
+    { conversationId: 'conversation', providerId: 'kiro', draftModel: null },
+    coordinator,
+    session => createSessionModelStub(session, { getState: () => state }),
+  );
+  const session = new TabSession({ id: 'tab', lifecycleState: 'open' }, runtime);
+  const tab = { state, renderer, session, executionCoordinator: coordinator, lifecycleState: 'open',
+    ui: { promptSuggestion: { receive() {}, discard() {} } },
+    dom: { contentEl: messagesEl },
+    services: { subagentManager: subagents },
+    controllers: { streamController: stream, inputController: undefined,
+      conversationController: { save: async () => undefined, scheduleProgressSave: () => undefined } } } as any;
   try {
     await coordinator.bindConversation({ conversationId: 'conversation', providerId: 'kiro' });
     await coordinator.prepare();
@@ -67,7 +76,7 @@ it.each([false, true])('keeps main-chat automatic work and later output on eithe
     if (compaction) native.emitBackgroundEvent({ type: 'context_compacted' });
     native.emitBackgroundEvent({ type: 'text_delta', text: 'After notification.' });
     native.emitBackgroundEvent({ type: 'background_turn_completed', reason: 'completed', nativeAssistantId: 'final-checkpoint' });
-    await session.awaitBackgroundWork();
+    await session.runtime.awaitBackgroundWork();
     const notifications = within(messagesEl).getAllByRole('button', { name: 'Task notification' });
     const automaticWork = within(messagesEl).getByText('Read');
     expect(notifications[0].compareDocumentPosition(automaticWork) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

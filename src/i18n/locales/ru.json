@@ -8,7 +8,8 @@
     "clearAll": "Очистить всё",
     "error": "Ошибка",
     "confirm": "Подтвердить",
-    "refresh": "Обновить"
+    "refresh": "Обновить",
+    "inputSuggestions": "Подсказки ввода"
   },
   "chat": {
     "promptSuggestionHint": "Tab для принятия",
@@ -72,7 +73,8 @@
       "mainOnlyCommand": "/{command} доступна только в основном чате.",
       "startFailed": "Не удалось запустить побочный чат: {error}",
       "queued": "Добавлено в очередь бокового чата.",
-      "busySide": "Побочный чат ещё отвечает. Дождитесь завершения."
+      "busySide": "Побочный чат ещё отвечает. Дождитесь завершения.",
+      "fullHeight": "Во всю высоту"
     },
     "zen": {
       "regionLabel": "Чат Claudian",

@@ -8,7 +8,8 @@
     "clearAll": "Clear all",
     "error": "Error",
     "confirm": "Confirm",
-    "refresh": "Refresh"
+    "refresh": "Refresh",
+    "inputSuggestions": "Input suggestions"
   },
   "chat": {
     "promptSuggestionHint": "Tab to accept",
@@ -72,7 +73,8 @@
       "mainOnlyCommand": "/{command} is available in the main chat only.",
       "startFailed": "Side chat could not start: {error}",
       "queued": "Queued for the side chat.",
-      "busySide": "The side chat is still responding. Wait for it to finish."
+      "busySide": "The side chat is still responding. Wait for it to finish.",
+      "fullHeight": "Full height"
     },
     "zen": {
       "regionLabel": "Claudian chat",

@@ -245,22 +245,24 @@ it.each([false, true])('inserts a plain newline without rewriting draft whitespa
   }
 });
 
-it('allows input listeners to update composer modes and forwards dropdown accessibility to the focused textbox', async () => {
+it('allows input listeners to update composer modes and hands pre-mount dropdown accessibility to the focused textbox', async () => {
   const parent = document.body.createDiv();
   const editor = createEditor(parent);
   const input = editor.element;
-  input.focus();
-  input.value = 'x';
+  // A dropdown opened before the editor mounts sets the relationship attributes on the host.
+  input.setAttribute('aria-autocomplete', 'list');
+  input.setAttribute('aria-activedescendant', 'option-1');
   input.addEventListener('input', () => { input.placeholder = 'Save instructions'; });
+  input.value = 'x';
+  input.focus();
   const content = within(parent).getByRole('textbox', { name: 'Message' });
   fireEvent.keyDown(content, { key: 'Backspace', code: 'Backspace' });
   await Promise.resolve();
   expect(within(parent).getByText('Save instructions')).toBeTruthy();
-  input.setAttribute('aria-autocomplete', 'list');
-  input.setAttribute('aria-activedescendant', 'option-1');
-  await Promise.resolve();
+  // Mounting transfers the relationships onto the live textbox and clears them from the host.
   expect(content.getAttribute('aria-autocomplete')).toBe('list');
   expect(content.getAttribute('aria-activedescendant')).toBe('option-1');
+  expect(input.getAttribute('aria-autocomplete')).toBeNull();
   editor.destroy();
   parent.remove();
 });

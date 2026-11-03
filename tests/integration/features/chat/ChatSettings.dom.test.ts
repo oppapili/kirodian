@@ -3,6 +3,7 @@ import '@/providers';
 
 import { deserialize, serialize } from 'node:v8';
 
+import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { createHarness, releaseSideChatHarnesses } from '@test/helpers/features/chat/SideChatDOMHarness';
 import { FakeSideSession } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { modelCatalogCases } from '@test/helpers/providerModelCatalogs';
@@ -12,6 +13,7 @@ import { App, Component } from 'obsidian';
 import { ChatModelSelectionCoordinator } from '@/app/settings/ChatModelSelectionCoordinator';
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@/app/settings/defaultSettings';
 import { SettingsCoordinator } from '@/app/settings/SettingsCoordinator';
+import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import { formatReasoningValueLabel } from '@/core/providers/reasoning';
@@ -19,8 +21,8 @@ import type { ProviderId } from '@/core/providers/types';
 import type { ClaudianSettings, Conversation } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { getChatSettingsSnapshot } from '@/features/chat/ChatSettings';
+import { updateSessionProviderSettings } from '@/features/chat/sessions/sessionSettings';
 import { destroyTab } from '@/features/chat/tabs/TabLifecycle';
-import { updateTabProviderSettings } from '@/features/chat/tabs/tabProviderSettings';
 import { refreshTabProviderUI } from '@/features/chat/tabs/tabProviderUI';
 import { createTabRuntime } from '@/features/chat/tabs/TabRuntimeFactory';
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
@@ -80,6 +82,8 @@ function createChatHarness(settings: ClaudianSettings, id: ProviderId, selected:
   const app = new App();
   Object.assign(app.vault.adapter, { basePath: '/vault' });
   Object.assign(app.vault, { on: () => ({}), offref: () => undefined });
+  // A blank draft tab resets its auto-linked content from the active file on model creation.
+  Object.assign(app.workspace, { getActiveFile: () => null });
   const conversations: Conversation[] = [];
   const tabs: AssembledTabRuntime[] = [];
   const sessions: FakeSideSession[] = [];
@@ -97,6 +101,7 @@ function createChatHarness(settings: ClaudianSettings, id: ProviderId, selected:
   const plugin = {
     ...(harness.plugin as ChatFeatureHost), app, settings,
     chatModelSelection: new ChatModelSelectionCoordinator(settingsCoordinator),
+    providerHost: { executionLifecycleRegistry: new ProviderExecutionLifecycleRegistry() },
     executionPersistence: {
       registerExecutionBinding: () => undefined,
       releaseExecutionBinding: () => undefined,
@@ -114,21 +119,28 @@ function createChatHarness(settings: ClaudianSettings, id: ProviderId, selected:
     mutateSettings: settingsCoordinator.mutate.bind(settingsCoordinator),
     getCommittedSettings: settingsCoordinator.getCommittedSettings.bind(settingsCoordinator),
   } as unknown as ChatFeatureHost;
-  const createTab = async () => {
-    const conversation = {
+  // The merged tab factory acquires a real session runtime from the plugin's pool;
+  // a blank tab stays a draft so selectDraft can retarget its provider.
+  const createTab = async (blank = false, existingId?: string) => {
+    const conversation = conversations.find(entry => entry.id === existingId) ?? {
       id: `conversation-${conversations.length}`, providerId: id, selectedModel: selected,
       messages: [...harness.tab.state.messages], sessionId: `session-${conversations.length}`,
     } as unknown as Conversation;
-    conversations.push(conversation);
+    if (!blank && !existingId) conversations.push(conversation);
+    if (!plugin.sessionRuntimes) installSessionRuntimePool(plugin);
     const tab = await createTabRuntime({
       plugin,
       component: Object.assign(new Component(), { registerDomEvent: () => undefined, registerEvent: () => undefined }) as never,
       containerEl: document.body.appendChild(document.createElement('div')),
       mentionDataProvider: new VaultMentionDataProvider(plugin.app),
-      conversation, getProviderCatalogConfig: () => null, isRuntimeLive: () => true,
+      conversation: blank ? undefined : conversation, providerId: id, draftModel: selected,
+      getProviderCatalogConfig: () => null, isRuntimeLive: () => true,
+      openConversation: async () => {}, startNewConversation: async () => {},
     });
-    tab.state.currentConversationId = conversation.id;
-    tab.state.messages = conversation.messages;
+    if (!blank) {
+      tab.state.currentConversationId = conversation.id;
+      tab.state.messages = conversation.messages;
+    }
     tabs.push(tab);
     return tab;
   };
@@ -255,21 +267,30 @@ test.each(['provider switch', 'switch back', 'closing'] as const)('queued toolba
   const entry = modelCatalogCases.find(entry => entry.id === 'kiro')!;
   const settings = createSettings(entry);
   const { plugin, createTab } = createChatHarness(settings, entry.id, entry.selected);
-  const tab = await createTab();
-  tab.session.startDraft(entry.id, entry.selected);
+  const tab = await createTab(true);
+  tab.session.selectDraft(entry.id, entry.selected);
   try {
     let release!: () => void;
     const blocker = plugin.mutateSettings(() => new Promise<void>(resolve => { release = resolve; }));
     await Promise.resolve();
     const before = structuredClone(settings);
-    const pending = updateTabProviderSettings(tab, plugin, snapshot => { snapshot.permissionMode = 'normal'; });
+    // Queue a real permission-mode change ('yolo' differs from kiro's 'normal' default),
+    // held behind the in-flight settings mutation.
+    const pending = updateSessionProviderSettings(tab.session.runtime, plugin, snapshot => { snapshot.permissionMode = 'yolo'; });
     if (transition === 'closing') tab.session.beginClose();
     else {
-      tab.session.selectDraft('kiro', 'kiro:claude-sonnet-4');
+      // Kirodian registers only kiro, so a draft "switch" retargets the model within kiro.
+      tab.session.selectDraft('kiro', 'kiro/unselected-catalog-entry');
       if (transition === 'switch back') tab.session.selectDraft(entry.id, entry.selected);
     }
     release();
     await Promise.all([blocker, pending]);
-    expect(settings).toEqual(before);
+    // The queued change survives only when it commits before the tab closes. On closing it
+    // reaches both the session selection and committed settings as kiro's 'yolo'. A provider
+    // switch (or switch back) discards it: the session selection falls back to kiro's resolved
+    // default ('normal') and committed settings keep their untouched pre-queue mode.
+    expect(tab.session.runtime.providerSelections.get(entry.id)?.permissionMode)
+      .toBe(transition === 'closing' ? 'yolo' : 'normal');
+    expect(settings.permissionMode).toBe(transition === 'closing' ? 'yolo' : before.permissionMode);
   } finally { await destroyTab(tab); }
 });

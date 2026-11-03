@@ -1,6 +1,7 @@
 /** @jest-environment jsdom */
 import '@/providers';
 
+import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
 import { App, Component } from 'obsidian';
@@ -97,16 +98,23 @@ async function createView(fakeBackend?: FakeSideBackend) {
     mutateSettings: async (mutate: (settings: ClaudianSettings) => void) => mutate(settings),
     chatModelSelection: { beginIntent: () => 1, commitIntent: async () => true },
   } as unknown as ChatFeatureHost;
+  installSessionRuntimePool(plugin);
   const tab = await createTabRuntime({
     plugin, conversation, component: new Component(),
     containerEl: document.body.createDiv(),
     mentionDataProvider: new VaultMentionDataProvider(plugin.app),
     getProviderCatalogConfig: () => null, isRuntimeLive: () => true,
+    openConversation: async () => {}, startNewConversation: async () => {},
   });
   tab.hydrationState = 'ready';
   await tab.executionCoordinator.bindConversation({ conversationId: conversation.id, providerId: 'kiro' });
   await tab.executionCoordinator.prepare();
   activateTab(tab);
+  // jsdom has no layout engine; the presentation's visibility gate reads getClientRects(). A hidden
+  // ancestor (deactivateTab adds `claudian-hidden`) yields no rects in a real browser, so mirror that.
+  tab.dom.messagesEl.getClientRects = (() =>
+    tab.dom.contentEl.classList.contains('claudian-hidden') ? [] : [new DOMRect(0, 0, 100, 100)]
+  ) as unknown as () => DOMRectList;
   tab.dom.inputEl.focus();
   return { tab, conversation, saved, plugin,
     dispose: async () => { await destroyTab(tab); await lifecycleRegistry.dispose(); },
@@ -187,8 +195,13 @@ it.each(['tab', 'conversation', 'provider', 'model', 'send'] as const)(
       if (change === 'tab') {
         deactivateTab(view.tab); activateTab(view.tab);
       } else if (change === 'conversation' || change === 'provider') {
-        view.tab.session.bindConversation(change === 'conversation' ? 'other-conversation' : view.conversation.id,
-          change === 'provider' ? 'other' : 'kiro');
+        // A bound session cannot be re-identified in place; the coordinator rebinds to a different
+        // conversation, releasing the prior binding so the earlier turn's context goes stale. Kiro is
+        // the only registered provider, so the provider case exercises the same rebind invalidation.
+        await view.tab.executionCoordinator.bindConversation({
+          conversationId: change === 'conversation' ? 'other-conversation' : 'other-provider-conversation',
+          providerId: 'kiro',
+        });
       } else if (change === 'model') {
         await selectToolbarModel(view, /opus/i);
       } else {
