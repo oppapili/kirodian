@@ -2,12 +2,18 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import type { ProviderHistoryPathContext } from '@/core/providers/types';
 import {
   encodeKiroSessionCwd,
   readKiroV2SessionCwd,
   resolveKiroSessionCwd,
   resolveKiroSessionDirectory,
 } from '@/providers/kiro/history/KiroHistoryPathResolver';
+
+/** Minimal history path context; the resolver only reads `environment`/`hostPlatform`. */
+function pathContext(environment: NodeJS.ProcessEnv): ProviderHistoryPathContext {
+  return { environment, config: {}, environmentText: '' };
+}
 
 describe('KiroHistoryPathResolver v2 layout', () => {
   let tempRoot: string;
@@ -37,27 +43,21 @@ describe('KiroHistoryPathResolver v2 layout', () => {
     const vaultPath = path.join(tempRoot, 'vault');
     const cliDirectory = writeV2Session('session-v2', vaultPath);
 
-    expect(resolveKiroSessionDirectory('', 'session-v2', vaultPath, {
-      environment: { HOME: tempRoot },
-    })).toBe(path.resolve(cliDirectory));
+    expect(resolveKiroSessionDirectory('', 'session-v2', vaultPath, pathContext({ HOME: tempRoot }))).toBe(path.resolve(cliDirectory));
   });
 
   it('tolerates a missing metadata file (jsonl existence is sufficient)', () => {
     const vaultPath = path.join(tempRoot, 'vault');
     const cliDirectory = writeV2Session('session-no-meta');
 
-    expect(resolveKiroSessionDirectory('', 'session-no-meta', vaultPath, {
-      environment: { HOME: tempRoot },
-    })).toBe(path.resolve(cliDirectory));
+    expect(resolveKiroSessionDirectory('', 'session-no-meta', vaultPath, pathContext({ HOME: tempRoot }))).toBe(path.resolve(cliDirectory));
   });
 
   it('skips a v2 session whose recorded cwd does not match the vault', () => {
     const vaultPath = path.join(tempRoot, 'vault');
     writeV2Session('session-other-cwd', path.join(tempRoot, 'different-vault'));
 
-    expect(resolveKiroSessionDirectory('', 'session-other-cwd', vaultPath, {
-      environment: { HOME: tempRoot },
-    })).toBeNull();
+    expect(resolveKiroSessionDirectory('', 'session-other-cwd', vaultPath, pathContext({ HOME: tempRoot }))).toBeNull();
   });
 
   it('falls back to the v1 directory layout when no v2 file exists', () => {
@@ -72,9 +72,7 @@ describe('KiroHistoryPathResolver v2 layout', () => {
     );
     fs.mkdirSync(v1Directory, { recursive: true });
 
-    expect(resolveKiroSessionDirectory('', sessionId, vaultPath, {
-      environment: { HOME: tempRoot },
-    })).toBe(v1Directory);
+    expect(resolveKiroSessionDirectory('', sessionId, vaultPath, pathContext({ HOME: tempRoot }))).toBe(v1Directory);
   });
 
   it('prefers v2 over an existing v1 directory for the same session id', () => {
@@ -90,9 +88,7 @@ describe('KiroHistoryPathResolver v2 layout', () => {
     fs.mkdirSync(v1Directory, { recursive: true });
     const cliDirectory = writeV2Session(sessionId, vaultPath);
 
-    expect(resolveKiroSessionDirectory('', sessionId, vaultPath, {
-      environment: { HOME: tempRoot },
-    })).toBe(path.resolve(cliDirectory));
+    expect(resolveKiroSessionDirectory('', sessionId, vaultPath, pathContext({ HOME: tempRoot }))).toBe(path.resolve(cliDirectory));
   });
 
   describe('resolveKiroSessionCwd', () => {

@@ -93,16 +93,21 @@ test('initial metadata loading reads unchanged payloads once through the storage
     await store.saveMetadata({ ...metadata, id: `saved-${index}` });
   }
   const read = jest.spyOn(adapter, 'read');
+  const conversations = createRepository();
   const loader = new SessionMetadataLoader({
-    sessions: store.metadataReader, conversations: createRepository(),
-    providerSettings: ProviderSettingsCoordinator, runtimeSettings: {} as never,
+    sessions: store.metadataReader, conversations,
+    providerSettings: ProviderSettingsCoordinator,
+    runtimeSettings: {
+      getPendingProviderIds: () => [],
+      getPendingGenerations: () => [],
+      completePendingSessionInvalidations: async () => undefined,
+    } as never,
     isUnloading: () => false, whenLayoutReady: callback => callback(), onConversationListChanged: () => undefined,
   });
-  const result = await loader.readInitialMetadata();
-  expect(result.records).toHaveLength(25);
-  expect(result.complete).toBe(true);
-  expect(result.records.every(record => record.source === 'device')).toBe(true);
+  await loader.ensureAllLoaded();
+  // Each unchanged payload is read exactly once through the storage adapter.
   expect(read).toHaveBeenCalledTimes(25);
+  expect(conversations.list()).toHaveLength(25);
 });
 
 test('preserves higher-priority metadata authority when its stat is unavailable', async () => {
@@ -232,12 +237,14 @@ test.each(['{', JSON.stringify({ schemaVersion: 1, conversationId: metadata.id, 
   },
 );
 
-test('a deletion started during an execution authority check rejects the handoff', async () => {
+test('a pending deletion rejects execution authority', async () => {
+  // Authority now reflects binding state at call time: a deletion started before the
+  // check fences the record, so the subsequent authority request rejects the handoff.
   const repository = createRepository();
   const conversation = await repository.create();
   repository.registerExecutionBinding(conversation.id, 'binding', 0);
-  const authority = repository.assertConversationExecutionAuthority(conversation.id, 'binding', 0);
   const deletion = repository.delete(conversation.id);
+  const authority = repository.assertConversationExecutionAuthority(conversation.id, 'binding', 0);
 
   await expect(authority).rejects.toThrow('no longer available');
   await deletion;

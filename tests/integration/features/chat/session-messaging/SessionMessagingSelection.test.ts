@@ -21,9 +21,10 @@ import { getSessionSettingsSnapshot } from '@/features/chat/sessions/sessionSett
 import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 
 // Selections carry the `kiro/` prefix; the backend receives the selection id (the kiro adapter decodes it on the wire).
-// Both models expose low/high effort.
+// All models expose low/high effort.
 const sonnet = 'kiro/sonnet';
 const haiku = 'kiro/haiku';
+const opus = 'kiro/opus';
 
 function buildKiroCatalog(settings: Record<string, unknown>): void {
   updateCurrentKiroCatalog(settings, {
@@ -33,9 +34,11 @@ function buildKiroCatalog(settings: Record<string, unknown>): void {
         reasoningMetadataResolved: true, reasoningEfforts: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }] },
       { rawId: 'haiku', displayName: 'Haiku', description: 'SDK model', supportsReasoning: true,
         reasoningMetadataResolved: true, reasoningEfforts: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }] },
+      { rawId: 'opus', displayName: 'Opus', description: 'SDK model', supportsReasoning: true,
+        reasoningMetadataResolved: true, reasoningEfforts: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }] },
     ],
   });
-  updateKiroProviderSettings(settings, { enabled: true, visibleModels: ['sonnet', 'haiku'] });
+  updateKiroProviderSettings(settings, { enabled: true, visibleModels: ['sonnet', 'haiku', 'opus'] });
 }
 
 function setup() {
@@ -79,15 +82,16 @@ function setup() {
   } as unknown as ChatFeatureHost;
   const pool = installSessionRuntimePool(host);
   const refreshModelControls = jest.fn();
-  const service = new SessionMessagingService({ getHost: () => host, getActiveConversationId: () => null, refreshModelControls,
-    commitSelection: (...args) => repository.updateSelectedModelIf(...args),
-  });
+  const service = new SessionMessagingService({ getHost: () => host, getActiveConversationId: () => null, refreshModelControls });
   Object.assign(host, { bindSessionTools: (id: string) => service.bindSessionTools(id) });
   const runtime = pool.ensure({ conversationId: 'recipient', providerId: 'kiro', draftModel: null });
   getSessionSettingsSnapshot(runtime, host);
   const reasoningBefore = [...runtime.reasoningSelections];
-  const send = (choice = { model: haiku, reasoning: 'low' }) => service.bindSessionTools('sender').port.send(
-    { sessionId: 'recipient', text: 'Incoming task', ...choice }, new AbortController().signal,
+  const send = (
+    choice: { model: string; reasoning?: string } = { model: haiku, reasoning: 'low' },
+    signal: AbortSignal = new AbortController().signal,
+  ) => service.bindSessionTools('sender').port.send(
+    { sessionId: 'recipient', text: 'Incoming task', ...choice }, signal,
   );
   const pauseWrite = () => {
     const entered = deferred<void>();
@@ -105,52 +109,48 @@ function setup() {
 
 afterEach(() => { ProviderWorkspaceRegistry.clear(); jest.restoreAllMocks(); });
 
-it('rejects a switch queued behind archive without changing model or reasoning', async () => {
+// Upstream #1807 applies a session-tool model switch like the user's own choice: the
+// switch commits and persists, and a send that fails after it keeps the switch rather
+// than rolling back. Only a failed model WRITE leaves the prior selection intact.
+it('rejects a send whose model write fails without switching reasoning or delivering', async () => {
   const h = setup();
-  const write = h.pauseWrite();
-  const archive = h.repository.setArchived('recipient', true);
-  await write.entered;
-  const sending = h.send().catch(error => error as unknown);
-  try { await h.waitForSend(); } finally { write.release(); }
-  await archive;
-  expect(await sending).toBeInstanceOf(Error);
-  expect(h.repository.getSync('recipient')).toMatchObject({ isArchived: true, selectedModel: sonnet });
-  expect(h.stored.get('recipient')?.selectedModel).toBe(sonnet);
+  h.saveMetadata.mockRejectedValueOnce(new Error('Disk unavailable'));
+  await expect(h.send()).rejects.toThrow('Disk unavailable');
+  expect(h.repository.getSummary('recipient')?.selectedModel).toBe(sonnet);
   expect([...h.runtime.reasoningSelections]).toEqual(h.reasoningBefore);
   expect(h.runtime.mailbox!.hasPending).toBe(false);
   expect(h.backend.sessions).toHaveLength(0);
   expect(h.refreshModelControls).not.toHaveBeenCalled();
 });
 
-it.each(['stop', 'shutdown'] as const)('changes nothing when %s discards the reservation during its metadata write', async action => {
+it('keeps a committed switch but delivers nothing when the send is cancelled during its model write', async () => {
   const h = setup();
   const write = h.pauseWrite();
-  const sending = h.send().catch(error => error as unknown);
+  const cancellation = new AbortController();
+  const sending = h.send({ model: haiku }, cancellation.signal);
   await write.entered;
-  if (action === 'stop') h.runtime.cancelTurn('user');
-  else h.runtime.beginShutdown();
+  cancellation.abort();
   write.release();
-  expect(await sending).toBeInstanceOf(Error);
-  expect(h.repository.getSummary('recipient')?.selectedModel).toBe(sonnet);
-  expect(h.stored.get('recipient')?.selectedModel).toBe(sonnet);
-  expect([...h.runtime.reasoningSelections]).toEqual(h.reasoningBefore);
+  await expect(sending).rejects.toMatchObject({ name: 'AbortError' });
+  expect(h.repository.getSummary('recipient')?.selectedModel).toBe(haiku);
   expect(h.runtime.mailbox!.hasPending).toBe(false);
   expect(h.backend.sessions).toHaveLength(0);
 });
 
-it('rejects reasoning validated against a model superseded by a competing selection', async () => {
+it('applies its switch after a pending user model choice instead of rejecting the message', async () => {
   const h = setup();
   const write = h.pauseWrite();
   const selecting = h.repository.update('recipient', { selectedModel: haiku });
   await write.entered;
-  const sending = h.send({ model: sonnet, reasoning: 'low' }).catch(error => error as unknown);
+  const sending = h.send({ model: opus });
   try { await h.waitForSend(); } finally { write.release(); }
   await selecting;
-  expect(await sending).toBeInstanceOf(Error);
-  expect(h.repository.getSummary('recipient')?.selectedModel).toBe(haiku);
-  expect([...h.runtime.reasoningSelections]).toEqual(h.reasoningBefore);
-  expect(h.runtime.mailbox!.hasPending).toBe(false);
-  expect(h.backend.sessions).toHaveLength(0);
+  await expect(sending).resolves.toMatchObject({ sessionId: 'recipient', status: 'started' });
+  expect(h.repository.getSummary('recipient')?.selectedModel).toBe(opus);
+  await waitFor(() => expect(h.backend.sessions[0]?.requests).toHaveLength(1));
+  expect(h.backend.latest.requests[0].configuration).toMatchObject({ model: opus });
+  h.backend.latest.complete();
+  await h.runtime.turns.drain();
 });
 
 it('does not reject an admitted switch when its presentation refresh throws', async () => {
@@ -161,63 +161,6 @@ it('does not reject an admitted switch when its presentation refresh throws', as
   expect(h.backend.latest.requests[0].configuration).toMatchObject({ model: haiku, reasoning: 'low' });
   h.backend.latest.complete();
   await h.runtime.turns.drain();
-});
-
-it('finishes cancellation rollback before a newer user model selection commits', async () => {
-  const h = setup();
-  const write = h.pauseWrite();
-  const sending = h.send().catch(error => error as unknown);
-  await write.entered;
-  expect(h.runtime.mailbox!.hasPending).toBe(true);
-  expect(h.runtime.isIdle).toBe(false);
-  expect(h.backend.sessions).toHaveLength(0);
-  h.runtime.cancelTurn('user');
-  const newerChoice = h.repository.update('recipient', { selectedModel: haiku });
-  write.release();
-  expect(await sending).toBeInstanceOf(Error);
-  await newerChoice;
-  expect(h.repository.getSummary('recipient')?.selectedModel).toBe(haiku);
-  expect(h.stored.get('recipient')?.selectedModel).toBe(haiku);
-  expect([...h.runtime.reasoningSelections]).toEqual(h.reasoningBefore);
-  expect(h.runtime.mailbox!.hasPending).toBe(false);
-  expect(h.backend.sessions).toHaveLength(0);
-});
-
-it('preserves a newer reasoning choice made while the model write is pending', async () => {
-  const h = setup();
-  const write = h.pauseWrite();
-  const sending = h.send().catch(error => error as unknown);
-  await write.entered;
-  h.runtime.reasoningSelections.set(`kiro:${haiku}`, 'high');
-  write.release();
-  expect(await sending).toBeInstanceOf(Error);
-  expect(h.repository.getSummary('recipient')?.selectedModel).toBe(sonnet);
-  expect(h.stored.get('recipient')?.selectedModel).toBe(sonnet);
-  expect([...h.runtime.reasoningSelections]).toEqual([...h.reasoningBefore, [`kiro:${haiku}`, 'high']]);
-  expect(h.backend.sessions).toHaveLength(0);
-});
-
-it('revalidates reasoning capability after persistence and restores metadata if it changed', async () => {
-  const h = setup();
-  const write = h.pauseWrite();
-  const sending = h.send().catch(error => error as unknown);
-  await write.entered;
-  // Haiku loses its `low` effort mid-write, so the queued `reasoning: 'low'` switch fails revalidation after persistence.
-  updateCurrentKiroCatalog(h.host.settings as unknown as Record<string, unknown>, {
-    defaultModelId: null, fingerprint: 'test-fingerprint', refreshedAt: 0,
-    models: [
-      { rawId: 'sonnet', displayName: 'Sonnet', description: 'SDK model', supportsReasoning: true,
-        reasoningMetadataResolved: true, reasoningEfforts: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }] },
-      { rawId: 'haiku', displayName: 'Haiku', description: 'SDK model', supportsReasoning: true,
-        reasoningMetadataResolved: true, reasoningEfforts: [{ label: 'High', value: 'high' }] },
-    ],
-  });
-  write.release();
-  expect(await sending).toBeInstanceOf(Error);
-  expect(h.repository.getSummary('recipient')?.selectedModel).toBe(sonnet);
-  expect(h.stored.get('recipient')?.selectedModel).toBe(sonnet);
-  expect([...h.runtime.reasoningSelections]).toEqual(h.reasoningBefore);
-  expect(h.runtime.mailbox!.hasPending).toBe(false);
 });
 
 it('discards a failed metadata write without committing reasoning or message admission', async () => {

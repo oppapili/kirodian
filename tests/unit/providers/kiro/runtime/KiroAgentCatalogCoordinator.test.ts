@@ -1,4 +1,4 @@
-import type { ProviderHost } from '@/core/providers/ProviderHost';
+import type { ProviderRuntimeHost } from '@/core/providers/ProviderRuntimeHost';
 import { KiroAgentCatalogCoordinator } from '@/providers/kiro/runtime/KiroAgentCatalogCoordinator';
 import type {
   KiroAgentCatalogDiscoveryResult,
@@ -9,6 +9,8 @@ import {
   getCurrentKiroAgentModes,
   updateKiroProviderSettings,
 } from '@/providers/kiro/settings';
+
+import { runtimeHostFor } from '../../../../helpers/providerRuntimeHost';
 
 /**
  * Minimal ProviderHost stub covering only the surface the coordinator touches: the
@@ -25,7 +27,7 @@ import {
  * therefore exercise the branches this coordinator actually owns.
  */
 function createTestHost(enabled: boolean): {
-  host: ProviderHost;
+  host: ProviderRuntimeHost;
   settings: Record<string, unknown>;
   notified: string[];
 } {
@@ -35,17 +37,15 @@ function createTestHost(enabled: boolean): {
   updateKiroProviderSettings(settings, { enabled });
   const notified: string[] = [];
 
-  const host = {
-    settings,
-    async mutateSettingsConditionally(
-      mutation: (settings: Record<string, unknown>) => boolean | Promise<boolean>,
-    ): Promise<void> {
-      await mutation(settings);
+  const host = runtimeHostFor(
+    {
+      settings,
+      notifyProviderChatOptionsChanged(providerId) {
+        notified.push(providerId);
+      },
     },
-    notifyProviderChatOptionsChanged(providerId: string): void {
-      notified.push(providerId);
-    },
-  } as unknown as ProviderHost;
+    'kiro',
+  );
 
   return { host, settings, notified };
 }

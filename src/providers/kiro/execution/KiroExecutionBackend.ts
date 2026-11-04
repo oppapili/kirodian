@@ -3,7 +3,7 @@ import type {
   ProviderExecutionSession,
   ProviderSessionConfig,
 } from '../../../core/execution';
-import type { ProviderHost } from '../../../core/providers/ProviderHost';
+import type { ProviderRuntimeHost } from '../../../core/providers/ProviderRuntimeHost';
 import type { SlashCommand } from '../../../core/types';
 import type {
   ACPLoadSessionRequest,
@@ -111,7 +111,7 @@ export class KiroExecutionBackend implements ProviderExecutionBackend {
   private readonly nativeFactory: KiroExecutionNativeFactory;
 
   constructor(
-    private readonly plugin: ProviderHost,
+    private readonly host: ProviderRuntimeHost,
     private readonly options: KiroExecutionBackendOptions = {},
   ) {
     this.nativeFactory = options.nativeFactory ?? {
@@ -120,7 +120,7 @@ export class KiroExecutionBackend implements ProviderExecutionBackend {
   }
 
   createSession(config: ProviderSessionConfig): ProviderExecutionSession {
-    return new KiroExecutionSession(this.plugin, config, {
+    return new KiroExecutionSession(this.host, config, {
       modelCatalogCoordinator: this.options.modelCatalogCoordinator,
       nativeFactory: this.nativeFactory,
       resolvePromptIndex: this.options.resolvePromptIndex

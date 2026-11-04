@@ -2,8 +2,10 @@ import type { FakeRun } from '@test/helpers/ChatExecutionHarness';
 import { beginExecution, createHarness, createSubmission, deferred, FakeSession, requestedScope } from '@test/helpers/ChatExecutionHarness';
 import { testDate } from '@test/helpers/testClock';
 
+import { ConversationExecutionBindings } from '@/app/conversations/ConversationExecutionBindings';
+import type { ConversationRecordFence } from '@/app/conversations/ConversationRecordFence';
 import { type ProviderExecutionEvent, type ProviderSessionSnapshot } from '@/core/execution';
-import type { ChatMessage } from '@/core/types';
+import type { ChatMessage, Conversation } from '@/core/types';
 import { ChatExecutionInteractionStaleError, ChatExecutionPreHandoffError } from '@/features/chat/execution/ChatExecutionCoordinator';
 
 const IDLE_MS = 30 * 60_000;
@@ -287,7 +289,7 @@ describe('ChatExecutionCoordinator', () => {
       lifecycle: 'persistent',
       nativePersistence: 'enabled',
       resumeSeed: { providerSessionId: 'native-session' },
-      vaultWorkingDirectory: '/vault',
+      workingDirectory: '/vault',
     });
     expect(harness.repository.registerExecutionBinding).toHaveBeenCalledWith(
       'conversation-1',
@@ -1617,6 +1619,105 @@ describe('ChatExecutionCoordinator', () => {
     );
   });
 
+  it.each(['dispose', 'bind', 'transition'] as const)('persists provider state settled during release on %s before giving up the binding', async mode => {
+    const harness = createHarness();
+    await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+    await harness.coordinator.prepare();
+    const session = harness.backends.get('claude')!.sessions[0];
+    harness.repository.persistExecutionSnapshot.mockClear();
+    jest.spyOn(session, 'dispose').mockImplementationOnce(async () => {
+      // A stopped turn's native state settles once its process exits, after event routing ends.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      session.snapshot = { ...session.snapshot, revision: session.snapshot.revision + 1, providerState: { leafId: 'stopped' } };
+      session.emit({
+        type: 'session_state_changed',
+        scope: { kind: 'session', sessionInstanceId: session.sessionInstanceId, sequence: 1 },
+        snapshot: session.snapshot,
+      });
+    });
+
+    await (mode === 'dispose' ? harness.coordinator.dispose()
+      : mode === 'bind' ? harness.coordinator.bindConversation(null)
+        : harness.registry.runTransition(['claude'], async () => undefined));
+    // Disposal joins any release still settling.
+    await harness.coordinator.dispose();
+
+    const persist = harness.repository.persistExecutionSnapshot;
+    expect(persist).toHaveBeenCalledWith('conversation-1', expect.any(String), expect.any(Number),
+      expect.objectContaining({ providerState: { leafId: 'stopped' } }));
+    expect(persist.mock.invocationCallOrder.at(-1)!)
+      .toBeLessThan(harness.repository.releaseExecutionBinding.mock.invocationCallOrder.at(-1)!);
+    await harness.registry.dispose();
+  });
+
+  /** Routes the harness's claims through the real execution-binding owner, which rejects a second open claim. */
+  function useRealBindings(harness: ReturnType<typeof createHarness>, writeMetadata: () => Promise<void> = async () => undefined) {
+    const conversation = { id: 'conversation-1', providerId: 'claude' } as Conversation;
+    const bindings = new ConversationExecutionBindings({
+      fence: {
+        getRecord: (id: string) => (id === conversation.id ? conversation : null),
+        canWrite: async () => true,
+        enqueuePersistence: <T>(_id: string, operation: () => Promise<T>) => operation(),
+        writeMetadata,
+      } as unknown as ConversationRecordFence,
+      isTransientDeletionBinding: () => false,
+      discardModelRecovery: () => undefined,
+      invalidateSession: () => undefined,
+    });
+    const { repository } = harness;
+    repository.registerExecutionBinding.mockImplementation((id, bindingId, generation) => bindings.register(id, bindingId, generation));
+    repository.persistExecutionSnapshot.mockImplementation((id, bindingId, generation, snapshot) =>
+      bindings.persistSnapshot(id, bindingId, generation, snapshot));
+    repository.releaseExecutionBinding.mockImplementation((id, bindingId) => bindings.release(id, bindingId));
+  }
+
+  it('registers a replacement queued before a transition only after the old claim is given up', async () => {
+    const harness = createHarness();
+    const firstWrite = deferred<void>();
+    let writes = 0;
+    useRealBindings(harness, async () => { if (writes++ === 0) await firstWrite.promise; });
+    await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+    const backend = harness.backends.get('claude')!;
+
+    const first = harness.coordinator.prepare();
+    const queued = harness.coordinator.prepare();
+    for (let attempt = 0; attempt < 20 && writes === 0; attempt++) await Promise.resolve();
+    expect(backend.sessions).toHaveLength(1);
+    await harness.registry.runTransition(['claude'], async () => undefined);
+    firstWrite.resolve();
+
+    await first;
+    await expect(queued).resolves.toBeUndefined();
+    expect(backend.sessions).toHaveLength(2);
+    await harness.coordinator.dispose();
+    await harness.registry.dispose();
+  });
+
+  // Preparation captures the release barrier within its first ticks; a rebind there starts a release it must also await.
+  it.each([1, 2])('waits for a release that starts while preparation awaits the barrier (after %i ticks)', async ticks => {
+    const harness = createHarness();
+    useRealBindings(harness);
+    await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
+    await harness.coordinator.prepare();
+    const backend = harness.backends.get('claude')!;
+    const disposal = deferred<void>();
+    jest.spyOn(backend.sessions[0], 'dispose').mockImplementationOnce(() => disposal.promise);
+
+    const preparation = harness.coordinator.prepare();
+    for (let tick = 0; tick < ticks; tick++) await Promise.resolve();
+    // An updated resume seed releases the prepared session; its disposal is still pending.
+    const rebind = harness.coordinator.bindConversation({
+      conversationId: 'conversation-1', providerId: 'claude', resumeSeed: { providerSessionId: 'updated' },
+    });
+    disposal.resolve();
+
+    await expect(preparation).resolves.toBeUndefined();
+    await rebind;
+    expect(backend.sessions).toHaveLength(2);
+    await harness.coordinator.dispose();
+    await harness.registry.dispose();
+  });
+
   it('disposes idempotently and never acquires again', async () => {
     const harness = createHarness();
     await harness.coordinator.bindConversation({
@@ -1674,7 +1775,7 @@ it('protects branch navigation from idle release and concurrent input and persis
   const navigate = jest.fn(() => navigation.promise);
   Object.assign(session, { navigateConversationBranch: navigate, getConversationBranches: async () => ({}),
     reconcileConversationBranch: async () => ({ status: 'committed', messages: [] }) });
-  const request = { userMessageId: 'user', configuration: { systemInstructions: { kind: 'provider-default' as const } } };
+  const request = { userMessageId: 'user', configuration: { systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' } } };
   const pending = harness.coordinator.navigateConversationBranch(request);
   await new Promise(resolve => setImmediate(resolve));
   expect(navigate).toHaveBeenCalledWith({ ...request, signal: expect.any(AbortSignal) });
@@ -1702,12 +1803,12 @@ it('reports recovery after native branching succeeds but snapshot persistence fa
     reconcileConversationBranch: async () => ({ status: 'committed', messages }),
   });
   harness.repository.persistExecutionSnapshot.mockRejectedValueOnce(new Error('Storage unavailable'));
-  await expect(harness.coordinator.navigateConversationBranch({ userMessageId: 'old', configuration: { systemInstructions: { kind: 'provider-default' } } }))
+  await expect(harness.coordinator.navigateConversationBranch({ userMessageId: 'old', configuration: { systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' } } }))
     .resolves.toMatchObject({ status: 'recovery-required', messages });
   await jest.advanceTimersByTimeAsync(IDLE_MS);
   expect(session.disposeCalls).toBe(0);
   await expect(harness.coordinator.execute(createSubmission())).rejects.toThrow('recovery must finish');
-  await expect(harness.coordinator.reconcileConversationBranch({ configuration: { systemInstructions: { kind: 'provider-default' } } }))
+  await expect(harness.coordinator.reconcileConversationBranch({ configuration: { systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' } } }))
     .resolves.toEqual({ status: 'committed', messages });
   expect(harness.repository.persistExecutionSnapshot).toHaveBeenLastCalledWith(
     'conversation-1', expect.any(String), expect.any(Number), expect.objectContaining({ revision: 1 }),

@@ -91,9 +91,7 @@ function setup() {
   } as unknown as ChatFeatureHost;
   const pool = installSessionRuntimePool(host);
   const refreshModelControls = jest.fn();
-  const service = new SessionMessagingService({ getHost: () => host, getActiveConversationId: () => 'sender', refreshModelControls,
-    commitSelection: (...args) => repository.updateSelectedModelIf(...args),
-  });
+  const service = new SessionMessagingService({ getHost: () => host, getActiveConversationId: () => 'sender', refreshModelControls });
   Object.assign(host, { bindSessionTools: (id: string) => service.bindSessionTools(id) });
   const binding = service.bindSessionTools('sender');
   return { host, pool, service, binding, records, repository, backend, saves, record, refreshModelControls };

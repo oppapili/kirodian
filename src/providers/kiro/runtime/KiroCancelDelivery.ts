@@ -7,12 +7,7 @@ export interface KiroFlushableTransport {
 export function waitForKiroCancelDelivery(
   transport: KiroFlushableTransport | null | undefined,
 ): Promise<void> {
-  let delivery: Promise<void>;
-  try {
-    delivery = transport?.flush() ?? Promise.resolve();
-  } catch {
-    delivery = Promise.resolve();
-  }
+  const delivery = transport?.flush() ?? Promise.resolve();
 
   return new Promise(resolve => {
     const timeout = window.setTimeout(resolve, KIRO_CANCEL_DELIVERY_GRACE_MS);

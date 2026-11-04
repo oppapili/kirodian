@@ -1,11 +1,11 @@
-import type { ProviderHost } from '../../../core/providers/ProviderHost';
+import type { ProviderRuntimeHost } from '../../../core/providers/ProviderRuntimeHost';
 import type { ProviderTransitionOwnerContext } from '../../../core/providers/types';
 import {
-  getCurrentKiroAgentModes,
-  getKiroProviderSettings,
+  decodeKiroConfig,
+  getCurrentKiroAgentModesConfig,
   type KiroAgentModeSnapshot,
-  updateCurrentKiroAgentModes,
-} from '../settings';
+  updateCurrentKiroAgentModesConfig,
+} from '../config';
 import {
   type KiroAgentCatalogServiceLike,
   toKiroAgentModes,
@@ -31,18 +31,18 @@ export class KiroAgentCatalogCoordinator {
   private inFlight: Promise<KiroAgentCatalogRefreshResult> | null = null;
 
   constructor(
-    private readonly plugin: ProviderHost,
+    private readonly host: ProviderRuntimeHost,
     private readonly service: KiroAgentCatalogServiceLike,
   ) {}
 
   getCachedAgentModes(): KiroAgentModeSnapshot | null {
-    return getCurrentKiroAgentModes(this.plugin.settings);
+    return getCurrentKiroAgentModesConfig(this.host.config, this.host.selection);
   }
 
   refresh(
     context?: ProviderTransitionOwnerContext,
   ): Promise<KiroAgentCatalogRefreshResult> {
-    if (this.disposed || !getKiroProviderSettings(this.plugin.settings).enabled) {
+    if (this.disposed || !decodeKiroConfig(this.host.config, this.host.selection).enabled) {
       return Promise.resolve({ changed: false, kind: 'skipped' });
     }
     if (this.inFlight) {
@@ -78,21 +78,21 @@ export class KiroAgentCatalogCoordinator {
       modes,
     });
     if (changed) {
-      this.plugin.notifyProviderChatOptionsChanged('kiro');
+      this.host.notifyChatOptionsChanged();
     }
     return { changed, kind: 'completed' };
   }
 
   private async persist(snapshot: KiroAgentModeSnapshot): Promise<boolean> {
     let changed = false;
-    await this.plugin.mutateSettingsConditionally((settings) => {
+    await this.host.updateConfig((config, selection) => {
       if (this.disposed) {
         return false;
       }
-      const previous = getCurrentKiroAgentModes(settings);
+      const previous = getCurrentKiroAgentModesConfig(config, selection);
       changed = !sameSnapshot(previous, snapshot);
       if (changed) {
-        updateCurrentKiroAgentModes(settings, snapshot);
+        updateCurrentKiroAgentModesConfig(config, selection, snapshot);
       }
       return changed;
     });

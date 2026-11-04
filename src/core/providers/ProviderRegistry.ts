@@ -1,4 +1,3 @@
-import { getVaultPath } from '../../utils/path';
 import type { AuxiliaryExecutionContext } from '../auxiliary/AuxiliaryExecutionContext';
 import { InlineEditService } from '../auxiliary/InlineEditService';
 import { RoutedTitleGenerationService } from '../auxiliary/RoutedTitleGenerationService';
@@ -71,26 +70,25 @@ export class ProviderRegistry {
     return factory?.(plugin) ?? null;
   }
 
-  static createTitleGenerationService(plugin: ProviderHost, providerId?: ProviderId): TitleGenerationService {
-    if (!providerId) {
-      return new RoutedTitleGenerationService({
-        resolveProviderId: () => this.resolveTitleGenerationSelection(plugin.settings)?.providerId ?? null,
-        initializeProvider: provider => ProviderWorkspaceRegistry.ensureInitialized(
-          plugin, provider, 'title-generation',
-        ),
-        createService: provider => this.createTitleGenerationService(plugin, provider),
-      });
-    }
-    const registration = this.getProviderRegistration(providerId);
-    return new SharedTitleGenerationService({
-      ...this.createAuxiliaryExecutionContext(plugin, providerId),
-      resolveLocale: () => resolveTitleGenerationLocale(plugin.settings),
-      resolveModel: () => {
-        const selection = this.resolveTitleGenerationSelection(plugin.settings);
-        if (!selection || selection.providerId !== providerId) {
-          throw new ProviderModelUnavailableError(registration.displayName);
-        }
-        return selection.model;
+  static createTitleGenerationService(plugin: ProviderHost): TitleGenerationService {
+    return new RoutedTitleGenerationService({
+      resolveProviderId: () => this.resolveTitleGenerationSelection(plugin.settings)?.providerId ?? null,
+      initializeProvider: provider => ProviderWorkspaceRegistry.ensureInitialized(
+        plugin, provider, 'title-generation',
+      ),
+      createService: providerId => {
+        const registration = this.getProviderRegistration(providerId);
+        return new SharedTitleGenerationService({
+          ...this.createAuxiliaryExecutionContext(plugin, providerId),
+          resolveLocale: () => resolveTitleGenerationLocale(plugin.settings),
+          resolveModel: () => {
+            const selection = this.resolveTitleGenerationSelection(plugin.settings);
+            if (!selection || selection.providerId !== providerId) {
+              throw new ProviderModelUnavailableError(registration.displayName);
+            }
+            return selection.model;
+          },
+        });
       },
     });
   }
@@ -124,7 +122,7 @@ export class ProviderRegistry {
       backend: this.createExecutionBackend(plugin, providerId),
       interactionPort: PASSIVE_AUXILIARY_INTERACTION_PORT,
       lifecycleRegistry: plugin.executionLifecycleRegistry,
-      vaultWorkingDirectory: getVaultPath(plugin.app) ?? '.',
+      workingDirectory: plugin.workingDirectory ?? '.',
     };
   }
 

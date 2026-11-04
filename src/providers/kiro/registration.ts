@@ -22,7 +22,7 @@ export const kiroProviderRegistration: ProviderModule = {
   modelPolicy: kiroChatUIConfig,
   createExecutionBackend: (plugin) => {
     const workspace = getKiroWorkspaceServices();
-    return new KiroExecutionBackend(plugin, {
+    return new KiroExecutionBackend(plugin.getRuntimeHost('kiro'), {
       modelCatalogCoordinator: workspace.modelCatalogCoordinator,
     });
   },

@@ -1,4 +1,5 @@
-import type { ProviderHost } from '@/core/providers/ProviderHost';
+import { runtimeHostFor } from '@test/helpers/providerRuntimeHost';
+
 import {
   KiroAgentCatalogService,
   parseKiroAgentListDirectories,
@@ -236,12 +237,12 @@ describe('KiroAgentCatalogService.discoverCatalog', () => {
     const runner: KiroCatalogCommandRunner = {
       run: async () => result,
     };
-    const plugin = {
+    const host = runtimeHostFor({
       settings: { providerConfigs: { kiro: { enabled: true } } },
-      app: { vault: { adapter: { basePath: '/vault' } } },
+      workingDirectory: '/vault',
       getResolvedProviderCliPath: async () => 'kiro-cli',
-    } as unknown as ProviderHost;
-    return new KiroAgentCatalogService(plugin, { runner });
+    }, 'kiro');
+    return new KiroAgentCatalogService(host, { runner });
   }
 
   it('parses the listing even when the CLI exits non-zero with stdout present', async () => {

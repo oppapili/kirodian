@@ -8,6 +8,7 @@ import type {
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { ConversationBranching } from '@/features/chat/conversation/ConversationBranching';
 import { ConversationRewind, type ConversationSaveOptions } from '@/features/chat/conversation/ConversationRewind';
+import { resolveChatSystemInstructions } from '@/features/chat/execution/chatExecutionConfiguration';
 import type { ChatExecutionCoordinator } from '@/features/chat/execution/ChatExecutionCoordinator';
 import { resolveSessionInstructions } from '@/features/chat/execution/projectInstructions';
 import type { LinkedContentController, LinkedContentSubmissionToken } from '@/features/chat/linked-content';
@@ -101,10 +102,14 @@ export class ConversationController {
       getExecutionCoordinator: () => this.#getExecutionCoordinator(),
       ensureExecutionInitialized,
       getSelectedModel: () => this.deps.getSelectedModel?.() ?? null,
-      getSessionInstructions: () => {
+      getSystemInstructions: workingDirectory => {
         const { plugin, state } = this.deps;
         const id = state.currentConversationId;
-        return resolveSessionInstructions(plugin.projects, id ? plugin.getConversationSummary(id) : null);
+        return resolveChatSystemInstructions(
+          plugin.settings,
+          workingDirectory,
+          resolveSessionInstructions(plugin.projects, id ? plugin.getConversationSummary(id) : null),
+        );
       },
       isClosing,
       save: () => this.save(),
@@ -264,11 +269,7 @@ export class ConversationController {
     state.currentConversationId = conversation.id;
     this.#setDraftProject({ projectId: null, frozen: false });
 
-    const settlement = this.deps.getLinkedContentController().commitSubmission(token);
-    for (const event of settlement.queuedEvents) {
-      if (event.kind !== 'rename') continue;
-      await plugin.rewriteLinkedContentPaths(event.oldPath, event.newPath, event.includeDescendants);
-    }
+    this.deps.getLinkedContentController().commitSubmission(token);
   }
 
   /**
