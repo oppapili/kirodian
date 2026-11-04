@@ -1,7 +1,7 @@
 import type { ProviderRuntimeHost } from '../../../core/providers/ProviderRuntimeHost';
 import type { ProviderTransitionOwnerContext } from '../../../core/providers/types';
+import { isKiroProviderEnabled } from '../config';
 import type { KiroAgentMode } from '../execution/KiroSessionModeMetadata';
-import { isKiroProviderEnabled } from '../settings';
 import type { KiroAgentDirectories } from './KiroAgentModelLock';
 import {
   type KiroCatalogCommandRunner,

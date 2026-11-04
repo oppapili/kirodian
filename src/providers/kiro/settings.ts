@@ -3,7 +3,13 @@ import { getProviderConfig, setProviderConfig } from '../../core/providers/provi
 import { getProviderEnvironmentVariables } from '../../core/providers/providerEnvironment';
 import { STANDARD_REASONING_VALUES } from '../../core/providers/reasoning';
 import { normalizeHostnameStringMap } from '../../core/providers/settings/HostnameStringMap';
-import type { HostnameCLIPaths } from '../../core/types/settings';
+import {
+  DEFAULT_KIRO_PROVIDER_SETTINGS,
+  type KiroAgentModeSnapshot,
+  type KiroCatalogSnapshot,
+  type KiroProviderSettings,
+  type PersistedKiroProviderSettings,
+} from './config';
 import type { KiroAgentMode } from './execution/KiroSessionModeMetadata';
 import {
   clearKiroReasoningMetadata,
@@ -14,64 +20,17 @@ import {
 } from './models';
 import type { KiroAgentDirectories } from './runtime/KiroAgentModelLock';
 
-export interface KiroCatalogSnapshot {
-  models: KiroDiscoveredModel[];
-  defaultModelId: string | null;
-  fingerprint: string;
-  refreshedAt: number;
-}
-
-/** Runtime snapshot of the agent modes advertised by the live ACP session. */
-export interface KiroAgentModeSnapshot {
-  modes: KiroAgentMode[];
-  currentModeId: string | null;
-  /**
-   * Agent-definition directories from the CLI-prefetched `agent list` headers, used to
-   * resolve a selected custom agent's `<dir>/<id>.json` (and its pinned `"model"`). Absent
-   * for a session-only snapshot, which never carries these paths.
-   */
-  directories?: KiroAgentDirectories;
-}
-
-export interface PersistedKiroProviderSettings {
-  enabled: boolean;
-  cliPath: string;
-  cliPathsByHost: HostnameCLIPaths;
-  catalogsByHost: Record<string, KiroCatalogSnapshot>;
-  environmentVariables: string;
-  environmentHash: string;
-  visibleModels: string[] | null;
-  modelAliases: Record<string, string>;
-  preferredReasoningByModel: Record<string, string>;
-  /** Runtime snapshot of the live session's agent modes, keyed by host. Not user-authored. */
-  agentModesByHost: Record<string, KiroAgentModeSnapshot>;
-  /** The user's explicitly chosen agent mode id, independent of the permission toggle. */
-  selectedAgentMode: string | null;
-}
-
-export interface KiroProviderSettings extends PersistedKiroProviderSettings {
-  currentCatalog: KiroCatalogSnapshot | null;
-  /** Agent modes for the current host, resolved from `agentModesByHost`. */
-  currentAgentModes: KiroAgentModeSnapshot | null;
-}
-
-export const DEFAULT_KIRO_PROVIDER_SETTINGS: Readonly<PersistedKiroProviderSettings> = Object.freeze({
-  agentModesByHost: {},
-  catalogsByHost: {},
-  cliPath: '',
-  cliPathsByHost: {},
-  // Kiro is Kirodian's primary and only user-visible provider. On a fresh
-  // install with no persisted settings it must default to enabled, otherwise
-  // the provider menu renders empty (claude is hidden, kiro would be disabled)
-  // and a new user is stuck with no selectable provider (#88).
-  enabled: true,
-  environmentHash: '',
-  environmentVariables: '',
-  modelAliases: {},
-  preferredReasoningByModel: {},
-  selectedAgentMode: null,
-  visibleModels: null,
-});
+// Runtime-safe config shape, defaults, and predicates live in `./config` so provider
+// runtime modules can read them without importing this settings-document adapter.
+// Re-exported here for existing integration callers.
+export {
+  DEFAULT_KIRO_PROVIDER_SETTINGS,
+  isKiroProviderEnabled,
+  type KiroAgentModeSnapshot,
+  type KiroCatalogSnapshot,
+  type KiroProviderSettings,
+  type PersistedKiroProviderSettings,
+} from './config';
 
 export function getOrderedKiroVisibleModelIds(
   settings: KiroProviderSettings,
@@ -111,17 +70,6 @@ export function normalizeKiroCatalogSnapshot(value: unknown): KiroCatalogSnapsho
     models: normalizeKiroDiscoveredModels(value.models),
     refreshedAt,
   };
-}
-
-/**
- * Whether the Kiro provider is enabled, read from its own provider configuration
- * (e.g. `ProviderRuntimeHost.config`) without touching the application settings
- * document, so provider runtime modules stay within their architecture boundary.
- */
-export function isKiroProviderEnabled(config: Readonly<Record<string, unknown>>): boolean {
-  return typeof config.enabled === 'boolean'
-    ? config.enabled
-    : DEFAULT_KIRO_PROVIDER_SETTINGS.enabled;
 }
 
 export function getKiroProviderSettings(

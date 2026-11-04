@@ -224,6 +224,7 @@ test('providers avoid root app imports', () => {
  * Listed explicitly so a new provider module is runtime until it is reviewed into this set.
  */
 const PROVIDER_DOCUMENT_WRAPPERS = new Set([
+  'src/providers/kiro/app/KiroCommandLoader.ts',
   'src/providers/kiro/env/KiroSettingsReconciler.ts',
   'src/providers/kiro/execution/KiroExecutionBackend.ts',
   'src/providers/kiro/execution/KiroExecutionSession.ts',
@@ -452,7 +453,7 @@ test('provider runtimes never reach the application settings document', () => {
 });
 
 test('the settings document boundary detects direct and type-only access', () => {
-  const file = path.join(providersRoot, 'pi', 'runtime', 'BoundaryFixture.ts');
+  const file = path.join(providersRoot, 'kiro', 'runtime', 'BoundaryFixture.ts');
   for (const source of [
     "import type { ProviderHost } from '@/core/providers/ProviderHost';\nexport type Host = ProviderHost;",
     "import type { ClaudianSettings } from '@/core/types';\nexport type Settings = ClaudianSettings;",
@@ -470,14 +471,14 @@ test('the settings document boundary detects direct and type-only access', () =>
     "import { createConfigCatalogStore } from '@/core/providers/models/ProviderModelCatalog';\nexport const store = createConfigCatalogStore;",
   ]) assert.deepEqual(inspectSettingsDocumentAccess(file, source), [], source);
   // Document wrappers are integration; the configuration modules they wrap are runtime.
-  assert.equal(isProviderIntegrationModule(path.join(providersRoot, 'pi', 'settings.ts')), true);
-  assert.equal(isProviderIntegrationModule(path.join(providersRoot, 'pi', 'config.ts')), false);
+  assert.equal(isProviderIntegrationModule(path.join(providersRoot, 'kiro', 'settings.ts')), true);
+  assert.equal(isProviderIntegrationModule(path.join(providersRoot, 'kiro', 'config.ts')), false);
   // A module named like a wrapper is runtime until it is listed.
   for (const unlisted of [
-    ['pi', 'runtime', 'FooCLIResolver.ts'],
-    ['pi', 'app', 'FooCommandLoader.ts'],
-    ['pi', 'FooModelPolicy.ts'],
-    ['pi', 'env', 'FooReconciler.ts'],
+    ['kiro', 'runtime', 'FooCLIResolver.ts'],
+    ['kiro', 'app', 'FooCommandLoader.ts'],
+    ['kiro', 'FooModelPolicy.ts'],
+    ['kiro', 'env', 'FooReconciler.ts'],
   ]) assert.equal(isProviderIntegrationModule(path.join(providersRoot, ...unlisted)), false, unlisted.join('/'));
 });
 
@@ -487,10 +488,10 @@ test('every listed document wrapper exists and reaches the settings document', (
     return inspectDocumentWrapper(file, fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null);
   });
   assert.deepEqual(problems, []);
-  const listed = path.join(providersRoot, 'pi', 'runtime', 'PiCLIResolver.ts');
+  const listed = path.join(providersRoot, 'kiro', 'runtime', 'KiroBoundaryWrapperFixture.ts');
   assert.notDeepEqual(inspectDocumentWrapper(listed, null), []);
-  assert.notDeepEqual(inspectDocumentWrapper(listed, "import { decodePiConfig } from '../config';\nexport const read = decodePiConfig;"), []);
-  assert.deepEqual(inspectDocumentWrapper(listed, "import { getPiProviderSettings } from '../settings';\nexport const read = getPiProviderSettings;"), []);
+  assert.notDeepEqual(inspectDocumentWrapper(listed, "import { decodeKiroConfig } from '../config';\nexport const read = decodeKiroConfig;"), []);
+  assert.deepEqual(inspectDocumentWrapper(listed, "import { getKiroProviderSettings } from '../settings';\nexport const read = getKiroProviderSettings;"), []);
   assert.deepEqual(inspectDocumentWrapper(listed, "import { getProviderConfig } from '@/core/providers/providerConfig';\nexport const read = getProviderConfig;"), []);
 });
 
