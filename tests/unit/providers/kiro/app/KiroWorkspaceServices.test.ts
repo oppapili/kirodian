@@ -9,6 +9,8 @@ import {
   updateKiroProviderSettings,
 } from '@/providers/kiro/settings';
 
+import { withRuntimeHosts } from '../../../../helpers/providerRuntimeHost';
+
 /**
  * Minimal ProviderHost stub covering only the surface
  * `createKiroWorkspaceServices` touches during construction: the transition-hook
@@ -28,20 +30,15 @@ function createTestHost(enabled: boolean): {
   updateKiroProviderSettings(settings, { enabled });
   const notified: string[] = [];
 
-  const host = {
+  const host = withRuntimeHosts({
     settings,
     executionLifecycleRegistry: {
       registerTransitionHook: () => () => {},
     },
-    async mutateSettingsConditionally(
-      mutation: (settings: Record<string, unknown>) => boolean | Promise<boolean>,
-    ): Promise<void> {
-      await mutation(settings);
-    },
     notifyProviderChatOptionsChanged(providerId: string): void {
       notified.push(providerId);
     },
-  } as unknown as ProviderHost;
+  }) as unknown as ProviderHost;
 
   return { host, settings, notified };
 }
@@ -59,10 +56,17 @@ function createSpyService(
   };
 }
 
-/** Wait for the microtask-scheduled best-effort prefetch to settle. */
+/**
+ * Wait for the best-effort prefetch to settle. The prefetch persists through the
+ * provider runtime host's `updateConfig`, which commits via the settings coordinator's
+ * async mutation queue, so draining a few microtask turns plus a macrotask turn lets the
+ * queued write and its notification complete before assertions read the settings bag.
+ */
 async function flushMicrotasks(): Promise<void> {
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let i = 0; i < 5; i += 1) {
+    await Promise.resolve();
+  }
+  await new Promise(resolve => setTimeout(resolve, 0));
 }
 
 describe('createKiroWorkspaceServices startup agent prefetch', () => {

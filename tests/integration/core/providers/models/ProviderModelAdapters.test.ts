@@ -1,9 +1,9 @@
 import { modelCatalogCases } from '@test/helpers/providerModelCatalogs';
 
-import { SettingsCoordinator } from '@/app/settings/SettingsCoordinator';
 import type { ProviderModelCatalog } from '@/core/providers/models/ProviderModelCatalog';
-import type { ProviderHost } from '@/core/providers/ProviderHost';
 import { createKiroModels } from '@/providers/kiro/runtime/KiroModels';
+
+import { runtimeHostFor } from '../../../../helpers/providerRuntimeHost';
 
 const browseOrders = {
   kiro: ['sonnet', 'unselected-catalog-entry'],
@@ -13,8 +13,11 @@ it.each(modelCatalogCases)('$id keeps native selection, aliases and metadata beh
   const settings: Record<string, unknown> = {};
   populate(settings);
   const persist = jest.fn(async () => undefined);
-  const coordinator = new SettingsCoordinator(settings, persist);
-  const host = { settings, mutateSettings: coordinator.mutate.bind(coordinator), mutateSettingsConditionally: coordinator.mutateConditionally.bind(coordinator), notifyProviderChatOptionsChanged: jest.fn() } as unknown as ProviderHost;
+  const host = runtimeHostFor(
+    { settings, notifyProviderChatOptionsChanged: jest.fn() },
+    'kiro',
+    { persist },
+  );
   const discovery = jest.fn(async () => ({
     catalog: null,
     changed: false,

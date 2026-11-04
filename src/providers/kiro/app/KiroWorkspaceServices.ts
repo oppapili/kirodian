@@ -47,16 +47,16 @@ export async function createKiroWorkspaceServices(
   const runtimeHost = plugin.getRuntimeHost('kiro');
   const modelCatalogService = new KiroModelCatalogService(runtimeHost);
   const modelCatalogCoordinator = new KiroModelCatalogCoordinator(
-    plugin,
+    runtimeHost,
     modelCatalogService,
   );
   const agentCatalogCoordinator = new KiroAgentCatalogCoordinator(
-    plugin,
+    runtimeHost,
     options.agentCatalogService ?? new KiroAgentCatalogService(runtimeHost),
   );
   const commandMetadataProbe = options.commandMetadataProbe
     ?? new KiroCommandMetadataProbe(runtimeHost);
-  const modelCatalog = createKiroModels(plugin, modelCatalogCoordinator);
+  const modelCatalog = createKiroModels(runtimeHost, modelCatalogCoordinator);
   const unregisterTransitionHook =
     plugin.executionLifecycleRegistry.registerTransitionHook('kiro', {
       beforeTransition: async () => {

@@ -1,4 +1,9 @@
+import { getInstallationKey } from '@/core/device/InstallationKey';
 import { getEnhancedPath, parseEnvironmentVariables } from '@/core/process/env';
+
+import { createCLIPathFingerprintInputs } from '../../../core/providers/cli/CLIPathFingerprintInputs';
+import { createRuntimeInputFingerprint } from '../../../core/providers/settings/RuntimeInputFingerprint';
+import type { KiroProviderSettings } from '../config';
 
 /**
  * Build the Kiro subprocess environment from the already-resolved runtime
@@ -19,4 +24,27 @@ export function buildKiroRuntimeEnv(
     ...configuredEnvironment,
     PATH: getEnhancedPath(configuredEnvironment.PATH, cliPath || undefined),
   };
+}
+
+/**
+ * Fingerprint of Kiro's runtime inputs: the CLI path for this installation and the
+ * environment. Takes the decoded provider config plus `ProviderRuntimeHost.environmentText`,
+ * so provider runtime modules can detect environment changes without touching the
+ * application settings document.
+ */
+export function computeKiroRuntimeInputHash(
+  settings: Pick<KiroProviderSettings, 'cliPath' | 'cliPathsByHost'>,
+  environmentText: string,
+): string {
+  const cliPathInputs = createCLIPathFingerprintInputs(
+    settings.cliPathsByHost[getInstallationKey()],
+    settings.cliPath,
+  );
+  const environment = Object.entries(parseEnvironmentVariables(environmentText))
+    .sort(([left], [right]) => left.localeCompare(right));
+  return createRuntimeInputFingerprint({
+    additionalInputs: cliPathInputs,
+    environmentKeys: environment.map(([key]) => key),
+    environmentText,
+  });
 }

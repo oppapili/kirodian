@@ -226,12 +226,7 @@ test('providers avoid root app imports', () => {
 const PROVIDER_DOCUMENT_WRAPPERS = new Set([
   'src/providers/kiro/app/KiroCommandLoader.ts',
   'src/providers/kiro/env/KiroSettingsReconciler.ts',
-  'src/providers/kiro/execution/KiroExecutionBackend.ts',
-  'src/providers/kiro/execution/KiroExecutionSession.ts',
-  'src/providers/kiro/runtime/KiroAgentCatalogCoordinator.ts',
   'src/providers/kiro/runtime/KiroCLIResolver.ts',
-  'src/providers/kiro/runtime/KiroModelCatalogCoordinator.ts',
-  'src/providers/kiro/runtime/KiroModels.ts',
   'src/providers/kiro/settings.ts',
 ]);
 
