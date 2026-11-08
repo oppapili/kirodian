@@ -61,6 +61,7 @@ test('does not publish recovered identity after concurrent deletion', async () =
   const { repository, persistence } = createRepository(conversation);
   vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
     hydrateConversationHistory: async () => ({}),
+    readNativeHistoryRevision: async () => null,
     resolveSessionIdForConversation: value => value?.sessionId ?? null,
     isPendingForkConversation: () => false,
     buildForkProviderState: () => ({}),
@@ -121,6 +122,7 @@ test('late accepted binding survives a missing-session decision', async () => {
   let updating: Promise<void> | undefined;
   vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
     hydrateConversationHistory: async () => ({}),
+    readNativeHistoryRevision: async () => null,
     resolveSessionIdForConversation: value => value?.sessionId ?? null,
     isPendingForkConversation: () => false,
     buildForkProviderState: () => ({}),
