@@ -3,7 +3,6 @@ import '@/providers';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import type { ProviderRegistration, ProviderSettingsReconciler } from '@/core/providers/types';
-import type { Conversation } from '@/core/types';
 import { kiroChatUIConfig } from '@/providers/kiro/ui/KiroChatUIConfig';
 
 // Claude has been removed; the multi-provider enablement/reconciliation contracts
@@ -31,10 +30,7 @@ beforeAll(() => {
     chatUIConfig: kiroChatUIConfig,
     settingsReconciler: {
       invalidateConversationSessions: (conversations: unknown[]) => conversations,
-      reconcileModelWithEnvironment: (_settings: unknown, conversations: unknown[]) => ({
-        changed: false,
-        invalidatedConversations: conversations,
-      }),
+      reconcileModelWithEnvironment: () => ({ changed: false }),
       normalizeModelVariantSettings: () => false,
     },
   } as unknown as ProviderRegistration);
@@ -206,28 +202,22 @@ describe('ProviderSettingsCoordinator', () => {
   });
 
   describe('reconcileProviders', () => {
-    it('filters conversations per provider', () => {
+    it('reconciles each provider against the projected settings', () => {
       const reconcileSpy = jest.spyOn(
         ProviderRegistry.getSettingsReconciler(STUB_PROVIDER_ID),
         'reconcileModelWithEnvironment',
       );
 
-      const stubConv = { providerId: STUB_PROVIDER_ID, messages: [] } as unknown as Conversation;
-      const otherConv = { providerId: 'kiro', messages: [] } as unknown as Conversation;
       const settings: Record<string, unknown> = { model: 'haiku' };
 
       ProviderSettingsCoordinator.reconcileProviders(
-        settings, [stubConv, otherConv], ProviderRegistry.getRegisteredProviderIds(),
+        settings, ProviderRegistry.getRegisteredProviderIds(),
       );
 
-      // The stub reconciler should only receive the stub's conversations. kiro is
-      // the settings provider, so the stub is reconciled against a cloned+projected
-      // settings object rather than the live one; assert the conversation filtering
-      // (the contract under test), not the settings arg.
-      expect(reconcileSpy).toHaveBeenCalledWith(
-        expect.anything(),
-        [stubConv],
-      );
+      // kiro is the settings provider, so the stub is reconciled against a
+      // cloned+projected settings object rather than the live one. Reconciliation
+      // no longer receives conversations; assert it ran against some settings.
+      expect(reconcileSpy).toHaveBeenCalledWith(expect.anything());
 
       reconcileSpy.mockRestore();
     });
@@ -235,9 +225,8 @@ describe('ProviderSettingsCoordinator', () => {
     it('defaults existing providers to invalidation and separates reload-policy providers', () => {
       const defaultReconciler: ProviderSettingsReconciler = {
         invalidateConversationSessions: jest.fn(conversations => conversations),
-        reconcileModelWithEnvironment: jest.fn((_settings, conversations) => ({
+        reconcileModelWithEnvironment: jest.fn(() => ({
           changed: true,
-          invalidatedConversations: conversations,
         })),
         normalizeModelVariantSettings: jest.fn(() => false),
       };
@@ -245,7 +234,6 @@ describe('ProviderSettingsCoordinator', () => {
         invalidateConversationSessions: jest.fn(conversations => conversations),
         reconcileModelWithEnvironment: jest.fn(() => ({
           changed: true,
-          invalidatedConversations: [],
           sessionPolicy: 'reload',
         })),
         normalizeModelVariantSettings: jest.fn(() => false),
@@ -268,20 +256,8 @@ describe('ProviderSettingsCoordinator', () => {
             ? originalGetChatUIConfig('kiro')
             : originalGetChatUIConfig(providerId)
         ));
-      const invalidatedConversation = {
-        id: 'invalidate-conversation',
-        providerId: 'fake-invalidate',
-        messages: [],
-      } as unknown as Conversation;
-      const preservedConversation = {
-        id: 'reload-conversation',
-        providerId: 'fake-reload',
-        messages: [],
-      } as unknown as Conversation;
-
       const result = ProviderSettingsCoordinator.reconcileProviders(
         { model: 'haiku' },
-        [invalidatedConversation, preservedConversation],
         ['fake-invalidate', 'fake-reload'],
       );
       reconcilerSpy.mockRestore();
@@ -296,7 +272,6 @@ describe('ProviderSettingsCoordinator', () => {
         'fake-reload',
       ]);
       expect(result.sessionInvalidationProviderIds).toEqual(['fake-invalidate']);
-      expect(result.invalidatedConversations).toEqual([invalidatedConversation]);
     });
   });
 

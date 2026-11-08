@@ -1,5 +1,7 @@
 import '@/providers';
 
+import { withRuntimeHosts } from '@test/helpers/providerRuntimeHost';
+
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
@@ -7,7 +9,7 @@ import { KiroExecutionBackend } from '@/providers/kiro/execution/KiroExecutionBa
 
 function createHost(): any {
   const executionLifecycleRegistry = new ProviderExecutionLifecycleRegistry();
-  return {
+  return withRuntimeHosts({
     app: {
       vault: { adapter: { basePath: '/tmp/provider-registration' } },
     },
@@ -24,7 +26,7 @@ function createHost(): any {
         kiro: { enabled: true },
       },
     },
-  };
+  });
 }
 
 describe('provider execution registration', () => {

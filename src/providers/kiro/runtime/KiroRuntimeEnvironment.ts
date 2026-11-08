@@ -1,12 +1,19 @@
+import { getInstallationKey } from '@/core/device/InstallationKey';
 import { getEnhancedPath, parseEnvironmentVariables } from '@/core/process/env';
 
-import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
+import { createCLIPathFingerprintInputs } from '../../../core/providers/cli/CLIPathFingerprintInputs';
+import { createRuntimeInputFingerprint } from '../../../core/providers/settings/RuntimeInputFingerprint';
+import type { KiroProviderSettings } from '../config';
 
+/**
+ * Build the Kiro subprocess environment from the already-resolved runtime
+ * environment text (shared plus Kiro-scoped). Runtime modules obtain this from
+ * `ProviderRuntimeHost.environmentText`, so this never reads the settings document.
+ */
 export function buildKiroRuntimeEnv(
-  settings: Record<string, unknown>,
+  environmentText: string,
   cliPath: string,
 ): NodeJS.ProcessEnv {
-  const environmentText = getRuntimeEnvironmentText(settings, 'kiro');
   const configuredEnvironment = parseEnvironmentVariables(environmentText);
 
   return {
@@ -17,4 +24,27 @@ export function buildKiroRuntimeEnv(
     ...configuredEnvironment,
     PATH: getEnhancedPath(configuredEnvironment.PATH, cliPath || undefined),
   };
+}
+
+/**
+ * Fingerprint of Kiro's runtime inputs: the CLI path for this installation and the
+ * environment. Takes the decoded provider config plus `ProviderRuntimeHost.environmentText`,
+ * so provider runtime modules can detect environment changes without touching the
+ * application settings document.
+ */
+export function computeKiroRuntimeInputHash(
+  settings: Pick<KiroProviderSettings, 'cliPath' | 'cliPathsByHost'>,
+  environmentText: string,
+): string {
+  const cliPathInputs = createCLIPathFingerprintInputs(
+    settings.cliPathsByHost[getInstallationKey()],
+    settings.cliPath,
+  );
+  const environment = Object.entries(parseEnvironmentVariables(environmentText))
+    .sort(([left], [right]) => left.localeCompare(right));
+  return createRuntimeInputFingerprint({
+    additionalInputs: cliPathInputs,
+    environmentKeys: environment.map(([key]) => key),
+    environmentText,
+  });
 }

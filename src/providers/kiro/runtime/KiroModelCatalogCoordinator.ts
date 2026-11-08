@@ -1,26 +1,25 @@
-import type { ProviderHost } from '../../../core/providers/ProviderHost';
+import type { ProviderRuntimeHost } from '../../../core/providers/ProviderRuntimeHost';
 import type {
   ProviderModelCatalogRefreshResult,
   ProviderTransitionOwnerContext,
 } from '../../../core/providers/types';
 import { toError } from '../../../utils/error';
-import { computeKiroEnvironmentHash } from '../env/KiroSettingsReconciler';
+import {
+  decodeKiroConfig,
+  type KiroCatalogSnapshot,
+  updateCurrentKiroCatalogConfig,
+} from '../config';
 import {
   clearKiroReasoningMetadata,
   type KiroDiscoveredModel,
   mergeKiroDiscoveredModels,
   normalizeKiroDiscoveredModels,
 } from '../models';
-import {
-  getCurrentKiroCatalog,
-  getKiroProviderSettings,
-  type KiroCatalogSnapshot,
-  updateCurrentKiroCatalog,
-} from '../settings';
 import type {
   KiroModelCatalogDiscoveryResult,
   KiroModelCatalogServiceLike,
 } from './KiroModelCatalogService';
+import { computeKiroRuntimeInputHash } from './KiroRuntimeEnvironment';
 
 const CATALOG_TTL_MS = 5 * 60 * 1000;
 
@@ -63,12 +62,12 @@ export class KiroModelCatalogCoordinator {
   private readonly transitionWaiters = new Set<() => void>();
 
   constructor(
-    private readonly plugin: ProviderHost,
+    private readonly host: ProviderRuntimeHost,
     private readonly service: KiroModelCatalogServiceLike,
   ) {}
 
   getCachedCatalog(): KiroCatalogSnapshot | null {
-    return getCurrentKiroCatalog(this.plugin.settings);
+    return decodeKiroConfig(this.host.config, this.host.selection).currentCatalog;
   }
 
   getState(): KiroCatalogState {
@@ -106,7 +105,7 @@ export class KiroModelCatalogCoordinator {
     _reason: string,
     options: { force?: boolean } = {},
   ): Promise<KiroCatalogEnsureResult> {
-    if (this.disposed || !getKiroProviderSettings(this.plugin.settings).enabled) {
+    if (this.disposed || !decodeKiroConfig(this.host.config, this.host.selection).enabled) {
       return Promise.resolve(this.skippedResult());
     }
     return this.runMetadataOperation(
@@ -143,7 +142,7 @@ export class KiroModelCatalogCoordinator {
   }
 
   refresh(context?: ProviderTransitionOwnerContext): Promise<KiroCatalogResult> {
-    if (this.disposed || !getKiroProviderSettings(this.plugin.settings).enabled) {
+    if (this.disposed || !decodeKiroConfig(this.host.config, this.host.selection).enabled) {
       return Promise.resolve(this.skippedResult());
     }
     return this.runMetadataOperation(
@@ -226,7 +225,7 @@ export class KiroModelCatalogCoordinator {
       return { changed: false };
     }
     this.prepareLiveContext(contextKey);
-    const settings = getKiroProviderSettings(this.plugin.settings);
+    const settings = decodeKiroConfig(this.host.config, this.host.selection);
     const enabledModelIds = new Set(settings.visibleModels ?? []);
     const normalizedLiveModels = normalizeKiroDiscoveredModels(liveModels)
       .map(model => (
@@ -268,7 +267,7 @@ export class KiroModelCatalogCoordinator {
       this.pendingLiveRevisions.delete(revision);
     }
     if (persisted.changed) {
-      this.plugin.notifyProviderChatOptionsChanged('kiro');
+      this.host.notifyChatOptionsChanged();
     }
     return persisted;
   }
@@ -400,7 +399,7 @@ export class KiroModelCatalogCoordinator {
       }
       this.state = 'ready';
       if (persisted.changed) {
-        this.plugin.notifyProviderChatOptionsChanged('kiro');
+        this.host.notifyChatOptionsChanged();
       }
       return {
         catalog: this.getCachedCatalog(),
@@ -485,20 +484,21 @@ export class KiroModelCatalogCoordinator {
     expectedGeneration?: number,
   ): Promise<{ changed: boolean; persistedSettingsChanged: boolean }> {
     let result = { changed: false, persistedSettingsChanged: false };
-    await this.plugin.mutateSettingsConditionally((settings) => {
+    await this.host.updateConfig((config, selection) => {
+      const decoded = decodeKiroConfig(config, selection);
       if (
         this.disposed
         || (
           expectedGeneration !== undefined
           && !this.isCurrentRefresh(expectedGeneration)
         )
-        || computeKiroEnvironmentHash(settings) !== expectedContextKey
+        || computeKiroRuntimeInputHash(decoded, this.host.environmentText) !== expectedContextKey
       ) {
         return false;
       }
-      const current = getCurrentKiroCatalog(settings);
+      const current = decoded.currentCatalog;
       const builtSnapshot = buildSnapshot(current);
-      const visibleModels = getKiroProviderSettings(settings).visibleModels;
+      const visibleModels = decoded.visibleModels;
       const enabledModelIds = new Set(visibleModels ?? []);
       const snapshot = visibleModels === null
         ? builtSnapshot
@@ -513,7 +513,7 @@ export class KiroModelCatalogCoordinator {
       const changed = !sameCatalogContent(current, snapshot);
       const persistedSettingsChanged = !sameValue(current, snapshot);
       if (persistedSettingsChanged) {
-        updateCurrentKiroCatalog(settings, snapshot);
+        updateCurrentKiroCatalogConfig(config, selection, snapshot);
       }
       result = { changed, persistedSettingsChanged };
       return persistedSettingsChanged;
@@ -522,7 +522,10 @@ export class KiroModelCatalogCoordinator {
   }
 
   private getContextKey(): string {
-    return computeKiroEnvironmentHash(this.plugin.settings);
+    return computeKiroRuntimeInputHash(
+      decodeKiroConfig(this.host.config, this.host.selection),
+      this.host.environmentText,
+    );
   }
 
   private isCurrentRefresh(generation: number): boolean {

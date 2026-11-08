@@ -1,34 +1,26 @@
-import { getInstallationKey } from '@/core/device/InstallationKey';
-import { parseEnvironmentVariables } from '@/core/process/env';
-
-import { createCLIPathFingerprintInputs } from '../../../core/providers/cli/CLIPathFingerprintInputs';
 import { getRuntimeEnvironmentText } from '../../../core/providers/providerEnvironment';
-import { createRuntimeInputFingerprint } from '../../../core/providers/settings/RuntimeInputFingerprint';
 import type { ProviderSettingsReconciler } from '../../../core/providers/types';
 import {
   decodeKiroModelId,
   encodeKiroModelId,
 } from '../models';
+import { computeKiroRuntimeInputHash } from '../runtime/KiroRuntimeEnvironment';
 import {
   clearCurrentKiroCatalog,
   getKiroProviderSettings,
   updateKiroProviderSettings,
 } from '../settings';
 
+/**
+ * Integration-side environment fingerprint: reads the Kiro runtime environment text
+ * from the settings document, then delegates to the runtime-safe
+ * {@link computeKiroRuntimeInputHash} so the hashing stays a single source of truth.
+ */
 export function computeKiroEnvironmentHash(settings: Record<string, unknown>): string {
-  const providerSettings = getKiroProviderSettings(settings);
-  const cliPathInputs = createCLIPathFingerprintInputs(
-    providerSettings.cliPathsByHost[getInstallationKey()],
-    providerSettings.cliPath,
-  );
-  const environment = Object.entries(parseEnvironmentVariables(
+  return computeKiroRuntimeInputHash(
+    getKiroProviderSettings(settings),
     getRuntimeEnvironmentText(settings, 'kiro'),
-  )).sort(([left], [right]) => left.localeCompare(right));
-  return createRuntimeInputFingerprint({
-    additionalInputs: cliPathInputs,
-    environmentKeys: environment.map(([key]) => key),
-    environmentText: getRuntimeEnvironmentText(settings, 'kiro'),
-  });
+  );
 }
 
 export const kiroSettingsReconciler: ProviderSettingsReconciler = {

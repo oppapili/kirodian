@@ -1,8 +1,7 @@
 import { OwnedProbeRegistry } from '@/core/providers/metadata/OwnedProbeRegistry';
 import { ProviderTransitionFence } from '@/core/providers/metadata/ProviderTransitionFence';
-import type { ProviderHost } from '@/core/providers/ProviderHost';
+import type { ProviderRuntimeHost } from '@/core/providers/ProviderRuntimeHost';
 import type { SlashCommand } from '@/core/types';
-import { getVaultPath } from '@/utils/path';
 
 import type {
   KiroExecutionNativeConnection,
@@ -31,7 +30,7 @@ export class KiroCommandMetadataProbe {
   });
 
   constructor(
-    private readonly plugin: ProviderHost,
+    private readonly host: ProviderRuntimeHost,
     private readonly nativeFactory: KiroExecutionNativeFactory = DEFAULT_NATIVE_FACTORY,
   ) {
     this.probes = new OwnedProbeRegistry({
@@ -49,18 +48,18 @@ export class KiroCommandMetadataProbe {
 
     return await this.probes.run({
       create: async (ownedSignal) => {
-        const command = await this.plugin.getResolvedProviderCliPath('kiro') ?? 'kiro-cli';
+        const command = await this.host.resolveCliPath() ?? 'kiro-cli';
         ownedSignal.throwIfAborted();
-        const cwd = getVaultPath(this.plugin.app) ?? process.cwd();
+        const cwd = this.host.workingDirectory ?? process.cwd();
         return {
           cwd,
           native: this.nativeFactory.create({
             command,
             cwd,
-            env: buildKiroRuntimeEnv(this.plugin.settings, command),
+            env: buildKiroRuntimeEnv(this.host.environmentText, command),
             requestExtension: async () => null,
             requestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
-            version: this.plugin.manifest?.version ?? '0.0.0',
+            version: this.host.clientVersion ?? '0.0.0',
           }),
         };
       },

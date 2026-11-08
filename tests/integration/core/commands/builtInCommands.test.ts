@@ -13,7 +13,7 @@ describe('getBuiltInCommandsForDropdown - provider filtering', () => {
       supportsFastMode: true,
     });
     expect(commands.length).toBe(BUILT_IN_COMMANDS.length);
-    expect(commands.map(c => c.name)).toEqual(['new', 'sessions', 'fast', 'side']);
+    expect(commands.map(c => c.name)).toEqual(['new', 'compact', 'sessions', 'fast', 'side']);
   });
 
   it('returns the full set when no capability context is provided', () => {
@@ -27,7 +27,7 @@ describe('getBuiltInCommandsForDropdown - provider filtering', () => {
       supportsFork: false,
       supportsFastMode: false,
     });
-    expect(commands.map(c => c.name)).toEqual(['new']);
+    expect(commands.map(c => c.name)).toEqual(['new', 'compact']);
     expect(commands.map(c => c.name)).not.toContain('sessions');
     expect(commands.map(c => c.name)).not.toContain('fast');
     expect(commands.map(c => c.name)).not.toContain('side');

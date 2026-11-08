@@ -57,10 +57,16 @@ it.each([true, false])('freezes the parent project side-chat text at start (live
   harness.backend.latest.complete();
   await second;
 
-  const expected = live
-    ? { kind: 'provider-default', sessionInstructions: renderProjectMemberInstructions(record) }
-    : { kind: 'provider-default' };
-  expect(harness.backend.latest.requests.map(request => request.configuration.systemInstructions)).toEqual([expected, expected]);
+  // Upstream builds one main-agent prompt that embeds the project section; the side
+  // chat freezes it at start, so both turns carry the identical instructions and later
+  // project edits never reach them.
+  const [first, next] = harness.backend.latest.requests.map(
+    request => request.configuration.systemInstructions,
+  );
+  expect(first).toEqual(next);
+  expect(first.kind).toBe('main-agent');
+  const projectSection = renderProjectMemberInstructions(record);
+  expect(first.instructions.includes(projectSection)).toBe(live);
 });
 
 it('admits only one child per main conversation while startup is pending', async () => {

@@ -1,3 +1,4 @@
+import { DesktopVault } from '@test/helpers/core/DesktopVault';
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@test/helpers/defaultSettings';
 
 import { SettingsCoordinator } from '@/app/settings/SettingsCoordinator';
@@ -59,7 +60,6 @@ describe('startApplication', () => {
       providers: overrides.providers ?? ProviderRegistry,
       providerSettings: ProviderSettingsCoordinator,
       executionLifecycle: new ProviderExecutionLifecycleRegistry(),
-      deferNonRestoredSessionMetadata: false,
       isUnloading: () => false,
       publishCommittedSettings: async () => undefined,
       onConversationDeleted: async () => undefined,
@@ -73,6 +73,10 @@ describe('startApplication', () => {
       await domains.nativeSessionArchives.dispose();
       await domains.projects?.dispose();
     });
+    // Upstream removed the eager `deferNonRestoredSessionMetadata: false` startup
+    // option; non-restored metadata now loads on demand. Load it here so these
+    // tests observe the fully-hydrated set as before.
+    await domains.sessionMetadata.ensureAllLoaded();
     return domains;
   }
 
@@ -329,31 +333,22 @@ describe('startApplication', () => {
   });
   describe('projects', () => {
     it('loads project records and member metadata before startup completes, preserving unparsable files', async () => {
+      // Upstream #1807 moved project storage onto the managed-file API, which reaches
+      // the real desktop filesystem rather than the Obsidian adapter mock, so this
+      // uses a real temporary vault.
       const timestamp = Date.now();
-      const files = new Map<string, string>([
-        ['.claudian/projects/project-a.json', JSON.stringify({
-          id: 'project-a', name: 'Launch', instructions: 'Ship.', memoryPath: '.claudian/projects/launch-project.md',
-          isPinned: true, createdAt: timestamp,
-        })],
-        ['.claudian/projects/broken.json', '{"id": "broken"'],
-        ['.claudian/sessions/conv-member.meta.json', JSON.stringify({
-          id: 'conv-member', title: 'Member', createdAt: timestamp, lastActivityAt: timestamp,
-          sessionId: null, projectId: 'project-a',
-        })],
-      ]);
-      const folders = new Set(['.claudian', '.claudian/projects', '.claudian/sessions']);
-      const { adapter } = mockApp.vault;
-      adapter.exists.mockImplementation(async (path: string) => files.has(path) || folders.has(path));
-      adapter.stat.mockImplementation(async (path: string) => {
-        if (folders.has(path)) return { type: 'folder', ctime: 0, mtime: 0, size: 0 };
-        const content = files.get(path);
-        return content === undefined ? null : { type: 'file', ctime: 0, mtime: 0, size: content.length };
-      });
-      adapter.list.mockImplementation(async (path: string) => ({
-        files: [...files.keys()].filter(file => file.slice(0, file.lastIndexOf('/')) === path),
-        folders: [],
+      const vault = await DesktopVault.create();
+      disposals.push(() => vault.dispose());
+      await vault.write('.claudian/projects/project-a.json', JSON.stringify({
+        id: 'project-a', name: 'Launch', instructions: 'Ship.', memoryPath: '.claudian/projects/launch-project.md',
+        isPinned: true, createdAt: timestamp,
       }));
-      adapter.read.mockImplementation(async (path: string) => files.get(path) ?? '');
+      await vault.write('.claudian/projects/broken.json', '{"id": "broken"');
+      await vault.write('.claudian/sessions/conv-member.meta.json', JSON.stringify({
+        id: 'conv-member', title: 'Member', createdAt: timestamp, lastActivityAt: timestamp,
+        sessionId: null, projectId: 'project-a',
+      }));
+      plugin.app = vault.app;
 
       const domains = await loadApplication();
 
@@ -361,8 +356,8 @@ describe('startApplication', () => {
       expect(domains.conversations.getConversationList()).toEqual([
         expect.objectContaining({ id: 'conv-member', projectId: 'project-a' }),
       ]);
-      const writtenPaths = adapter.write.mock.calls.map(([path]: [string]) => path);
-      expect(writtenPaths.filter((path: string) => path.startsWith('.claudian/projects/'))).toEqual([]);
+      // The unparsable file is left untouched rather than rewritten or removed.
+      expect(await vault.read('.claudian/projects/broken.json')).toBe('{"id": "broken"');
     });
   });
 });
