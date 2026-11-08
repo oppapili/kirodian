@@ -150,7 +150,8 @@ test('the CI entry point handles real Git ranges, renames, missing bases and rel
     writeFileSync(path.join(root, 'vitest.config.mjs'), `export default { test: { globals: true, maxWorkers: 1, include: ['tests/unit/**/*.test.ts'] } };`);
     writeFileSync(path.join(root, 'src/value.ts'), 'export const value = 1;');
     writeFileSync(path.join(root, 'tests/unit/types.test.ts'), "import type { value } from '../../src/value'; const example: typeof value = 1; test('type-only', () => expect(example).toBe(1));");
-    writeFileSync(path.join(root, 'tests/unit/value.test.ts'), "import { value } from '../../src/value'; test('value', () => expect(value).toBe(1));");
+    writeFileSync(path.join(root, 'src/value.css'), 'body {}');
+    writeFileSync(path.join(root, 'tests/unit/value.test.ts'), "// @test-ci {\"native\":true,\"inputs\":[\"src/value.css\"]}\nimport { value } from '../../src/value'; test('value', () => expect(value).toBe(1));");
     writeFileSync(path.join(root, '.gitignore'), 'node_modules/\n');
     const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     git('init');
@@ -182,13 +183,15 @@ test('the CI entry point handles real Git ranges, renames, missing bases and rel
     git('add', '.'); git('commit', '-m', 'Rename test');
     const renamed = git('rev-parse', 'HEAD');
     assert.deepEqual(scope(renamed, { BASE_SHA: edited })['test-files'], ['tests/unit/renamed.test.ts']);
-    rmSync(path.join(root, 'tests/unit/renamed.test.ts'));
-    git('add', '.'); git('commit', '-m', 'Delete test');
-    const deleted = git('rev-parse', 'HEAD');
+    assert.deepEqual(scope(renamed, { BASE_SHA: edited })['cross-platform-tests'], ['tests/unit/renamed.test.ts']);
     writeFileSync(path.join(root, 'src/value.css'), 'body { color: red }');
     git('add', '.'); git('commit', '-m', 'Edit a non-import input');
     const styled = git('rev-parse', 'HEAD');
     assert.deepEqual(scope(styled, { BASE_SHA: renamed })['test-files'], ['tests/unit/renamed.test.ts']);
+    assert.deepEqual(scope(styled, { BASE_SHA: renamed })['cross-platform-tests'], ['tests/unit/renamed.test.ts']);
+    rmSync(path.join(root, 'tests/unit/renamed.test.ts'));
+    git('add', '.'); git('commit', '-m', 'Delete test');
+    const deleted = git('rev-parse', 'HEAD');
     assert.deepEqual(scope(deleted, { BASE_SHA: styled })['test-files'], []);
     assert.deepEqual(scope(deleted, { BASE_SHA: styled })['test-lanes'], ['scripts']);
     for (const overrides of [
