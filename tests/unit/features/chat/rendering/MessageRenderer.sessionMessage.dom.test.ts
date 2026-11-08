@@ -16,7 +16,6 @@ it.each(['live', 'history'])('shows the sender safely in %s and keeps the envelo
   document.body.replaceChildren();
   const host = document.body.createDiv();
   const records = new Map([['source-session', { id: 'source-session', providerId: 'kiro' } as Conversation]]);
-  const getCachedConversation = vi.fn((id: string) => records.get(id) ?? null);
   const openConversation = vi.fn(async (_id: string) => undefined);
   const renderer = new MessageRenderer({
     app: {}, settings: { mediaFolder: '' },

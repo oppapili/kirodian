@@ -1,11 +1,10 @@
-import type { Mock } from 'vitest';
-
 import { holdResponse } from '@test/helpers/ConversationPorts';
 import { createProjectsFake, projectRecord } from '@test/helpers/features/chat/ProjectsFake';
 import { createMockEl } from '@test/helpers/MockElement';
 import { within } from '@testing-library/dom';
 import { JSDOM } from 'jsdom';
 import { Component } from 'obsidian';
+import type { Mock } from 'vitest';
 
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 import { RuntimeCommandCatalog } from '@/core/providers/commands/RuntimeCommandCatalog';

@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
-import { fireEvent, waitFor, within } from '@testing-library/dom';
 import { axe } from '@test/helpers/accessibility';
+import { fireEvent, waitFor, within } from '@testing-library/dom';
 import { type App, type Component, MarkdownRenderer, Platform, TFile } from 'obsidian';
 
 import type { ProviderCommandDiscoveryResult } from '@/core/providers/commands/ProviderCommandDiscoveryResult';

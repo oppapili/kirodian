@@ -34,6 +34,7 @@ export interface ACPToolStreamPresentationAdapter {
     rawName: string | undefined,
     input: Record<string, unknown>,
     rawOutput: unknown,
+    rawInput: unknown,
   ): ToolResultDetails | undefined;
   /** Lossless native fields attached to the tool's start and result. */
   buildToolProviderPayload?(
@@ -157,6 +158,7 @@ export class ACPToolStreamAdapter {
           state.rawName,
           state.input,
           state.rawOutput,
+          state.rawInput,
         ));
         return {
           ...chunk,

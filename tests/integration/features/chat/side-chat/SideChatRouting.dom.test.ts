@@ -13,6 +13,7 @@ import {
 import { testDate } from '@test/helpers/testClock';
 import { waitFor } from '@testing-library/dom';
 
+import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ChatMessage, ImageAttachment } from '@/core/types';
 import { ConversationController } from '@/features/chat/conversation/ConversationController';
 import { ChatExecutionPreHandoffError } from '@/features/chat/execution/ChatExecutionCoordinator';

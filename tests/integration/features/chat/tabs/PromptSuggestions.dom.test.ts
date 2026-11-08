@@ -119,22 +119,7 @@ async function createView(fakeBackend?: FakeSideBackend) {
     tab.dom.contentEl.classList.contains('claudian-hidden') ? [] : [new DOMRect(0, 0, 100, 100)]
   ) as unknown as () => DOMRectList;
   tab.dom.inputEl.focus();
-  return { get tab() { return tab; }, conversation, saved, plugin,
-    rebind: async (providerId: string) => {
-      const next = { ...conversation, id: 'next-conversation', providerId, messages: [],
-        selectedModel: providerId === 'kiro' ? conversation.selectedModel : 'gpt-5.5' } as Conversation;
-      conversations.set(next.id, next);
-      const tabId = tab.id;
-      await destroyTab(tab);
-      tab = await createTabRuntime({
-        plugin, conversation: next, component: new Component(), tabId,
-        containerEl: document.body.createDiv(), mentionDataProvider: new VaultMentionDataProvider(plugin.app),
-        getProviderCatalogConfig: () => null, isRuntimeLive: () => true,
-        openConversation: async () => {}, startNewConversation: async () => {},
-      });
-      vi.spyOn(tab.dom.messagesEl, 'getClientRects').mockReturnValue([{}] as unknown as DOMRectList);
-      activateTab(tab);
-    },
+  return { tab, conversation, saved, plugin,
     dispose: async () => { await destroyTab(tab); await lifecycleRegistry.dispose(); },
   };
 }

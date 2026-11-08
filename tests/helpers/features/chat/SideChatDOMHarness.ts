@@ -64,6 +64,8 @@ export function createHarness(options: {
   settings?: Record<string, unknown>;
   supportsEphemeralFork?: boolean;
   forkMode?: ProviderCapabilities['forkMode'];
+  getConversationCapabilities?: ProviderRegistration['getConversationCapabilities'];
+  providerState?: Record<string, unknown>;
   buildForkProviderState?: ProviderConversationHistoryService['buildForkProviderState'];
 } = {}) {
   const backend = new FakeSideBackend();

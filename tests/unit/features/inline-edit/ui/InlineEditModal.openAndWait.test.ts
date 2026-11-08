@@ -2,6 +2,7 @@ import '@/providers';
 
 import { createMockEl } from '@test/helpers/MockElement';
 import { MarkdownRenderer, Notice } from 'obsidian';
+import type { Mock } from 'vitest';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
@@ -20,8 +21,8 @@ function createDeferred(): { promise: Promise<void>; resolve: () => void } {
 
 function createInertInlineEditService() {
   return {
-    send: jest.fn(),
-    end: jest.fn(),
+    send: vi.fn(),
+    end: vi.fn(),
   };
 }
 
@@ -29,16 +30,16 @@ describe('InlineEditModal - openAndWait', () => {
   let owner: InlineEditSessionOwner;
   beforeEach(() => {
     owner = new InlineEditSessionOwner();
-    jest.clearAllMocks();
-    jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized').mockResolvedValue(undefined);
-    jest
+    vi.clearAllMocks();
+    vi.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized').mockResolvedValue(undefined);
+    vi
       .spyOn(ProviderRegistry, 'createInlineEditService')
       .mockReturnValue(createInertInlineEditService() as any);
   });
 
   afterEach(() => {
     owner.dispose();
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   it('uses editorCallback references first and falls back to view.editor before rejecting', async () => {
@@ -47,7 +48,7 @@ describe('InlineEditModal - openAndWait', () => {
 
     const app = {
       workspace: {
-        getActiveViewOfType: jest.fn(),
+        getActiveViewOfType: vi.fn(),
       },
     } as any;
     const plugin = {} as any;
@@ -64,7 +65,7 @@ describe('InlineEditModal - openAndWait', () => {
       },
     };
 
-    const getEditorViewSpy = jest
+    const getEditorViewSpy = vi
       .spyOn(obsidianCompat, 'getEditorView')
       .mockReturnValueOnce(undefined)
       .mockReturnValueOnce(undefined);
@@ -77,7 +78,7 @@ describe('InlineEditModal - openAndWait', () => {
     expect(getEditorViewSpy).toHaveBeenNthCalledWith(2, fallbackEditor);
     expect(app.workspace.getActiveViewOfType).not.toHaveBeenCalled();
 
-    const noticeMock = Notice as unknown as jest.Mock;
+    const noticeMock = Notice as unknown as Mock;
     expect(noticeMock).toHaveBeenCalledWith(
       'Inline edit unavailable: could not access the active editor. Try reopening the note.'
     );
@@ -94,7 +95,7 @@ describe('InlineEditModal - openAndWait', () => {
           kiro: { enabled: true },
         },
       },
-      getView: jest.fn().mockReturnValue(null),
+      getView: vi.fn().mockReturnValue(null),
     } as any;
     plugin.providerHost = plugin;
     const view = { editor } as any;
@@ -109,8 +110,8 @@ describe('InlineEditModal - openAndWait', () => {
       },
     };
 
-    jest.spyOn(obsidianCompat, 'getEditorView').mockReturnValue({ dispatch: jest.fn() } as any);
-    jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized')
+    vi.spyOn(obsidianCompat, 'getEditorView').mockReturnValue({ dispatch: vi.fn() } as any);
+    vi.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized')
       .mockRejectedValue(new Error('stop after provider resolution'));
 
     const modal = new InlineEditModal(app, plugin, plugin, editor, view, editContext, 'note.md', owner);
@@ -134,13 +135,13 @@ describe('InlineEditModal - openAndWait', () => {
           kiro: { enabled: true },
         },
       },
-      getConversationSync: jest.fn().mockReturnValue({
+      getConversationSync: vi.fn().mockReturnValue({
         id: 'claude-conversation',
         providerId: 'claude',
         selectedModel: 'sonnet',
       }),
-      getView: jest.fn().mockReturnValue({
-        getActiveTab: jest.fn().mockReturnValue({
+      getView: vi.fn().mockReturnValue({
+        getActiveTab: vi.fn().mockReturnValue({
           conversationId: 'claude-conversation',
           providerId: 'claude',
           selectedModel: 'sonnet',
@@ -160,8 +161,8 @@ describe('InlineEditModal - openAndWait', () => {
       },
     };
 
-    jest.spyOn(obsidianCompat, 'getEditorView').mockReturnValue({ dispatch: jest.fn() } as any);
-    jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized')
+    vi.spyOn(obsidianCompat, 'getEditorView').mockReturnValue({ dispatch: vi.fn() } as any);
+    vi.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized')
       .mockRejectedValue(new Error('stop after provider resolution'));
 
     const modal = new InlineEditModal(app, plugin, plugin, editor, view, editContext, 'note.md', owner);
@@ -175,29 +176,29 @@ describe('InlineEditModal - openAndWait', () => {
   });
 
   it('debounces Inline Edit Vault mention loading through the shared dropdown', async () => {
-    jest.useFakeTimers();
+    vi.useFakeTimers();
     const originalDocument = (global as any).document;
     (global as any).document = {
       body: createMockEl('body'),
       createElement: (tagName: string) => createMockEl(tagName),
-      addEventListener: jest.fn(),
-      removeEventListener: jest.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
       // The merged composer installs its accept/reject key handler on the document's
       // defaultView, so the fake document exposes one with the window listener API.
       defaultView: {
-        addEventListener: jest.fn(),
-        removeEventListener: jest.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
       },
     };
 
     try {
       const app = {
         vault: {
-          getFiles: jest.fn().mockReturnValue([]),
-          getAllLoadedFiles: jest.fn().mockReturnValue([]),
+          getFiles: vi.fn().mockReturnValue([]),
+          getAllLoadedFiles: vi.fn().mockReturnValue([]),
         },
         workspace: {
-          getActiveViewOfType: jest.fn(),
+          getActiveViewOfType: vi.fn(),
         },
       } as any;
       const plugin = {
@@ -211,7 +212,7 @@ describe('InlineEditModal - openAndWait', () => {
       const view = { editor } as any;
 
       let widgetRef: any = null;
-      const dispatch = jest.fn((transaction: any) => {
+      const dispatch = vi.fn((transaction: any) => {
         const effects = Array.isArray(transaction?.effects)
           ? transaction.effects
           : transaction?.effects
@@ -227,25 +228,25 @@ describe('InlineEditModal - openAndWait', () => {
       });
       const editorView = {
         state: {
-          field: jest.fn(() => undefined),
+          field: vi.fn(() => undefined),
           doc: {
-            line: jest.fn(() => ({ from: 0 })),
-            lineAt: jest.fn(() => ({ from: 0 })),
+            line: vi.fn(() => ({ from: 0 })),
+            lineAt: vi.fn(() => ({ from: 0 })),
           },
         },
         dispatch,
-        focus: jest.fn(),
+        focus: vi.fn(),
         dom: {
           ownerDocument: (global as any).document,
-          addEventListener: jest.fn(),
-          removeEventListener: jest.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
         },
       } as any;
 
-      const getEditorViewSpy = jest
+      const getEditorViewSpy = vi
         .spyOn(obsidianCompat, 'getEditorView')
         .mockReturnValue(editorView);
-      const getFoldersSpy = jest
+      const getFoldersSpy = vi
         .spyOn(VaultFolderCache.prototype, 'getFolders')
         .mockReturnValue([{ name: 'src', path: 'src' } as any]);
 
@@ -270,7 +271,7 @@ describe('InlineEditModal - openAndWait', () => {
       // Upstream #1815 removed the mention-load debounce (reduce lookup latency),
       // so the shared dropdown resolves folders promptly on input.
       inputEl.dispatchEvent({ type: 'input' });
-      jest.advanceTimersByTime(1);
+      vi.advanceTimersByTime(1);
       await Promise.resolve();
 
       expect(getFoldersSpy).toHaveBeenCalled();
@@ -286,7 +287,7 @@ describe('InlineEditModal - openAndWait', () => {
       getFoldersSpy.mockRestore();
     } finally {
       (global as any).document = originalDocument;
-      jest.useRealTimers();
+      vi.useRealTimers();
     }
   });
 
@@ -296,31 +297,31 @@ describe('InlineEditModal - openAndWait', () => {
     (global as any).document = {
       body: createMockEl('body'),
       createElement: (tagName: string) => createMockEl(tagName),
-      addEventListener: jest.fn(),
-      removeEventListener: jest.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
       // The merged composer installs its accept/reject key handler on the document's
       // defaultView, so the fake document exposes one with the window listener API.
       defaultView: {
-        addEventListener: jest.fn(),
-        removeEventListener: jest.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
       },
     };
 
     try {
       const app = {
         vault: {
-          getFiles: jest.fn().mockReturnValue([]),
-          getAllLoadedFiles: jest.fn().mockReturnValue([]),
+          getFiles: vi.fn().mockReturnValue([]),
+          getAllLoadedFiles: vi.fn().mockReturnValue([]),
         },
         workspace: {
-          getActiveViewOfType: jest.fn(),
+          getActiveViewOfType: vi.fn(),
         },
       } as any;
       const inlineEditService = {
-        send: jest.fn().mockResolvedValue({ success: true, editedText: 'done' }),
-        end: jest.fn(),
+        send: vi.fn().mockResolvedValue({ success: true, editedText: 'done' }),
+        end: vi.fn(),
       };
-      const providerSpy = jest
+      const providerSpy = vi
         .spyOn(ProviderRegistry, 'createInlineEditService')
         .mockReturnValue(inlineEditService as any);
       const plugin = {
@@ -335,9 +336,9 @@ describe('InlineEditModal - openAndWait', () => {
         },
         getActiveModelSelection: () => ({ providerId: 'kiro', model: 'kiro:claude-sonnet-4' }),
         getActiveEnvironmentVariables: () => ({}),
-        getConversationSync: jest.fn().mockReturnValue(null),
-        getView: jest.fn().mockReturnValue({
-          getActiveTab: jest.fn().mockReturnValue({
+        getConversationSync: vi.fn().mockReturnValue(null),
+        getView: vi.fn().mockReturnValue({
+          getActiveTab: vi.fn().mockReturnValue({
             conversationId: null,
             draftModel: 'kiro:claude-sonnet-4',
             providerId: 'kiro',
@@ -349,7 +350,7 @@ describe('InlineEditModal - openAndWait', () => {
       const view = { editor } as any;
 
       let widgetRef: any = null;
-      const dispatch = jest.fn((transaction: any) => {
+      const dispatch = vi.fn((transaction: any) => {
         const effects = Array.isArray(transaction?.effects)
           ? transaction.effects
           : transaction?.effects
@@ -365,22 +366,22 @@ describe('InlineEditModal - openAndWait', () => {
       });
       const editorView = {
         state: {
-          field: jest.fn(() => undefined),
+          field: vi.fn(() => undefined),
           doc: {
-            line: jest.fn(() => ({ from: 0 })),
-            lineAt: jest.fn(() => ({ from: 0 })),
+            line: vi.fn(() => ({ from: 0 })),
+            lineAt: vi.fn(() => ({ from: 0 })),
           },
         },
         dispatch,
-        focus: jest.fn(),
+        focus: vi.fn(),
         dom: {
           ownerDocument: (global as any).document,
-          addEventListener: jest.fn(),
-          removeEventListener: jest.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
         },
       } as any;
 
-      const getEditorViewSpy = jest
+      const getEditorViewSpy = vi
         .spyOn(obsidianCompat, 'getEditorView')
         .mockReturnValue(editorView);
 
@@ -422,31 +423,31 @@ describe('InlineEditModal - openAndWait', () => {
     (global as any).document = {
       body: createMockEl('body'),
       createElement: (tagName: string) => createMockEl(tagName),
-      addEventListener: jest.fn(),
-      removeEventListener: jest.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
       // The merged composer installs its accept/reject key handler on the document's
       // defaultView, so the fake document exposes one with the window listener API.
       defaultView: {
-        addEventListener: jest.fn(),
-        removeEventListener: jest.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
       },
     };
 
     try {
       const app = {
         vault: {
-          getFiles: jest.fn().mockReturnValue([]),
-          getAllLoadedFiles: jest.fn().mockReturnValue([]),
+          getFiles: vi.fn().mockReturnValue([]),
+          getAllLoadedFiles: vi.fn().mockReturnValue([]),
         },
         workspace: {
-          getActiveViewOfType: jest.fn(),
+          getActiveViewOfType: vi.fn(),
         },
       } as any;
       const inlineEditService = {
-        send: jest.fn().mockResolvedValue({ success: true, editedText: 'done' }),
-        end: jest.fn(),
+        send: vi.fn().mockResolvedValue({ success: true, editedText: 'done' }),
+        end: vi.fn(),
       };
-      const providerSpy = jest
+      const providerSpy = vi
         .spyOn(ProviderRegistry, 'createInlineEditService')
         .mockReturnValue(inlineEditService as any);
       const conversation = {
@@ -463,9 +464,9 @@ describe('InlineEditModal - openAndWait', () => {
         },
         getActiveModelSelection: () => ({ providerId: 'kiro', model: conversation.selectedModel }),
         getActiveEnvironmentVariables: () => ({}),
-        getConversationSync: jest.fn().mockReturnValue(conversation),
-        getView: jest.fn().mockReturnValue({
-          getActiveTab: jest.fn().mockReturnValue({
+        getConversationSync: vi.fn().mockReturnValue(conversation),
+        getView: vi.fn().mockReturnValue({
+          getActiveTab: vi.fn().mockReturnValue({
             conversationId: 'conv-1',
             draftModel: null,
             providerId: 'kiro',
@@ -477,7 +478,7 @@ describe('InlineEditModal - openAndWait', () => {
       const view = { editor } as any;
 
       let widgetRef: any = null;
-      const dispatch = jest.fn((transaction: any) => {
+      const dispatch = vi.fn((transaction: any) => {
         const effects = Array.isArray(transaction?.effects)
           ? transaction.effects
           : transaction?.effects
@@ -493,22 +494,22 @@ describe('InlineEditModal - openAndWait', () => {
       });
       const editorView = {
         state: {
-          field: jest.fn(() => undefined),
+          field: vi.fn(() => undefined),
           doc: {
-            line: jest.fn(() => ({ from: 0 })),
-            lineAt: jest.fn(() => ({ from: 0 })),
+            line: vi.fn(() => ({ from: 0 })),
+            lineAt: vi.fn(() => ({ from: 0 })),
           },
         },
         dispatch,
-        focus: jest.fn(),
+        focus: vi.fn(),
         dom: {
           ownerDocument: (global as any).document,
-          addEventListener: jest.fn(),
-          removeEventListener: jest.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
         },
       } as any;
 
-      const getEditorViewSpy = jest
+      const getEditorViewSpy = vi
         .spyOn(obsidianCompat, 'getEditorView')
         .mockReturnValue(editorView);
 
@@ -551,13 +552,13 @@ describe('InlineEditModal - openAndWait', () => {
     (global as any).document = {
       body: createMockEl('body'),
       createElement: (tagName: string) => createMockEl(tagName),
-      addEventListener: jest.fn(),
-      removeEventListener: jest.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
       // The merged composer installs its accept/reject key handler on the document's
       // defaultView, so the fake document exposes one with the window listener API.
       defaultView: {
-        addEventListener: jest.fn(),
-        removeEventListener: jest.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
       },
     };
 
@@ -565,14 +566,14 @@ describe('InlineEditModal - openAndWait', () => {
       const app = {
         vault: {
           adapter: { basePath: '/vault' },
-          getFiles: jest.fn().mockReturnValue([
+          getFiles: vi.fn().mockReturnValue([
             { path: 'notes/a.md' },
             { path: 'notes/b.md' },
           ]),
-          getAllLoadedFiles: jest.fn().mockReturnValue([]),
+          getAllLoadedFiles: vi.fn().mockReturnValue([]),
         },
         workspace: {
-          getActiveViewOfType: jest.fn(),
+          getActiveViewOfType: vi.fn(),
         },
       } as any;
       const plugin = {
@@ -586,7 +587,7 @@ describe('InlineEditModal - openAndWait', () => {
       const view = { editor } as any;
 
       let widgetRef: any = null;
-      const dispatch = jest.fn((transaction: any) => {
+      const dispatch = vi.fn((transaction: any) => {
         const effects = Array.isArray(transaction?.effects)
           ? transaction.effects
           : transaction?.effects
@@ -602,22 +603,22 @@ describe('InlineEditModal - openAndWait', () => {
       });
       const editorView = {
         state: {
-          field: jest.fn(() => undefined),
+          field: vi.fn(() => undefined),
           doc: {
-            line: jest.fn(() => ({ from: 0 })),
-            lineAt: jest.fn(() => ({ from: 0, number: 1 })),
+            line: vi.fn(() => ({ from: 0 })),
+            lineAt: vi.fn(() => ({ from: 0, number: 1 })),
           },
         },
         dispatch,
-        focus: jest.fn(),
+        focus: vi.fn(),
         dom: {
           ownerDocument: (global as any).document,
-          addEventListener: jest.fn(),
-          removeEventListener: jest.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
         },
       } as any;
 
-      const getEditorViewSpy = jest
+      const getEditorViewSpy = vi
         .spyOn(obsidianCompat, 'getEditorView')
         .mockReturnValue(editorView);
 
@@ -636,13 +637,13 @@ describe('InlineEditModal - openAndWait', () => {
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
-      const sendMock = jest.fn().mockResolvedValue({
+      const sendMock = vi.fn().mockResolvedValue({
         success: true,
         clarification: 'Need more detail',
       });
       widgetRef.inlineEditService = {
         send: sendMock,
-        end: jest.fn(),
+        end: vi.fn(),
       };
 
       widgetRef.inputEl.value = 'Please check @notes/a.md and @notes/a.md.';
@@ -664,13 +665,13 @@ describe('InlineEditModal - openAndWait', () => {
     (global as any).document = {
       body: createMockEl('body'),
       createElement: (tagName: string) => createMockEl(tagName),
-      addEventListener: jest.fn(),
-      removeEventListener: jest.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
       // The merged composer installs its accept/reject key handler on the document's
       // defaultView, so the fake document exposes one with the window listener API.
       defaultView: {
-        addEventListener: jest.fn(),
-        removeEventListener: jest.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
       },
     };
 
@@ -678,13 +679,13 @@ describe('InlineEditModal - openAndWait', () => {
       const app = {
         vault: {
           adapter: { basePath: '/vault' },
-          getFiles: jest.fn().mockReturnValue([
+          getFiles: vi.fn().mockReturnValue([
             { path: 'notes/my note.md' },
           ]),
-          getAllLoadedFiles: jest.fn().mockReturnValue([]),
+          getAllLoadedFiles: vi.fn().mockReturnValue([]),
         },
         workspace: {
-          getActiveViewOfType: jest.fn(),
+          getActiveViewOfType: vi.fn(),
         },
       } as any;
       const plugin = {
@@ -698,7 +699,7 @@ describe('InlineEditModal - openAndWait', () => {
       const view = { editor } as any;
 
       let widgetRef: any = null;
-      const dispatch = jest.fn((transaction: any) => {
+      const dispatch = vi.fn((transaction: any) => {
         const effects = Array.isArray(transaction?.effects)
           ? transaction.effects
           : transaction?.effects
@@ -714,22 +715,22 @@ describe('InlineEditModal - openAndWait', () => {
       });
       const editorView = {
         state: {
-          field: jest.fn(() => undefined),
+          field: vi.fn(() => undefined),
           doc: {
-            line: jest.fn(() => ({ from: 0 })),
-            lineAt: jest.fn(() => ({ from: 0, number: 1 })),
+            line: vi.fn(() => ({ from: 0 })),
+            lineAt: vi.fn(() => ({ from: 0, number: 1 })),
           },
         },
         dispatch,
-        focus: jest.fn(),
+        focus: vi.fn(),
         dom: {
           ownerDocument: (global as any).document,
-          addEventListener: jest.fn(),
-          removeEventListener: jest.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
         },
       } as any;
 
-      const getEditorViewSpy = jest
+      const getEditorViewSpy = vi
         .spyOn(obsidianCompat, 'getEditorView')
         .mockReturnValue(editorView);
 
@@ -748,13 +749,13 @@ describe('InlineEditModal - openAndWait', () => {
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
-      const sendMock = jest.fn().mockResolvedValue({
+      const sendMock = vi.fn().mockResolvedValue({
         success: true,
         clarification: 'Need more detail',
       });
       widgetRef.inlineEditService = {
         send: sendMock,
-        end: jest.fn(),
+        end: vi.fn(),
       };
 
       widgetRef.inputEl.value = 'Please check @notes/my note.md.';
@@ -776,24 +777,24 @@ describe('InlineEditModal - openAndWait', () => {
     (global as any).document = {
       body: createMockEl('body'),
       createElement: (tagName: string) => createMockEl(tagName),
-      addEventListener: jest.fn(),
-      removeEventListener: jest.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
       // The merged composer installs its accept/reject key handler on the document's
       // defaultView, so the fake document exposes one with the window listener API.
       defaultView: {
-        addEventListener: jest.fn(),
-        removeEventListener: jest.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
       },
     };
 
     try {
       const app = {
         vault: {
-          getFiles: jest.fn().mockReturnValue([]),
-          getAllLoadedFiles: jest.fn().mockReturnValue([]),
+          getFiles: vi.fn().mockReturnValue([]),
+          getAllLoadedFiles: vi.fn().mockReturnValue([]),
         },
         workspace: {
-          getActiveViewOfType: jest.fn(),
+          getActiveViewOfType: vi.fn(),
         },
       } as any;
       const plugin = {
@@ -808,7 +809,7 @@ describe('InlineEditModal - openAndWait', () => {
       const view = { editor } as any;
 
       let widgetRef: any = null;
-      const dispatch = jest.fn((transaction: any) => {
+      const dispatch = vi.fn((transaction: any) => {
         const effects = Array.isArray(transaction?.effects)
           ? transaction.effects
           : transaction?.effects
@@ -824,28 +825,28 @@ describe('InlineEditModal - openAndWait', () => {
       });
       const editorView = {
         state: {
-          field: jest.fn(() => undefined),
+          field: vi.fn(() => undefined),
           doc: {
-            line: jest.fn(() => ({ from: 0 })),
-            lineAt: jest.fn(() => ({ from: 0, number: 1 })),
+            line: vi.fn(() => ({ from: 0 })),
+            lineAt: vi.fn(() => ({ from: 0, number: 1 })),
           },
         },
         dispatch,
-        focus: jest.fn(),
+        focus: vi.fn(),
         dom: {
           ownerDocument: (global as any).document,
-          addEventListener: jest.fn(),
-          removeEventListener: jest.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
         },
       } as any;
 
-      const getEditorViewSpy = jest
+      const getEditorViewSpy = vi
         .spyOn(obsidianCompat, 'getEditorView')
         .mockReturnValue(editorView);
 
       const firstRender = createDeferred();
       const secondRender = createDeferred();
-      (MarkdownRenderer.renderMarkdown as jest.Mock)
+      (MarkdownRenderer.renderMarkdown as Mock)
         .mockImplementationOnce((markdown: string, container: any) => {
           container.createDiv({ text: markdown });
           return firstRender.promise;
@@ -870,7 +871,7 @@ describe('InlineEditModal - openAndWait', () => {
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
-      (MarkdownRenderer.renderMarkdown as jest.Mock).mockClear();
+      (MarkdownRenderer.renderMarkdown as Mock).mockClear();
       widgetRef.showAgentReply('Should this use $Z(f)$?');
       expect(MarkdownRenderer.renderMarkdown).toHaveBeenCalledWith(
         'Should this use $Z(f)$?',
@@ -909,24 +910,24 @@ describe('InlineEditModal - openAndWait', () => {
     (global as any).document = {
       body: createMockEl('body'),
       createElement: (tagName: string) => createMockEl(tagName),
-      addEventListener: jest.fn(),
-      removeEventListener: jest.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
       // The merged composer installs its accept/reject key handler on the document's
       // defaultView, so the fake document exposes one with the window listener API.
       defaultView: {
-        addEventListener: jest.fn(),
-        removeEventListener: jest.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
       },
     };
 
     try {
       const app = {
         vault: {
-          getFiles: jest.fn().mockReturnValue([]),
-          getAllLoadedFiles: jest.fn().mockReturnValue([]),
+          getFiles: vi.fn().mockReturnValue([]),
+          getAllLoadedFiles: vi.fn().mockReturnValue([]),
         },
         workspace: {
-          getActiveViewOfType: jest.fn(),
+          getActiveViewOfType: vi.fn(),
         },
       } as any;
       const plugin = {
@@ -941,7 +942,7 @@ describe('InlineEditModal - openAndWait', () => {
       const view = { editor } as any;
 
       let widgetRef: any = null;
-      const dispatch = jest.fn((transaction: any) => {
+      const dispatch = vi.fn((transaction: any) => {
         const effects = Array.isArray(transaction?.effects)
           ? transaction.effects
           : transaction?.effects
@@ -957,22 +958,22 @@ describe('InlineEditModal - openAndWait', () => {
       });
       const editorView = {
         state: {
-          field: jest.fn(() => undefined),
+          field: vi.fn(() => undefined),
           doc: {
-            line: jest.fn(() => ({ from: 0 })),
-            lineAt: jest.fn(() => ({ from: 0, number: 1 })),
+            line: vi.fn(() => ({ from: 0 })),
+            lineAt: vi.fn(() => ({ from: 0, number: 1 })),
           },
         },
         dispatch,
-        focus: jest.fn(),
+        focus: vi.fn(),
         dom: {
           ownerDocument: (global as any).document,
-          addEventListener: jest.fn(),
-          removeEventListener: jest.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
         },
       } as any;
 
-      const getEditorViewSpy = jest
+      const getEditorViewSpy = vi
         .spyOn(obsidianCompat, 'getEditorView')
         .mockReturnValue(editorView);
 
@@ -991,8 +992,8 @@ describe('InlineEditModal - openAndWait', () => {
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
-      const rejectSpy = jest.spyOn(widgetRef, 'reject').mockImplementation(() => {});
-      const acceptSpy = jest.spyOn(widgetRef, 'accept').mockImplementation(() => {});
+      const rejectSpy = vi.spyOn(widgetRef, 'reject').mockImplementation(() => {});
+      const acceptSpy = vi.spyOn(widgetRef, 'accept').mockImplementation(() => {});
 
       const previewEl = widgetRef.createDiffPreviewDOM([
         { type: 'insert', text: 'Updated text' },
@@ -1118,24 +1119,24 @@ describe('InlineEditModal - openAndWait', () => {
     (global as any).document = {
       body: createMockEl('body'),
       createElement: (tagName: string) => createMockEl(tagName),
-      addEventListener: jest.fn(),
-      removeEventListener: jest.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
       // The merged composer installs its accept/reject key handler on the document's
       // defaultView, so the fake document exposes one with the window listener API.
       defaultView: {
-        addEventListener: jest.fn(),
-        removeEventListener: jest.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
       },
     };
 
     try {
       const app = {
         vault: {
-          getFiles: jest.fn().mockReturnValue([]),
-          getAllLoadedFiles: jest.fn().mockReturnValue([]),
+          getFiles: vi.fn().mockReturnValue([]),
+          getAllLoadedFiles: vi.fn().mockReturnValue([]),
         },
         workspace: {
-          getActiveViewOfType: jest.fn(),
+          getActiveViewOfType: vi.fn(),
         },
       } as any;
       const plugin = {
@@ -1147,17 +1148,17 @@ describe('InlineEditModal - openAndWait', () => {
       } as any;
       plugin.providerHost = plugin;
       const editor = {
-        getCursor: jest.fn((which: string) => which === 'from'
+        getCursor: vi.fn((which: string) => which === 'from'
           ? { line: 0, ch: 0 }
           : { line: 0, ch: 3 }),
-        getSelection: jest.fn().mockReturnValue(oldMarkdown),
+        getSelection: vi.fn().mockReturnValue(oldMarkdown),
       } as any;
       const view = { editor } as any;
 
       let widgetRef: any = null;
       let diffOps: Array<{ type: string; text: string }> | undefined;
       let hasPreviewText = false;
-      const dispatch = jest.fn((transaction: any) => {
+      const dispatch = vi.fn((transaction: any) => {
         const effects = Array.isArray(transaction?.effects)
           ? transaction.effects
           : transaction?.effects
@@ -1180,22 +1181,22 @@ describe('InlineEditModal - openAndWait', () => {
       });
       const editorView = {
         state: {
-          field: jest.fn(() => undefined),
+          field: vi.fn(() => undefined),
           doc: {
-            line: jest.fn(() => ({ from: 0 })),
-            lineAt: jest.fn(() => ({ from: 0, number: 1 })),
+            line: vi.fn(() => ({ from: 0 })),
+            lineAt: vi.fn(() => ({ from: 0, number: 1 })),
           },
         },
         dispatch,
-        focus: jest.fn(),
+        focus: vi.fn(),
         dom: {
           ownerDocument: (global as any).document,
-          addEventListener: jest.fn(),
-          removeEventListener: jest.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
         },
       } as any;
 
-      const getEditorViewSpy = jest
+      const getEditorViewSpy = vi
         .spyOn(obsidianCompat, 'getEditorView')
         .mockReturnValue(editorView);
 
@@ -1208,11 +1209,11 @@ describe('InlineEditModal - openAndWait', () => {
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
       widgetRef.inlineEditService = {
-        send: jest.fn().mockResolvedValue({
+        send: vi.fn().mockResolvedValue({
           success: true,
           editedText: newMarkdown,
         }),
-        end: jest.fn(),
+        end: vi.fn(),
       };
 
       widgetRef.inputEl.value = 'Improve the statement';
@@ -1221,9 +1222,9 @@ describe('InlineEditModal - openAndWait', () => {
       expect(diffOps).toEqual(expectedDiffOps);
       expect(hasPreviewText).toBe(false);
 
-      (MarkdownRenderer.renderMarkdown as jest.Mock).mockClear();
+      (MarkdownRenderer.renderMarkdown as Mock).mockClear();
       const previewEl = widgetRef.createDiffPreviewDOM(diffOps);
-      for (let i = 0; i < 5 && (MarkdownRenderer.renderMarkdown as jest.Mock).mock.calls.length < expectedKinds.length; i++) {
+      for (let i = 0; i < 5 && (MarkdownRenderer.renderMarkdown as Mock).mock.calls.length < expectedKinds.length; i++) {
         await Promise.resolve();
       }
 

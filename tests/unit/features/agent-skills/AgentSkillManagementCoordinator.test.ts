@@ -1,3 +1,5 @@
+import type { Mocked } from 'vitest';
+
 import type { AgentSkillDocument, AgentSkillInput } from '@/features/agent-skills/AgentSkill';
 import { AgentSkillManagementCoordinator } from '@/features/agent-skills/AgentSkillManagementCoordinator';
 import type { AgentSkillRepository } from '@/features/agent-skills/AgentSkillRepository';

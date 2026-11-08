@@ -18,7 +18,7 @@ describe('AgentSkillResources', () => {
     const refresh = vi.fn().mockReturnValue(new Promise<void>(resolve => {
       finishRefresh = resolve;
     }));
-    ProviderWorkspaceRegistry.register('kiro', { consumesAgentSkills: true, initialize: jest.fn() });
+    ProviderWorkspaceRegistry.register('kiro', { consumesAgentSkills: true, initialize: vi.fn() });
     ProviderWorkspaceRegistry.setServices('kiro', {
       onAgentSkillsChanged: refresh,
     });

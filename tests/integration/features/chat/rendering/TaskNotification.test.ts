@@ -2,7 +2,6 @@
 import '@/providers';
 
 import { axe } from '@test/helpers/accessibility';
-import { createTabSession } from '@test/helpers/ConversationPorts';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { fireEvent, within } from '@testing-library/dom';
 import { Component, MarkdownRenderer } from 'obsidian';

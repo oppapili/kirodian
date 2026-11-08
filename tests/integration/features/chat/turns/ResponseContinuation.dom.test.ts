@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import '@/providers';
 
+import { axe } from '@test/helpers/accessibility';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
 import { Component, MarkdownRenderer } from 'obsidian';

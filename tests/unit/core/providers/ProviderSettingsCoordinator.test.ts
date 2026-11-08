@@ -203,7 +203,7 @@ describe('ProviderSettingsCoordinator', () => {
 
   describe('reconcileProviders', () => {
     it('reconciles each provider against the projected settings', () => {
-      const reconcileSpy = jest.spyOn(
+      const reconcileSpy = vi.spyOn(
         ProviderRegistry.getSettingsReconciler(STUB_PROVIDER_ID),
         'reconcileModelWithEnvironment',
       );
@@ -260,7 +260,7 @@ describe('ProviderSettingsCoordinator', () => {
       uiConfigSpy.mockRestore();
 
       // An omitted sessionPolicy defaults to invalidate; the reload provider opts out explicitly.
-      expect(jest.mocked(defaultReconciler.reconcileModelWithEnvironment).mock.results[0]!.value)
+      expect(vi.mocked(defaultReconciler.reconcileModelWithEnvironment).mock.results[0]!.value)
         .not.toHaveProperty('sessionPolicy');
       expect(result.environmentChangedProviderIds).toEqual([
         'fake-invalidate',

@@ -372,10 +372,10 @@
         "archive": "Projekt konnte nicht archiviert werden",
         "restore": "Projekt konnte nicht wiederhergestellt werden",
         "pin": "Anheften des Projekts konnte nicht geändert werden",
+        "reorder": "Projekte konnten nicht neu angeordnet werden",
         "move": "Sitzungen konnten nicht in das Projekt verschoben werden",
         "remove": "Sitzungen konnten nicht aus dem Projekt entfernt werden",
-        "start": "Sitzung in diesem Projekt konnte nicht gestartet werden",
-        "sort": "Projektsortierung konnte nicht aktualisiert werden"
+        "start": "Sitzung in diesem Projekt konnte nicht gestartet werden"
       },
       "editor": {
         "titleNew": "Neues Projekt",

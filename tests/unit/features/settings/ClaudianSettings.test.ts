@@ -51,8 +51,8 @@ describe('ClaudianSettingTab model option updates', () => {
 describe('ClaudianSettingTab agent-skill coordinator selection', () => {
   function makeTab() {
     const plugin = {
-      notifyAgentSkillsChanged: jest.fn(),
-      storage: { getAdapter: jest.fn(() => ({})) },
+      notifyAgentSkillsChanged: vi.fn(),
+      storage: { getAdapter: vi.fn(() => ({})) },
     };
     return new ClaudianSettingTab({} as any, {} as any, plugin as any);
   }

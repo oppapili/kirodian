@@ -1,8 +1,7 @@
 import '@/providers';
 
-import type { Mock } from 'vitest';
-
 import { createMockEl } from '@test/helpers/MockElement';
+import type { Mock } from 'vitest';
 
 import {
   TOOL_APPLY_PATCH,
@@ -12,6 +11,8 @@ import {
 import type { ChatMessage, ToolCallInfo } from '@/core/types';
 import * as displayOnlyCodeFences from '@/features/chat/rendering/markdown/DisplayOnlyCodeFences';
 import { providerOutputEventToStreamChunk } from '@/features/chat/rendering/providerOutputChunks';
+import type { ThinkingBlockState } from '@/features/chat/rendering/ThinkingBlockRenderer';
+import type { WriteEditState } from '@/features/chat/rendering/tools/WriteEditRenderer';
 import { ChatState } from '@/features/chat/state/ChatState';
 import {
   AsyncSubagentHistoryRecovery,
@@ -656,7 +657,7 @@ describe('StreamController - Text Content', () => {
     // SubagentManager.test.ts.
 
     it('should render TodoWrite inline', async () => {
-      const { renderToolCall } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { renderToolCall } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       const mockTodos = [{ content: 'Task 1', status: 'pending', activeForm: 'Working on task 1' }];
 
       const msg = createTestMessage();
@@ -686,7 +687,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should flush pending tools before rendering text content', async () => {
-      const { renderToolCall } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { renderToolCall } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
@@ -780,7 +781,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should pass expanded default to apply_patch tool blocks when enabled', async () => {
-      const { renderToolCall } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { renderToolCall } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       (deps.plugin.settings as any).expandFileEditsByDefault = true;
 
       const msg = createTestMessage();
@@ -805,7 +806,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should flush pending tools before rendering thinking content', async () => {
-      const { renderToolCall } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { renderToolCall } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
@@ -823,7 +824,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should render pending tool when tool_result arrives before flush', async () => {
-      const { renderToolCall } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { renderToolCall } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
@@ -847,7 +848,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should render a pending tool on tool_output and append incremental output', async () => {
-      const { renderToolCall, updateToolCallResult } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { renderToolCall, updateToolCallResult } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
@@ -902,7 +903,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should coalesce tool_output renders until the next animation frame', async () => {
-      const { updateToolCallResult } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { updateToolCallResult } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
@@ -935,9 +936,9 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should buffer Write tool and use createWriteEditBlock on flush', async () => {
-      const { renderToolCall } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
-      const { createWriteEditBlock } = await import('@/features/chat/rendering/tools/WriteEditRenderer');
-      createWriteEditBlock.mockReturnValue({ wrapperEl: createMockEl() });
+      const { renderToolCall } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
+      const { createWriteEditBlock } = vi.mocked(await import('@/features/chat/rendering/tools/WriteEditRenderer'));
+      createWriteEditBlock.mockReturnValue({ wrapperEl: createMockEl() } as unknown as WriteEditState);
 
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
@@ -964,8 +965,8 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should pass expanded default to Write tool blocks when enabled', async () => {
-      const { createWriteEditBlock } = await import('@/features/chat/rendering/tools/WriteEditRenderer');
-      createWriteEditBlock.mockReturnValue({ wrapperEl: createMockEl() });
+      const { createWriteEditBlock } = vi.mocked(await import('@/features/chat/rendering/tools/WriteEditRenderer'));
+      createWriteEditBlock.mockReturnValue({ wrapperEl: createMockEl() } as unknown as WriteEditState);
 
       (deps.plugin.settings as any).expandFileEditsByDefault = true;
 
@@ -986,8 +987,8 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should buffer Edit tool and use createWriteEditBlock on flush', async () => {
-      const { createWriteEditBlock } = await import('@/features/chat/rendering/tools/WriteEditRenderer');
-      createWriteEditBlock.mockReturnValue({ wrapperEl: createMockEl() });
+      const { createWriteEditBlock } = vi.mocked(await import('@/features/chat/rendering/tools/WriteEditRenderer'));
+      createWriteEditBlock.mockReturnValue({ wrapperEl: createMockEl() } as unknown as WriteEditState);
 
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
@@ -1008,7 +1009,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should flush pending tools before rendering blocked message', async () => {
-      const { renderToolCall } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { renderToolCall } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
@@ -1027,7 +1028,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should flush pending tools before rendering error message', async () => {
-      const { renderToolCall } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { renderToolCall } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
@@ -1119,7 +1120,7 @@ describe('StreamController - Text Content', () => {
 
   describe('Tool handling - continued', () => {
     it('should handle multiple pending tools and flush in order', async () => {
-      const { renderToolCall } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { renderToolCall } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
@@ -1407,7 +1408,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should coalesce thinking renders until the next animation frame', async () => {
-      const { createThinkingBlock } = await import('@/features/chat/rendering/ThinkingBlockRenderer');
+      const { createThinkingBlock } = vi.mocked(await import('@/features/chat/rendering/ThinkingBlockRenderer'));
       const msg = createTestMessage();
       const contentEl = createMockEl();
       createThinkingBlock.mockReturnValueOnce({
@@ -1417,7 +1418,7 @@ describe('StreamController - Text Content', () => {
         content: '',
         startTime: Date.now(),
         isExpanded: true,
-      });
+      } as unknown as ThinkingBlockState);
 
       await controller.handleStreamChunk({ type: 'thinking', content: 'Let ' }, msg);
       await controller.handleStreamChunk({ type: 'thinking', content: 'me think' }, msg);
@@ -1432,12 +1433,12 @@ describe('StreamController - Text Content', () => {
     });
 
     it('defers Mermaid in thinking and renders it at finalization', async () => {
-      const { createThinkingBlock } = await import('@/features/chat/rendering/ThinkingBlockRenderer');
+      const { createThinkingBlock } = vi.mocked(await import('@/features/chat/rendering/ThinkingBlockRenderer'));
       const contentEl = createMockEl();
       createThinkingBlock.mockReturnValueOnce({
         wrapperEl: createMockEl(), contentEl, labelEl: createMockEl(),
         content: '', startTime: Date.now(), isExpanded: true,
-      });
+      } as unknown as ThinkingBlockState);
       const content = '> ```mermaid\n> graph TD\n> A --> B';
       await controller.appendThinking(content);
       vi.advanceTimersByTime(16);
@@ -1448,7 +1449,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should render original math once when finalizing a collapsed thinking block', async () => {
-      const { createThinkingBlock } = await import('@/features/chat/rendering/ThinkingBlockRenderer');
+      const { createThinkingBlock } = vi.mocked(await import('@/features/chat/rendering/ThinkingBlockRenderer'));
       const msg = createTestMessage();
       const contentEl = createMockEl();
       createThinkingBlock.mockReturnValueOnce({
@@ -1458,7 +1459,7 @@ describe('StreamController - Text Content', () => {
         content: '',
         startTime: Date.now(),
         isExpanded: false,
-      });
+      } as unknown as ThinkingBlockState);
 
       await controller.handleStreamChunk({ type: 'thinking', content: 'Reasoning $x^2$' }, msg);
       await controller.finalizeCurrentThinkingBlock(msg);
@@ -1475,7 +1476,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should replace deferred math when finalizing an expanded thinking block', async () => {
-      const { createThinkingBlock } = await import('@/features/chat/rendering/ThinkingBlockRenderer');
+      const { createThinkingBlock } = vi.mocked(await import('@/features/chat/rendering/ThinkingBlockRenderer'));
       const msg = createTestMessage();
       const contentEl = createMockEl();
       createThinkingBlock.mockReturnValueOnce({
@@ -1485,7 +1486,7 @@ describe('StreamController - Text Content', () => {
         content: '',
         startTime: Date.now(),
         isExpanded: true,
-      });
+      } as unknown as ThinkingBlockState);
 
       await controller.handleStreamChunk({ type: 'thinking', content: 'Reasoning $x^2$' }, msg);
       vi.advanceTimersByTime(16);
@@ -1513,7 +1514,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should skip live renders while thinking is collapsed', async () => {
-      const { createThinkingBlock } = await import('@/features/chat/rendering/ThinkingBlockRenderer');
+      const { createThinkingBlock } = vi.mocked(await import('@/features/chat/rendering/ThinkingBlockRenderer'));
       const msg = createTestMessage();
       const contentEl = createMockEl();
       createThinkingBlock.mockReturnValueOnce({
@@ -1523,7 +1524,7 @@ describe('StreamController - Text Content', () => {
         content: '',
         startTime: Date.now(),
         isExpanded: false,
-      });
+      } as unknown as ThinkingBlockState);
 
       await controller.handleStreamChunk({ type: 'thinking', content: 'Hidden ' }, msg);
       await controller.handleStreamChunk({ type: 'thinking', content: 'reasoning' }, msg);
@@ -1559,7 +1560,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should render accumulated thinking through the coordinator when expanded', async () => {
-      const { createThinkingBlock } = await import('@/features/chat/rendering/ThinkingBlockRenderer');
+      const { createThinkingBlock } = vi.mocked(await import('@/features/chat/rendering/ThinkingBlockRenderer'));
       const msg = createTestMessage();
       const contentEl = createMockEl();
       const thinkingState: Record<string, any> = {
@@ -1573,7 +1574,7 @@ describe('StreamController - Text Content', () => {
       let onToggle: ((isExpanded: boolean) => void) | undefined;
       createThinkingBlock.mockImplementationOnce((_parentEl: HTMLElement, options: any) => {
         onToggle = options.onToggle;
-        return thinkingState;
+        return thinkingState as unknown as ThinkingBlockState;
       });
 
       await controller.handleStreamChunk({ type: 'thinking', content: 'Deferred reasoning' }, msg);
@@ -1756,7 +1757,7 @@ describe('StreamController - Text Content', () => {
 
   describe('Text ↔ Thinking transitions', () => {
     it('text arrives while thinking state is active → finalizeCurrentThinkingBlock is called', async () => {
-      const { finalizeThinkingBlock } = await import('@/features/chat/rendering/ThinkingBlockRenderer');
+      const { finalizeThinkingBlock } = vi.mocked(await import('@/features/chat/rendering/ThinkingBlockRenderer'));
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
@@ -1795,7 +1796,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('tool_use arrives while thinking state → finalizeCurrentThinkingBlock is called', async () => {
-      const { finalizeThinkingBlock } = await import('@/features/chat/rendering/ThinkingBlockRenderer');
+      const { finalizeThinkingBlock } = vi.mocked(await import('@/features/chat/rendering/ThinkingBlockRenderer'));
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
@@ -1824,7 +1825,7 @@ describe('StreamController - Text Content', () => {
     // a lifecycle hidden tool (task_output) owned by SubagentStreamRouter.
 
     it('Agent output tool result handled via handleAgentOutputToolResult returning true', async () => {
-      const { updateToolCallResult } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { updateToolCallResult } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
@@ -1852,7 +1853,7 @@ describe('StreamController - Text Content', () => {
       ['Bash', { command: 'npm test' }],
       ['Read', { file_path: 'notes/test.md' }],
     ])('refines a pending generic tool to %s without duplicating it', async (name, input) => {
-      const { renderToolCall } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { renderToolCall } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
@@ -1890,9 +1891,9 @@ describe('StreamController - Text Content', () => {
     });
 
     it('selects the Edit renderer after a pending generic tool is refined', async () => {
-      const { renderToolCall } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
-      const { createWriteEditBlock } = await import('@/features/chat/rendering/tools/WriteEditRenderer');
-      createWriteEditBlock.mockReturnValueOnce({ wrapperEl: createMockEl() });
+      const { renderToolCall } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
+      const { createWriteEditBlock } = vi.mocked(await import('@/features/chat/rendering/tools/WriteEditRenderer'));
+      createWriteEditBlock.mockReturnValueOnce({ wrapperEl: createMockEl() } as unknown as WriteEditState);
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
@@ -1920,12 +1921,12 @@ describe('StreamController - Text Content', () => {
     });
 
     it.each(['Edit', 'Write'])('migrates a rendered generic tool in place to %s and finalizes its diff', async (name) => {
-      const { renderToolCall, updateToolCallResult } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { renderToolCall, updateToolCallResult } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       const {
         createWriteEditBlock,
         finalizeWriteEditBlock,
         updateWriteEditWithDiff,
-      } = await import('@/features/chat/rendering/tools/WriteEditRenderer');
+      } = vi.mocked(await import('@/features/chat/rendering/tools/WriteEditRenderer'));
       const parentEl = createMockEl();
       installOrderedMockParent(parentEl);
       deps.state.currentContentEl = parentEl;
@@ -2018,8 +2019,8 @@ describe('StreamController - Text Content', () => {
     });
 
     it('migrates a rendered Write tool back to generic without losing tool state', async () => {
-      const { renderToolCall, updateToolCallResult } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
-      const { createWriteEditBlock } = await import('@/features/chat/rendering/tools/WriteEditRenderer');
+      const { renderToolCall, updateToolCallResult } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
+      const { createWriteEditBlock } = vi.mocked(await import('@/features/chat/rendering/tools/WriteEditRenderer'));
       const parentEl = createMockEl();
       installOrderedMockParent(parentEl);
       deps.state.currentContentEl = parentEl;
@@ -2028,7 +2029,7 @@ describe('StreamController - Text Content', () => {
       const writeEditState = { wrapperEl: writeEditEl, isExpanded: true };
       createWriteEditBlock.mockImplementationOnce((parent: any) => {
         mountMockChild(parent, writeEditEl);
-        return writeEditState;
+        return writeEditState as unknown as WriteEditState;
       });
       renderToolCall.mockImplementationOnce((parent: any, toolCall: ToolCallInfo) => {
         mountMockChild(parent, genericEl);
@@ -2120,7 +2121,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('rebuilds rendered generic tools for forward and reverse normalized-name changes', async () => {
-      const { renderToolCall, updateToolCallResult } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { renderToolCall, updateToolCallResult } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       renderToolCall.mockReset();
       const parentEl = createMockEl();
       installOrderedMockParent(parentEl);
@@ -2219,7 +2220,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('rebuilds a rendered generic tool as TodoWrite', async () => {
-      const { renderToolCall } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { renderToolCall } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       renderToolCall.mockReset();
       const todos = [{ content: 'Task', status: 'in_progress', activeForm: 'Working' }];
       const parentEl = createMockEl();
@@ -2256,7 +2257,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('rebuilds a rendered generic tool as AskUserQuestion without duplicating result handling', async () => {
-      const { renderToolCall, updateToolCallResult } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { renderToolCall, updateToolCallResult } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       renderToolCall.mockReset();
       const parentEl = createMockEl();
       installOrderedMockParent(parentEl);
@@ -2391,7 +2392,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('dispatches a merged same-id input refinement to the rendered header owner', async () => {
-      const { renderToolCall, refreshToolCallHeader } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { renderToolCall, refreshToolCallHeader } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
       const toolEl = createMockEl();
@@ -2419,7 +2420,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('dispatches a title-only name refinement without losing the logical tool input', async () => {
-      const { renderToolCall, refreshToolCallHeader } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { renderToolCall, refreshToolCallHeader } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
       const toolEl = createMockEl();
@@ -2490,7 +2491,7 @@ describe('StreamController - Text Content', () => {
 
   describe('Async task tool result', () => {
     it('tool_result for a pending async task returns true from handleAsyncTaskToolResult', async () => {
-      const { updateToolCallResult } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { updateToolCallResult } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
 
@@ -2532,7 +2533,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('normalizes structured tool_result content before storing it on tool calls', async () => {
-      const { updateToolCallResult } = await import('@/features/chat/rendering/tools/ToolCallRenderer');
+      const { updateToolCallResult } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
       const msg = createTestMessage();
       msg.toolCalls = [
         {
@@ -2660,7 +2661,7 @@ describe('StreamController - Tool completion', () => {
     });
 
     it('should hydrate AskUserQuestion resolvedAnswers from result text fallback', async () => {
-      const coreTools = await import('@/core/tools/toolInput');
+      const coreTools = vi.mocked(await import('@/core/tools/toolInput'));
       (coreTools.extractResolvedAnswersFromResultText as Mock).mockReturnValueOnce({
         'Color?': 'Blue',
       });

@@ -1,9 +1,8 @@
 import '@/providers';
 
-import type { Mock } from 'vitest';
-
 import { createMockEl } from '@test/helpers/MockElement';
 import { Component, Menu } from 'obsidian';
+import type { Mock } from 'vitest';
 
 import {
   TOOL_APPLY_PATCH,

@@ -1,8 +1,7 @@
-import type { MockedFunction } from 'vitest';
-
 import type { FakeRun } from '@test/helpers/ChatExecutionHarness';
 import { beginExecution, createHarness, createSubmission, deferred, FakeSession, requestedScope } from '@test/helpers/ChatExecutionHarness';
 import { testDate } from '@test/helpers/testClock';
+import type { MockedFunction } from 'vitest';
 
 import { ConversationExecutionBindings } from '@/app/conversations/ConversationExecutionBindings';
 import type { ConversationRecordFence } from '@/app/conversations/ConversationRecordFence';
@@ -1768,7 +1767,7 @@ test.each([undefined, 'provider-reported-model'])(
 );
 
 it('protects branch navigation from idle release and concurrent input and persists the resulting native cursor', async () => {
-  vi.useFakeTimers({ doNotFake: ['setImmediate'] });
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'queueMicrotask'] });
   const harness = createHarness({ idleReleaseMs: IDLE_MS });
   await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
   await harness.coordinator.prepare();

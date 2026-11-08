@@ -2,9 +2,9 @@
 
 import '@/providers';
 
+import { axe } from '@test/helpers/accessibility';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
-import { axe } from '@test/helpers/accessibility';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';

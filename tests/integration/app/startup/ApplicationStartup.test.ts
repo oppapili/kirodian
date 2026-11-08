@@ -1,7 +1,6 @@
-import type { Mock } from 'vitest';
-
 import { DesktopVault } from '@test/helpers/core/DesktopVault';
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@test/helpers/defaultSettings';
+import type { Mock } from 'vitest';
 
 import { SettingsCoordinator } from '@/app/settings/SettingsCoordinator';
 import { type ApplicationDomains, startApplication } from '@/app/startup/ApplicationStartup';

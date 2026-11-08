@@ -1,8 +1,7 @@
-import type { Mock, MockInstance } from 'vitest';
-
 import { DEFAULT_CLAUDIAN_SETTINGS as DEFAULT_SETTINGS } from '@test/helpers/defaultSettings';
 import { testClock } from '@test/helpers/testClock';
 import { Notice, TFile, TFolder } from 'obsidian';
+import type { Mock, MockInstance } from 'vitest';
 
 import type { ConversationRepository } from '@/app/conversations/ConversationRepository';
 import { PinnedLinkedContentPathCoordinator } from '@/app/settings/PinnedLinkedContentPathCoordinator';
@@ -1118,7 +1117,7 @@ describe('ClaudianPlugin', () => {
         ([path]) => path === '.claudian/claudian-settings.json'
       );
       expect(writeCall).toBeDefined();
-      const content = JSON.parse(writeCall[1]);
+      const content = JSON.parse(writeCall![1]);
       expect(content).not.toHaveProperty('activeConversationId');
       expect(content).toHaveProperty('providerConfigs.kiro.environmentHash');
       expect(content).not.toHaveProperty('enableBlocklist');

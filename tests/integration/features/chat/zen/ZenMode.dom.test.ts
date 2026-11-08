@@ -33,7 +33,6 @@ import { createChatFocusCommand } from '@/features/chat/workspace/ChatFocusComma
 import type { ZenPresentationPort } from '@/features/chat/zen/types';
 import { ZenModeController } from '@/features/chat/zen/ZenModeController';
 import { ZenModePanel } from '@/features/chat/zen/ZenModePanel';
-
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
 const originalResizeObserver = globalThis.ResizeObserver;

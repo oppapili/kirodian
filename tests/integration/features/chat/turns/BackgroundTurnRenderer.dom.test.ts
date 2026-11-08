@@ -1,9 +1,9 @@
 /** @vitest-environment jsdom */
 import '@/providers';
 
+import { axe } from '@test/helpers/accessibility';
 import { createSessionModelStub } from '@test/helpers/ConversationPorts';
 import { enqueueTabSessionEvent } from '@test/helpers/features/chat/SessionEventsHarness';
-import { axe } from '@test/helpers/accessibility';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { within } from '@testing-library/dom';
 import { Component, MarkdownRenderer } from 'obsidian';
