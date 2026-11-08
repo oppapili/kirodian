@@ -2,19 +2,22 @@ import '@/providers';
 
 import { createConversationPorts, createTestSession, holdResponse } from '@test/helpers/ConversationPorts';
 import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
-import { createMockEl } from '@test/helpers/MockElement';
+import { createMockEl, type MockEl } from '@test/helpers/MockElement';
+import { partialMock } from '@test/helpers/partialMock';
 import { testDate } from '@test/helpers/testClock';
 import { Menu, setIcon } from 'obsidian';
 import type { Mock } from 'vitest';
 
 import type { TitleGenerationService } from '@/core/providers/types';
 import type { ClaudianSettings } from '@/core/types';
+import type { ImageContextManager } from '@/features/chat/composer/ImageContextManager';
 import type { ConversationControllerDeps } from '@/features/chat/conversation/ConversationController';
 import { SessionBrowser } from '@/features/chat/session-manager/SessionBrowser';
 import { formatSessionDate } from '@/features/chat/session-manager/SessionStatusPresentation';
 import type { ChatSessionRuntime } from '@/features/chat/sessions/ChatSessionRuntime';
 import { ChatState } from '@/features/chat/state/ChatState';
 import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
+import type { ComposerInputElement } from '@/shared/composer-dropdown/types';
 
 
 
@@ -25,9 +28,10 @@ vi.mock('@/shared/modals/ConfirmModal', () => ({
 function createMockDeps(overrides: Record<string, unknown> = {}): ConversationControllerDeps & { session: ChatSessionRuntime; plugin: ConversationControllerDeps['plugin'] & { settings: ClaudianSettings }; getHistoryDropdown: () => HTMLElement; getTitleGenerationService: () => TitleGenerationService | null } {
   const session = createTestSession({ getState: () => state });
   const state: ChatState = new ChatState({}, undefined, session.turns);
-  const inputEl = { value: '', focus: vi.fn() } as unknown as HTMLTextAreaElement;
+  const inputEl = partialMock<ComposerInputElement>({ value: '', focus: vi.fn() });
+  const imageContextManager = partialMock<ImageContextManager>({ clearImages: vi.fn() });
   const historyDropdown = createMockEl();
-  let welcomeEl: any = createMockEl();
+  let welcomeEl: HTMLElement | null = createMockEl();
   const messagesEl = createMockEl();
 
   const linkedContentController = {
@@ -71,29 +75,27 @@ function createMockDeps(overrides: Record<string, unknown> = {}): ConversationCo
         providerConfigs: {},
         permissionMode: 'yolo',
       },
-    } as any,
+    },
     state,
     renderer: {
       renderMessages: vi.fn().mockReturnValue(createMockEl()),
-    } as any,
+    },
     subagentManager: {
       clear: vi.fn(),
-    } as any,
-    getHistoryDropdown: () => historyDropdown as any,
+    },
+    getHistoryDropdown: () => historyDropdown,
     getWelcomeEl: () => welcomeEl,
-    setWelcomeEl: (el: any) => { welcomeEl = el; },
-    getMessagesEl: () => messagesEl as any,
+    setWelcomeEl: (el: HTMLElement | null) => { welcomeEl = el; },
+    getMessagesEl: () => messagesEl,
     getInputEl: () => inputEl,
-    getLinkedContentController: () => linkedContentController as any,
-    getImageContextManager: () => ({
-      clearImages: vi.fn(),
-    }) as any,
+    getLinkedContentController: () => linkedContentController,
+    getImageContextManager: () => imageContextManager,
     clearQueuedMessage: vi.fn(),
     getTitleGenerationService: () => null,
     getExecutionCoordinator: () => null,
     ...overrides,
   } as unknown as ReturnType<typeof createMockDeps>;
-  const mockSettings = (deps as any).plugin.settings as Record<string, unknown>;
+  const mockSettings = deps.plugin.settings as Record<string, unknown>;
   updateCurrentKiroCatalog(mockSettings, {
     defaultModelId: null,
     fingerprint: 'test-fingerprint',
@@ -107,7 +109,12 @@ function createMockDeps(overrides: Record<string, unknown> = {}): ConversationCo
     }],
   });
   updateKiroProviderSettings(mockSettings, { enabled: true, visibleModels: ['haiku'] });
-  return Object.assign(deps, createConversationPorts({ ...(deps as any), session }));
+  return Object.assign(deps, createConversationPorts({
+    state: deps.state,
+    getInputEl: () => inputEl,
+    getImageContextManager: () => imageContextManager,
+    session,
+  }));
 }
 
 function createBrowser(deps: ReturnType<typeof createMockDeps>): SessionBrowser {
@@ -126,7 +133,7 @@ function renderDropdown(browser: SessionBrowser, deps: ReturnType<typeof createM
 }
 
 describe('SessionBrowser', () => {
-  let mockTitleService: any;
+  let mockTitleService: { generateTitle: Mock; cancel: Mock };
   let controller: SessionBrowser;
   let deps: ReturnType<typeof createMockDeps>;
   beforeEach(() => {
@@ -137,7 +144,7 @@ describe('SessionBrowser', () => {
     controller = createBrowser(deps);
   });
   describe('History Rendering', () => {
-    let dropdown: any;
+    let dropdown: MockEl;
 
     beforeEach(() => {
       dropdown = createMockEl();
@@ -288,23 +295,23 @@ describe('SessionBrowser', () => {
 
         const pinnedSection = container.querySelector('.claudian-history-section--pinned')!;
         const pinnedHeaders = pinnedSection.querySelectorAll('.claudian-session-group-header');
-        expect(pinnedHeaders.map((header: any) => header.getAttribute('data-content-path'))).toEqual([
+        expect(pinnedHeaders.map(header => header.getAttribute('data-content-path'))).toEqual([
           'Projects/Plan.md',
           'Projects/Empty.md',
         ]);
         expect(pinnedSection.querySelectorAll('.claudian-session-group-body')[0]
           .querySelectorAll('.claudian-history-item-title')
-          .map((item: any) => item.textContent))
+          .map(item => item.textContent))
           .toEqual(['Note regular', 'Note pinned session']);
         expect(pinnedSection.querySelectorAll('.claudian-history-item-title')
-          .map((item: any) => item.textContent))
+          .map(item => item.textContent))
           .toEqual(['Note regular', 'Note pinned session', 'Standalone pinned']);
 
         const sessionsSection = container.querySelector('.claudian-history-section--sessions')!;
         expect(sessionsSection.querySelectorAll('.claudian-history-item-title')
-          .map((item: any) => item.textContent))
+          .map(item => item.textContent))
           .toEqual(['Regular']);
-        expect(container.querySelectorAll('.claudian-history-item').filter((item: any) => (
+        expect(container.querySelectorAll('.claudian-history-item').filter(item => (
           item.getAttribute('data-conversation-id') === 'note-pinned-session'
         ))).toHaveLength(1);
       });
@@ -1380,7 +1387,7 @@ describe('SessionBrowser', () => {
   });
 
   describe('History Item Interactions', () => {
-    let dropdown: any;
+    let dropdown: MockEl;
 
     beforeEach(() => {
       dropdown = createMockEl();
@@ -1424,7 +1431,7 @@ describe('SessionBrowser', () => {
         generateTitle: vi.fn().mockResolvedValue(undefined),
         cancel: vi.fn(),
       };
-      deps.getTitleGenerationService = () => mockTitleService as any;
+      deps.getTitleGenerationService = () => partialMock<TitleGenerationService>(mockTitleService);
 
       (deps.plugin.getConversationList as Mock).mockReturnValue([
         { id: 'conv-1', title: 'Failed', createdAt: 1000, lastActivityAt: 1000, titleGenerationStatus: 'failed' },

@@ -4,12 +4,12 @@ import '@/providers';
 
 import { axe } from '@test/helpers/accessibility';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
+import { App } from 'obsidian';
 
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@/app/settings/defaultSettings';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
 import { EnvSnippetManager } from '@/shared/settings/EnvSnippetManager';
 
-vi.mock('obsidian', async () => vi.importActual('../../../helpers/ObsidianSettingsDOM'));
 
 afterEach(() => document.body.replaceChildren());
 
@@ -22,7 +22,7 @@ it('applies a snippet environment to its provider scope', async () => {
   const applyEnvironmentVariables = vi.fn().mockResolvedValue(undefined);
   const host = {
     settings, applyEnvironmentVariables,
-    app: { workspace: { getLeavesOfType: () => [] } },
+    app: new App(),
     mutateSettings: async (mutate: Parameters<ProviderHost['mutateSettings']>[0]) => { await mutate(settings); },
   } as unknown as ProviderHost;
   const container = document.body.createEl('main');
@@ -40,7 +40,7 @@ it('offers saving the current environment from the empty snippet state', async (
   settings.envSnippets = [];
   const host = {
     settings,
-    app: { workspace: { getLeavesOfType: () => [] } },
+    app: new App(),
     getEnvironmentVariablesForScope: () => 'KIRO_MODEL=custom',
     mutateSettings: async (mutate: Parameters<ProviderHost['mutateSettings']>[0]) => { await mutate(settings); },
   } as unknown as ProviderHost;

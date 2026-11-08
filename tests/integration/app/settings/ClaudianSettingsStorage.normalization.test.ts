@@ -7,13 +7,12 @@ import {
   CLAUDIAN_SETTINGS_PATH,
   ClaudianSettingsStorage
 } from '@/app/settings/ClaudianSettingsStorage';
+import { getInstallationKey } from '@/core/device/InstallationKey';
 import type { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
 import { getKiroProviderSettings } from '@/providers/kiro/settings';
 
 
 
-const mockGetHostnameKey = vi.fn(() => 'host-a');
-const mockGetLegacyDeviceSettingsKey = vi.fn<(...args: []) => string | null>(() => null);
 const originalPlatform = process.platform;
 
 const mockAdapter = {
@@ -22,12 +21,6 @@ const mockAdapter = {
   write: vi.fn(),
   delete: vi.fn(),
 } as unknown as Mocked<VaultFileAdapter>;
-
-vi.mock('@/core/device/InstallationKey', async () => ({
-  ...(await vi.importActual<typeof import('@/core/device/InstallationKey')>('@/core/device/InstallationKey')),
-  getInstallationKey: () => mockGetHostnameKey(),
-  getLegacyDeviceSettingsKey: () => mockGetLegacyDeviceSettingsKey(),
-}));
 
 describe('ClaudianSettingsStorage', () => {
   let storage: ClaudianSettingsStorage;
@@ -40,8 +33,6 @@ describe('ClaudianSettingsStorage', () => {
     mockAdapter.read.mockResolvedValue('{}');
     mockAdapter.write.mockResolvedValue(undefined);
     mockAdapter.delete.mockResolvedValue(undefined);
-    mockGetHostnameKey.mockReturnValue('host-a');
-    mockGetLegacyDeviceSettingsKey.mockReturnValue(null);
     storage = new ClaudianSettingsStorage(mockAdapter, DEFAULT_SETTINGS);
   });
 
@@ -346,7 +337,6 @@ describe('ClaudianSettingsStorage', () => {
 
     it('preserves hostname-scoped provider settings without assigning them to the current device', async () => {
       Object.defineProperty(process, 'platform', { value: 'win32' });
-      mockGetHostnameKey.mockReturnValue('device:current');
       mockAdapter.exists.mockResolvedValue(true);
       mockAdapter.read.mockResolvedValue(JSON.stringify({
         lastSelectedChatModel: null,
@@ -364,41 +354,53 @@ describe('ClaudianSettingsStorage', () => {
       const kiroSettings = getKiroProviderSettings(result);
 
       // The foreign-host paths are preserved verbatim and NOT reassigned to the
-      // current device key ('device:current' must not appear).
+      // current device key.
       expect(kiroSettings.cliPathsByHost).toEqual({
         'host-a': '/custom/kiro-a',
         'host-b': '/custom/kiro-b',
       });
-      expect(kiroSettings.cliPathsByHost).not.toHaveProperty('device:current');
+      expect(kiroSettings.cliPathsByHost).not.toHaveProperty(getInstallationKey());
     });
 
     it('migrates current-device provider maps from the colon key to the portable key', async () => {
       Object.defineProperty(process, 'platform', { value: 'win32' });
-      mockGetHostnameKey.mockReturnValue('device-portable');
-      mockGetLegacyDeviceSettingsKey.mockReturnValue('device:legacy');
-      mockAdapter.exists.mockResolvedValue(true);
-      mockAdapter.read.mockResolvedValue(JSON.stringify({
-        lastSelectedChatModel: null,
-        providerConfigs: {
-          kiro: {
-            cliPathsByHost: {
-              'device:legacy': '/legacy/kiro',
-              'device:other': '/other/kiro',
+      // The device identity derives from the persisted seed; a colon-form seed is the legacy key.
+      const seedKey = 'claudian.deviceSettingsKey';
+      const originalSeed = window.localStorage.getItem(seedKey);
+      window.localStorage.setItem(seedKey, 'device:legacy');
+      vi.resetModules();
+      try {
+        await import('@/providers');
+        const { ClaudianSettingsStorage: SeededStorage } = await import('@/app/settings/ClaudianSettingsStorage');
+        const { getInstallationKey: getSeededKey } = await import('@/core/device/InstallationKey');
+        mockAdapter.exists.mockResolvedValue(true);
+        mockAdapter.read.mockResolvedValue(JSON.stringify({
+          lastSelectedChatModel: null,
+          providerConfigs: {
+            kiro: {
+              cliPathsByHost: {
+                'device:legacy': '/legacy/kiro',
+                'device:other': '/other/kiro',
+              },
             },
           },
-        },
-      }));
+        }));
 
-      const result = await storage.load();
-      const kiroSettings = getKiroProviderSettings(result);
-      const persisted = JSON.parse(mockAdapter.write.mock.calls[0][1]);
+        const result = await new SeededStorage(mockAdapter, DEFAULT_SETTINGS).load();
+        const kiroSettings = getKiroProviderSettings(result);
+        const persisted = JSON.parse(mockAdapter.write.mock.calls[0][1]);
 
-      expect(kiroSettings.cliPathsByHost).toEqual({
-        'device-portable': '/legacy/kiro',
-        'device:other': '/other/kiro',
-      });
-      expect(persisted.providerConfigs.kiro.cliPathsByHost)
-        .toEqual(kiroSettings.cliPathsByHost);
+        expect(kiroSettings.cliPathsByHost).toEqual({
+          [getSeededKey()]: '/legacy/kiro',
+          'device:other': '/other/kiro',
+        });
+        expect(persisted.providerConfigs.kiro.cliPathsByHost)
+          .toEqual(kiroSettings.cliPathsByHost);
+      } finally {
+        if (originalSeed === null) window.localStorage.removeItem(seedKey);
+        else window.localStorage.setItem(seedKey, originalSeed);
+        vi.resetModules();
+      }
     });
 
     it('merges per-provider hidden commands into one global list and retires the old key', async () => {

@@ -19,34 +19,6 @@ import { ClaudianSettingTab } from '@/features/settings/ClaudianSettings';
 import { t } from '@/i18n/i18n';
 
 vi.mock('@/shared/settings/EnvironmentSettingsSection', () => ({ renderEnvironmentSettingsSection() {} }));
-vi.mock('obsidian', async () => {
-  const dom = (await vi.importActual<typeof import('@test/helpers/ObsidianSettingsDOM')>('@test/helpers/ObsidianSettingsDOM'));
-  class Setting extends dom.Setting {
-    // AccessibleSetting (the merged src subclass) reads nameEl.id / .hasAttribute
-    // / .setAttribute in nameControl() and setHeading(); the final
-    // ObsidianSettingsDOM.Setting omits nameEl, so provide a real element.
-    readonly nameEl = this.settingEl.appendChild(document.createElement('div'));
-    setHeading() { return this; }
-    addToggle(callback: (control: unknown) => void) {
-      // exposeToggleState (merged AccessibleSetting) reads toggleEl.querySelector('input')
-      // and control.getValue()/setDisabled(), so model the obsidian label>input shape.
-      const toggleEl = this.settingEl.createEl('label');
-      const input = toggleEl.createEl('input', { attr: { type: 'checkbox' } });
-      let disabled = false;
-      const toggle = {
-        toggleEl,
-        get disabled() { return disabled; },
-        getValue() { return input.checked; },
-        setValue(value: boolean) { input.checked = value; return this; },
-        setDisabled(value: boolean) { disabled = value; input.disabled = value; return this; },
-        onChange(change: (value: boolean) => void) { input.addEventListener('change', () => change(input.checked)); return this; },
-      };
-      callback(toggle); return this;
-    }
-  }
-  return { ...(await vi.importActual<typeof import('@test/__mocks__/obsidian')>('@test/__mocks__/obsidian')), ...dom, Setting };
-});
-
 afterEach(() => { document.body.replaceChildren(); vi.clearAllMocks(); });
 
 // The settings execution transition runs only for registered providers; in this
@@ -89,7 +61,7 @@ it('retries an unchanged user-name draft on the next blur after a rejected save'
   const tab = new ClaudianSettingTab({} as never, {} as never, host as never);
   const container = document.body.createDiv();
   tab['renderGeneralTab'](container);
-  const row = within(container).getByText(t('settings.userName.name')).parentElement!;
+  const row = within(container).getByText(t('settings.userName.name')).closest<HTMLElement>('.setting-item')!;
   const input = within(row).getByRole('textbox') as HTMLInputElement;
   fireEvent.input(input, { target: { value: 'After' } });
   fireEvent.blur(input);
@@ -132,7 +104,7 @@ it.each([false, true])('shows the newest text draft when settings reopen before 
   const tab = new ClaudianSettingTab({} as never, {} as never, host as never);
   const first = document.body.createDiv();
   let cleanup = tab['renderSettings'](first);
-  const userName = (container: HTMLElement) => within(within(container).getByText(t('settings.userName.name')).parentElement!).getByRole<HTMLInputElement>('textbox');
+  const userName = (container: HTMLElement) => within(within(container).getByText(t('settings.userName.name')).closest<HTMLElement>('.setting-item')!).getByRole<HTMLInputElement>('textbox');
   try {
     fireEvent.input(userName(first), { target: { value: 'After' } });
     fireEvent.blur(userName(first));
@@ -183,7 +155,7 @@ it.each([
   const tab = new ClaudianSettingTab({} as never, {} as never, host as never);
   const container = document.body.createDiv();
   tab['renderGeneralTab'](container);
-  const row = within(container).getByText(t(label)).parentElement!;
+  const row = within(container).getByText(t(label)).closest<HTMLElement>('.setting-item')!;
   const input = within(row).getByRole<HTMLInputElement | HTMLTextAreaElement>('textbox');
   const active = await beginKiroExecution(execution, createSubmission({ timestamp: testDate().getTime() }));
   active.run.events.push({ type: 'turn_started', accepted: true, scope: requestedScope(active.session, active.run, 1) });
@@ -205,7 +177,7 @@ it.each([
     await Promise.all(transition.mock.results.map(result => result.value));
     expect(active.session.disposeCalls).toBe(0);
     expect(active.run.cancelCalls).toBe(0);
-    const tags = within(within(container).getByText(t('settings.excludedTags.name')).parentElement!).getByRole('textbox');
+    const tags = within(within(container).getByText(t('settings.excludedTags.name')).closest<HTMLElement>('.setting-item')!).getByRole('textbox');
     fireEvent.input(tags, { target: { value: 'excluded' } });
     fireEvent.blur(tags);
     await tab['textEdits'].flush();
@@ -260,7 +232,7 @@ it('does not restart or replay a prompt edit after publication of its durable co
   const tab = new ClaudianSettingTab({} as never, {} as never, host as never);
   const container = document.body.createDiv();
   tab['renderGeneralTab'](container);
-  const input = within(within(container).getByText(t('settings.userName.name')).parentElement!).getByRole('textbox');
+  const input = within(within(container).getByText(t('settings.userName.name')).closest<HTMLElement>('.setting-item')!).getByRole('textbox');
   try {
     fireEvent.input(input, { target: { value: 'After' } });
     fireEvent.blur(input);

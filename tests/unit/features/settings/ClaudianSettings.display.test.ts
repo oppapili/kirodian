@@ -1,208 +1,35 @@
 /** @vitest-environment jsdom */
 
 import { axe } from '@test/helpers/accessibility';
-import { fireEvent, waitFor, within } from '@testing-library/dom';
-
-const mockRenderedSettingNames: string[] = [];
-const mockSettingDescriptionEls = new Map<string, MockContainer>();
-const mockToggleChanges = new Map<string, (value: boolean) => Promise<void>>();
-const mockTextChanges = new Map<string, (value: string) => Promise<void>>();
-const mockGitStatusElements: Array<{
-  attributes: Map<string, string>;
-  className: string;
-  parent: 'control' | 'name';
-  title: string;
-}> = [];
-
-type MockChainableComponent = Record<string, Mock> & {
-  selectEl?: HTMLSelectElement;
-};
-
-type MockToggleComponent = MockChainableComponent & {
-  toggleEl: HTMLLabelElement;
-  disabled: boolean;
-  getValue: Mock;
-  setDisabled: Mock;
-};
-
-vi.mock('obsidian', async () => {
-  const obsidian = (await vi.importActual<typeof import('../../../__mocks__/obsidian')>('../../../__mocks__/obsidian'));
-
-  class MockSetting {
-    private name = '';
-    readonly descEl = createContainer();
-    readonly controlEl = {
-      createSpan: vi.fn(() => createGitStatusElement('control')),
-    };
-    readonly nameEl = Object.assign(document.createElement('div'), {
-      createSpan: vi.fn(() => createGitStatusElement('name')),
-    });
-
-    constructor(_containerEl: HTMLElement) {}
-
-    setName(name: string): this {
-      this.name = name;
-      mockRenderedSettingNames.push(name);
-      mockSettingDescriptionEls.set(name, this.descEl);
-      return this;
-    }
-
-    setDesc(_description: string): this {
-      return this;
-    }
-
-    setClass(_className: string): this {
-      return this;
-    }
-
-    setHeading(): this {
-      return this;
-    }
-
-    addDropdown(callback: (dropdown: MockChainableComponent) => void): this {
-      const dropdown = createChainableComponent();
-      const label = document.createElement('label');
-      label.textContent = this.name;
-      const select = document.createElement('select');
-      label.append(select);
-      document.body.append(label);
-      dropdown.selectEl = select;
-      dropdown.addOption.mockImplementation((value: string, text: string) => {
-        select.add(new Option(text, value));
-        return dropdown;
-      });
-      dropdown.setValue.mockImplementation((value: string) => {
-        select.value = value;
-        return dropdown;
-      });
-      dropdown.onChange.mockImplementation((handler: (value: string) => Promise<void>) => {
-        select.addEventListener('change', () => { void handler(select.value); });
-        return dropdown;
-      });
-      callback(dropdown);
-      return this;
-    }
-
-    addToggle(callback: (toggle: MockToggleComponent) => void): this {
-      const toggle = createToggleComponent();
-      toggle.onChange.mockImplementation((handler: (value: boolean) => Promise<void>) => {
-        mockToggleChanges.set(this.name, handler);
-        return toggle;
-      });
-      callback(toggle);
-      return this;
-    }
-
-    addText(callback: (text: Record<string, unknown>) => void): this {
-      const text = createTextComponent();
-      (text.onChange as Mock).mockImplementation(
-        (handler: (value: string) => Promise<void>) => {
-          mockTextChanges.set(this.name, handler);
-          return text;
-        },
-      );
-      callback(text);
-      return this;
-    }
-
-    addTextArea(callback: (text: Record<string, unknown>) => void): this {
-      callback(createTextComponent('textarea'));
-      return this;
-    }
-
-    addSlider(callback: (slider: MockChainableComponent) => void): this {
-      callback(createChainableComponent());
-      return this;
-    }
-  }
-
-  function createGitStatusElement(parent: 'control' | 'name') {
-    const element = {
-      attributes: new Map<string, string>(),
-      className: '',
-      parent,
-      setAttribute(name: string, value: string) {
-        this.attributes.set(name, value);
-      },
-      title: '',
-    };
-    mockGitStatusElements.push(element);
-    return element;
-  }
-
-  function createChainableComponent(): MockChainableComponent {
-    const component: MockChainableComponent = {};
-    for (const method of [
-      'addOption',
-      'setValue',
-      'onChange',
-      'setPlaceholder',
-      'setLimits',
-      'setDynamicTooltip',
-    ]) {
-      component[method] = vi.fn(() => component);
-    }
-    return component;
-  }
-
-  // AccessibleSetting.addToggle wraps the control via exposeToggleState, which
-  // reads control.toggleEl (a real element containing an <input>) plus the
-  // value/disabled API. Model those so the merged accessibility wrapper runs.
-  function createToggleComponent(): MockToggleComponent {
-    const toggleEl = document.createElement('label');
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    toggleEl.append(input);
-    const component = createChainableComponent() as MockToggleComponent;
-    component.toggleEl = toggleEl;
-    component.disabled = false;
-    let value = false;
-    component.getValue = vi.fn(() => value);
-    (component.setValue as Mock).mockImplementation((next: boolean) => {
-      value = next;
-      return component;
-    });
-    component.setDisabled = vi.fn((next: boolean) => {
-      component.disabled = next;
-      return component;
-    });
-    return component;
-  }
-
-  function createTextComponent(tag: 'input' | 'textarea' = 'input'): Record<string, unknown> {
-    const inputEl = document.createElement(tag);
-    inputEl.addClass = (...classes) => inputEl.classList.add(...classes);
-    return {
-      ...createChainableComponent(),
-      inputEl,
-    };
-  }
-
-  return {
-    ...obsidian,
-    Setting: MockSetting,
-  };
-});
-
-
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@test/helpers/defaultSettings';
+import { controlChangeSettled } from '@test/helpers/ObsidianHost';
+import { partialMock } from '@test/helpers/partialMock';
+import { fireEvent, waitFor, within } from '@testing-library/dom';
+import { App, type Plugin, type Setting } from 'obsidian';
 import type { Mock } from 'vitest';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
+import type { ClaudianSettings } from '@/core/types';
+import type { FeatureHost } from '@/features/FeatureHost';
 import { ClaudianSettingTab } from '@/features/settings/ClaudianSettings';
 import { t } from '@/i18n/i18n';
 
+interface TestPlugin {
+  settings: ClaudianSettings;
+  mutateSettings: Mock;
+  getAllViews: Mock;
+  notifyAgentSkillsChanged: Mock;
+  notifyProviderChatOptionsChanged?: Mock;
+  storage: { getAdapter: Mock };
+  providerHost: { settings: ClaudianSettings; getEnvironmentVariablesForScope: Mock; applyEnvironmentVariables: Mock };
+}
 
-
-function createTab(enableDualPane: boolean): {
-  tab: ClaudianSettingTab;
-  plugin: Record<string, any>;
-} {
-  const settings = { ...DEFAULT_CLAUDIAN_SETTINGS, enableDualPane };
-  const plugin = {
+function createTab(enableDualPane: boolean): { tab: ClaudianSettingTab; plugin: TestPlugin } {
+  const settings = { ...structuredClone(DEFAULT_CLAUDIAN_SETTINGS), enableDualPane };
+  const plugin: TestPlugin = {
     settings,
-    mutateSettings: vi.fn(async (mutation: (value: typeof settings) => void) => {
+    mutateSettings: vi.fn(async (mutation: (value: ClaudianSettings) => void) => {
       mutation(settings);
     }),
     getAllViews: vi.fn(() => [{ refreshDualPaneLayout: vi.fn() }]),
@@ -218,76 +45,15 @@ function createTab(enableDualPane: boolean): {
   };
 
   return {
-    tab: new ClaudianSettingTab({} as any, {} as any, plugin as any),
+    tab: new ClaudianSettingTab(new App(), partialMock<Plugin>({}), partialMock<FeatureHost>(plugin)),
     plugin,
   };
 }
 
-interface MockContainer extends Record<string, any> {
-  readonly children: MockContainer[];
-  readonly text?: string;
-  click(): void;
-}
-
-function createContainer(options: { text?: string; cls?: string } = {}): MockContainer {
-  const listeners = new Map<string, () => void>();
-  const children: MockContainer[] = [];
-  const attributes = new Map<string, string>();
-  const element: MockContainer = {
-    attributes,
-    children,
-    classList: {
-      contains: (name: string) => options?.cls?.split(' ').includes(name) ?? false,
-      add: vi.fn(),
-      remove: vi.fn(),
-    },
-    ...options,
-    click: () => listeners.get('click')?.(),
-    createSpan: vi.fn((childOptions?: { text?: string }) => {
-      const child = createContainer(childOptions);
-      children.push(child);
-      return child;
-    }),
-    createEl: vi.fn((_tag: string, childOptions?: { text?: string }) => {
-      const child = createContainer(childOptions);
-      children.push(child);
-      return child;
-    }),
-    addEventListener: vi.fn((event: string, listener: () => void) => {
-      listeners.set(event, listener);
-    }),
-    addClass: vi.fn(),
-    removeClass: vi.fn(),
-    setAttribute: vi.fn((name: string, value: string) => {
-      attributes.set(name, value);
-    }),
-    toggleClass: vi.fn(),
-    title: '',
-    empty: vi.fn(),
-    setText: vi.fn(),
-  };
-  element.createDiv = vi.fn((childOptions?: { text?: string }) => {
-    const child = createContainer(childOptions);
-    children.push(child);
-    return child;
-  });
-  return element;
-}
-
-function findContainer(root: MockContainer, text: string): MockContainer | null {
-  if (root.text === text) return root;
-  for (const child of root.children) {
-    const match = findContainer(child, text);
-    if (match) return match;
-  }
-  return null;
-}
-
-
 function renderSettingsTab(
   tab: ClaudianSettingTab,
-  container = createContainer(),
-): MockContainer {
+  container = document.body.createDiv(),
+): HTMLElement {
   const [definition] = tab.getSettingDefinitions();
   if (
     !definition
@@ -298,22 +64,23 @@ function renderSettingsTab(
   }
 
   definition.render(
-    { settingEl: container } as never,
-    {} as never,
+    partialMock<Setting>({ settingEl: container }),
+    partialMock<Parameters<typeof definition.render>[1]>({}),
   );
   return container;
 }
 
-describe('ClaudianSettingTab display settings', () => {
-  beforeEach(() => {
-    document.body.replaceChildren();
-    mockRenderedSettingNames.length = 0;
-    mockSettingDescriptionEls.clear();
-    mockGitStatusElements.length = 0;
-    mockToggleChanges.clear();
-    mockTextChanges.clear();
-  });
+function toggleOf(container: HTMLElement, name: string): HTMLElement {
+  return within(container).getByRole('switch', { name });
+}
 
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  document.body.replaceChildren();
+});
+
+describe('ClaudianSettingTab display settings', () => {
   it('shows title eligibility guidance and updates it after selection and catalog changes', async () => {
     vi.spyOn(ProviderRegistry, 'getTitleGenerationModelOptions').mockReturnValue([
       { value: 'claude-code/sonnet', label: 'Claude: Sonnet' },
@@ -325,7 +92,7 @@ describe('ClaudianSettingTab display settings', () => {
     plugin.settings.titleGenerationModel = '';
     renderSettingsTab(tab);
     expect(within(document.body).getByRole('status').textContent).toBe(t('settings.titleModel.unavailableWarning'));
-    const menu = within(document.body).getByRole('combobox', { name: t('settings.titleModel.name') }) as HTMLSelectElement;
+    const menu = within(document.body).getByRole<HTMLSelectElement>('combobox', { name: t('settings.titleModel.name') });
     expect(within(menu).queryByRole('option', { name: /Auto/ })).toBeNull();
     expect(menu.value).toBe('');
     expect(menu.options[0].disabled).toBe(true);
@@ -353,7 +120,6 @@ describe('ClaudianSettingTab display settings', () => {
 
   it('renders the custom settings surface through a declarative definition', () => {
     const { tab } = createTab(true);
-    const container = createContainer();
     const [definition] = tab.getSettingDefinitions();
 
     expect(definition).toEqual(expect.objectContaining({
@@ -362,13 +128,12 @@ describe('ClaudianSettingTab display settings', () => {
     }));
     expect(Object.hasOwn(ClaudianSettingTab.prototype, 'display')).toBe(false);
 
-    renderSettingsTab(tab, container);
+    const container = renderSettingsTab(tab);
 
-    expect(container.empty).toHaveBeenCalledTimes(1);
-    expect(container.addClass).toHaveBeenCalledWith('claudian-settings');
-    expect(findContainer(container, t('settings.tabs.general'))).not.toBeNull();
-    expect(findContainer(container, t('settings.tabs.providers'))).not.toBeNull();
-    expect(findContainer(container, t('settings.tabs.skills'))).toBeNull();
+    expect(container.classList.contains('claudian-settings')).toBe(true);
+    expect(within(container).getByRole('button', { name: t('settings.tabs.general') })).toBeDefined();
+    expect(within(container).getByRole('button', { name: t('settings.tabs.providers') })).toBeDefined();
+    expect(within(container).queryByRole('button', { name: t('settings.tabs.skills') })).toBeNull();
   });
 
   it('saves timestamp preferences through the application settings owner', async () => {
@@ -377,17 +142,20 @@ describe('ClaudianSettingTab display settings', () => {
     const secondView = { refreshMessageTimestamps: vi.fn() };
     plugin.getAllViews.mockReturnValue([firstView, secondView]);
     let finishSave!: () => void;
-    plugin.mutateSettings.mockImplementation(async (mutation: (settings: typeof plugin.settings) => void) => {
+    plugin.mutateSettings.mockImplementation(async (mutation: (settings: ClaudianSettings) => void) => {
       mutation(plugin.settings);
       await new Promise<void>(resolve => { finishSave = resolve; });
     });
-    (tab as any).renderGeneralTab(createContainer());
+    const container = document.body.createDiv();
+    tab['renderGeneralTab'](container);
 
-    const change = mockToggleChanges.get(t('settings.showMessageTimestamps.name'))!(true);
+    const toggle = toggleOf(container, t('settings.showMessageTimestamps.name'));
+    fireEvent.click(toggle);
+    await waitFor(() => expect(plugin.mutateSettings).toHaveBeenCalledTimes(1));
     expect(firstView.refreshMessageTimestamps).not.toHaveBeenCalled();
     expect(secondView.refreshMessageTimestamps).not.toHaveBeenCalled();
     finishSave();
-    await change;
+    await controlChangeSettled(toggle);
 
     expect(plugin.settings.showMessageTimestamps).toBe(true);
     expect(plugin.mutateSettings).toHaveBeenCalledTimes(1);
@@ -395,25 +163,28 @@ describe('ClaudianSettingTab display settings', () => {
 
   it('renders the dual-pane position only while dual-pane mode is enabled', () => {
     const enabled = createTab(true);
-    (enabled.tab as any).renderGeneralTab(createContainer());
+    const enabledContainer = document.body.createDiv();
+    enabled.tab['renderGeneralTab'](enabledContainer);
 
-    expect(mockRenderedSettingNames).toContain(t('settings.dualPaneSide.name'));
+    expect(within(enabledContainer).getByText(t('settings.dualPaneSide.name'))).toBeDefined();
 
-    document.body.replaceChildren();
-    mockRenderedSettingNames.length = 0;
     const disabled = createTab(false);
-    (disabled.tab as any).renderGeneralTab(createContainer());
+    const disabledContainer = document.body.createDiv();
+    disabled.tab['renderGeneralTab'](disabledContainer);
 
-    expect(mockRenderedSettingNames).not.toContain(t('settings.dualPaneSide.name'));
-    expect(mockRenderedSettingNames).toContain(t('settings.restoreTabsOnStartup.name'));
+    expect(within(disabledContainer).queryByText(t('settings.dualPaneSide.name'))).toBeNull();
+    expect(within(disabledContainer).getByText(t('settings.restoreTabsOnStartup.name'))).toBeDefined();
   });
 
   it('rerenders display settings after dual-pane mode changes', async () => {
     const { tab, plugin } = createTab(true);
     const update = vi.spyOn(tab, 'update').mockImplementation(() => undefined);
-    (tab as any).renderGeneralTab(createContainer());
+    const container = document.body.createDiv();
+    tab['renderGeneralTab'](container);
 
-    await mockToggleChanges.get(t('settings.enableDualPane.name'))?.(false);
+    const toggle = toggleOf(container, t('settings.enableDualPane.name'));
+    fireEvent.click(toggle);
+    await controlChangeSettled(toggle);
 
     expect(plugin.settings.enableDualPane).toBe(false);
     expect(update).toHaveBeenCalledTimes(1);
@@ -424,12 +195,14 @@ describe('ClaudianSettingTab display settings', () => {
     ['enableZenMode', 'settings.enableZenMode.name'],
   ] as const)('renders and updates the %s toggle', async (key, name) => {
     const { tab, plugin } = createTab(true);
-    (tab as any).renderGeneralTab(createContainer());
+    const container = document.body.createDiv();
+    tab['renderGeneralTab'](container);
 
-    expect(mockRenderedSettingNames).toContain(t(name));
     expect(plugin.settings[key]).toBe(true);
 
-    await mockToggleChanges.get(t(name))!(false);
+    const toggle = toggleOf(container, t(name));
+    fireEvent.click(toggle);
+    await controlChangeSettled(toggle);
 
     expect(plugin.settings[key]).toBe(false);
   });
@@ -453,7 +226,7 @@ describe('ClaudianSettingTab display settings', () => {
     renderSettingsTab(tab);
     expect(ensureInitialized).not.toHaveBeenCalled();
 
-    (tab as any).activeTab = 'providers';
+    tab['activeTab'] = 'providers';
     renderSettingsTab(tab);
     await Promise.resolve();
     await Promise.resolve();
@@ -481,16 +254,15 @@ describe('ClaudianSettingTab display settings', () => {
     ensureInitialized.mockClear();
     vi.spyOn(ProviderWorkspaceRegistry, 'getSettingsTabRenderer').mockReturnValue(null);
     const { tab } = createTab(true);
-    const container = createContainer();
-    (tab as any).activeTab = 'providers';
+    tab['activeTab'] = 'providers';
 
-    renderSettingsTab(tab, container);
+    const container = renderSettingsTab(tab);
     await Promise.resolve();
     await Promise.resolve();
-    findContainer(container, 'CODEX')?.click();
+    fireEvent.click(within(container).getByText('CODEX'));
     await Promise.resolve();
     await Promise.resolve();
-    findContainer(container, 'CLAUDE')?.click();
+    fireEvent.click(within(container).getByText('CLAUDE'));
     await Promise.resolve();
 
     expect(ensureInitialized).toHaveBeenCalledTimes(2);
@@ -512,63 +284,52 @@ describe('ClaudianSettingTab display settings', () => {
     });
     const { tab, plugin } = createTab(true);
     plugin.notifyProviderChatOptionsChanged = vi.fn();
-    const container = createContainer();
-    (tab as any).activeTab = 'providers';
+    tab['activeTab'] = 'providers';
 
-    renderSettingsTab(tab, container);
+    const container = renderSettingsTab(tab);
     await waitFor(() => expect(notify).not.toBeNull());
-    const content = findByClass(container, 'claudian-settings-provider-content')!;
-    const collapsed = (): boolean | undefined => content.toggleClass.mock.calls
-      .filter(([name]: [string]) => name === 'claudian-settings-provider-content--disabled')
-      .at(-1)?.[1];
-    expect(collapsed()).toBe(true);
+    const content = container.querySelector('.claudian-settings-provider-content')!;
+    const disabledClass = 'claudian-settings-provider-content--disabled';
+    expect(content.classList.contains(disabledClass)).toBe(true);
 
     enabled = true;
     notify!('kiro');
-    expect(collapsed()).toBe(false);
+    expect(content.classList.contains(disabledClass)).toBe(false);
   });
 });
 
-function findByClass(root: MockContainer, cls: string): MockContainer | null {
-  if ((root.cls as string | undefined)?.split(' ').includes(cls)) return root;
-  for (const child of root.children) {
-    const match = findByClass(child, cls);
-    if (match) return match;
-  }
-  return null;
-}
-
 it('batches a burst of text edits into one settings mutation and flushes on teardown', async () => {
-  vi.useFakeTimers();
   const { tab, plugin } = createTab(false);
-  const cleanup = (tab as any).renderSettings(createContainer());
+  const container = document.body.createDiv();
+  const cleanup = tab['renderSettings'](container);
+  vi.useFakeTimers();
   try {
-    const change = mockTextChanges.get(t('settings.userName.name'))!;
-    for (let index = 0; index < 20; index++) await change(`Name ${index}`);
+    const input = within(container).getByRole('textbox', { name: t('settings.userName.name') });
+    for (let index = 0; index < 20; index++) fireEvent.input(input, { target: { value: `Name ${index}` } });
     expect(plugin.mutateSettings).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(500);
     expect(plugin.mutateSettings).toHaveBeenCalledTimes(1);
     expect(plugin.settings.userName).toBe('Name 19');
-    await change('Last edit');
+    fireEvent.input(input, { target: { value: 'Last edit' } });
     cleanup();
     await Promise.resolve();
     expect(plugin.settings.userName).toBe('Last edit');
     await vi.advanceTimersByTimeAsync(1000);
     expect(plugin.mutateSettings).toHaveBeenCalledTimes(2);
-  } finally { cleanup(); vi.useRealTimers(); }
+  } finally { cleanup(); }
 });
 
 it('renders the General and Providers tabs, but no top-level Skills or Projects tab', () => {
   const { tab } = createTab(false);
-  const container = createContainer();
-  const cleanup = (tab as any).renderSettings(container);
+  const container = document.body.createDiv();
+  const cleanup = tab['renderSettings'](container);
   try {
     // Skills moved under the per-provider settings tab; the main settings has no
     // standalone Skills or Projects tab, and the doc folder is chosen per project.
-    expect(findByClass(container, 'claudian-settings-general')).not.toBeNull();
-    expect(findByClass(container, 'claudian-settings-provider-tabs')).not.toBeNull();
-    expect(findByClass(container, 'claudian-settings-skills')).toBeNull();
-    expect(findByClass(container, 'claudian-settings-projects')).toBeNull();
-    expect(findContainer(container, 'Projects')).toBeNull();
+    expect(container.querySelector('.claudian-settings-general')).not.toBeNull();
+    expect(container.querySelector('.claudian-settings-provider-tabs')).not.toBeNull();
+    expect(container.querySelector('.claudian-settings-skills')).toBeNull();
+    expect(container.querySelector('.claudian-settings-projects')).toBeNull();
+    expect(within(container).queryByText('Projects')).toBeNull();
   } finally { cleanup(); }
 });
