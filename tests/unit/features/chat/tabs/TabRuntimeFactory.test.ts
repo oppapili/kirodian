@@ -37,11 +37,20 @@ import {
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
-const coordinatorInstances: MockCoordinator[] = [];
-const coordinatorDeps: ChatExecutionCoordinatorDeps[] = [];
-const titleServiceInstances: Array<{ cancel: Mock }> = [];
+// Vitest hoists vi.mock factories above module init, so state the factories
+// touch is created through vi.hoisted (which runs before everything else).
+const mockState = vi.hoisted(() => ({
+  coordinatorInstances: [] as unknown[],
+  coordinatorDeps: [] as unknown[],
+  titleServiceInstances: [] as Array<{ cancel: unknown }>,
+  ensureInitialized: vi.fn().mockResolvedValue(undefined),
+  coordinatorDisposeError: null as Error | null,
+}));
+const coordinatorInstances = mockState.coordinatorInstances as MockCoordinator[];
+const coordinatorDeps = mockState.coordinatorDeps as ChatExecutionCoordinatorDeps[];
+const titleServiceInstances = mockState.titleServiceInstances as Array<{ cancel: Mock }>;
+const ensureInitialized = mockState.ensureInitialized;
 const pools: SessionRuntimePool[] = [];
-let coordinatorDisposeError: Error | null = null;
 
 interface MockCoordinator {
   execute: Mock;
@@ -56,33 +65,36 @@ interface MockCoordinator {
   state: 'absent' | 'idle' | 'active' | 'stale' | 'disposed';
 }
 
-vi.mock('@/features/chat/execution/ChatExecutionCoordinator', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/features/chat/execution/ChatExecutionCoordinator')>()),
-  ChatExecutionCoordinator: vi.fn().mockImplementation((deps) => {
-    const coordinator: MockCoordinator = {
-      execute: vi.fn().mockResolvedValue({ status: 'completed', accepted: true }),
-      getCommandSnapshot: vi.fn().mockReturnValue(undefined),
-      bindConversation: vi.fn().mockResolvedValue(undefined),
-      cancel: vi.fn(),
-      dispose: vi.fn().mockImplementation(() => coordinatorDisposeError
-        ? Promise.reject(coordinatorDisposeError)
-        : Promise.resolve()),
-      isEventContextCurrent: vi.fn().mockReturnValue(true),
-      prepare: vi.fn().mockResolvedValue(undefined),
-      resolveForkSource: vi.fn().mockResolvedValue({ sessionId: 'native-session' }),
-      snapshot: null,
-      state: 'absent',
-    };
-    coordinatorDeps.push(deps);
-    coordinatorInstances.push(coordinator);
-    return coordinator;
-  }),
-}));
-
-const ensureInitialized = vi.fn().mockResolvedValue(undefined);
+vi.mock('@/features/chat/execution/ChatExecutionCoordinator', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/chat/execution/ChatExecutionCoordinator')>();
+  // Vitest cannot `new` a vi.fn()-with-arrow-implementation, so the mocked
+  // coordinator is a real class whose constructor returns the mock object.
+  class MockChatExecutionCoordinator {
+    constructor(deps: unknown) {
+      const coordinator: MockCoordinator = {
+        execute: vi.fn().mockResolvedValue({ status: 'completed', accepted: true }),
+        getCommandSnapshot: vi.fn().mockReturnValue(undefined),
+        bindConversation: vi.fn().mockResolvedValue(undefined),
+        cancel: vi.fn(),
+        dispose: vi.fn().mockImplementation(() => mockState.coordinatorDisposeError
+          ? Promise.reject(mockState.coordinatorDisposeError)
+          : Promise.resolve()),
+        isEventContextCurrent: vi.fn().mockReturnValue(true),
+        prepare: vi.fn().mockResolvedValue(undefined),
+        resolveForkSource: vi.fn().mockResolvedValue({ sessionId: 'native-session' }),
+        snapshot: null,
+        state: 'absent',
+      };
+      mockState.coordinatorDeps.push(deps);
+      mockState.coordinatorInstances.push(coordinator);
+      return coordinator as unknown as MockChatExecutionCoordinator;
+    }
+  }
+  return { ...actual, ChatExecutionCoordinator: MockChatExecutionCoordinator };
+});
 vi.mock('@/core/providers/ProviderWorkspaceRegistry', () => ({
   ProviderWorkspaceRegistry: {
-    ensureInitialized: (...args: unknown[]) => ensureInitialized(...args),
+    ensureInitialized: (...args: unknown[]) => mockState.ensureInitialized(...args),
     getCommandCatalog: vi.fn().mockReturnValue(null),
     getIfInitialized: vi.fn().mockReturnValue(null),
     getCommandLoader: vi.fn().mockReturnValue(null),
@@ -98,7 +110,7 @@ vi.mock('@/core/providers/ProviderRegistry', () => ({
         cancel: vi.fn(),
         generateTitle: vi.fn().mockResolvedValue(undefined),
       };
-      titleServiceInstances.push(service);
+      mockState.titleServiceInstances.push(service);
       return service;
     }),
     getCapabilities: vi.fn().mockReturnValue({
@@ -361,7 +373,7 @@ describe('Tab provider execution ownership', () => {
     coordinatorInstances.length = 0;
     coordinatorDeps.length = 0;
     titleServiceInstances.length = 0;
-    coordinatorDisposeError = null;
+    mockState.coordinatorDisposeError = null;
     vi.clearAllMocks();
     const uiConfig = ProviderRegistry.getChatUIConfig('claude');
     (uiConfig.getDefaultModel as Mock).mockReturnValue('claude-default');
@@ -369,10 +381,7 @@ describe('Tab provider execution ownership', () => {
       { label: 'Claude Default', value: 'claude-default' },
       { label: 'Claude Alternate', value: 'claude-alternate' },
     ]);
-    globalThis.ResizeObserver = vi.fn().mockImplementation(() => ({
-      disconnect: vi.fn(),
-      observe: vi.fn(),
-    })) as unknown as typeof ResizeObserver;
+    globalThis.ResizeObserver = vi.fn().mockImplementation(function () { return { disconnect: vi.fn(), observe: vi.fn() }; }) as unknown as typeof ResizeObserver;
   });
 
   afterEach(async () => {
@@ -1258,9 +1267,7 @@ describe('Tab provider execution ownership', () => {
     const originalResizeObserver = globalThis.ResizeObserver;
     const assemblyError = new Error('resize observer failed');
     const tabId = 'ui-failure';
-    globalThis.ResizeObserver = vi.fn().mockImplementation(() => {
-      throw assemblyError;
-    }) as unknown as typeof ResizeObserver;
+    globalThis.ResizeObserver = vi.fn().mockImplementation(function () { throw assemblyError; }) as unknown as typeof ResizeObserver;
     const plugin = createPlugin();
     const { containerEl, removeTabRoot } = createTrackedTabContainer();
     const onTabCreated = vi.fn();
@@ -1286,10 +1293,7 @@ describe('Tab provider execution ownership', () => {
     const controllerError = new Error('controller construction failed');
     const tabId = 'controller-failure';
     const disconnect = vi.fn();
-    globalThis.ResizeObserver = vi.fn().mockImplementation(() => ({
-      disconnect,
-      observe: vi.fn(),
-    })) as unknown as typeof ResizeObserver;
+    globalThis.ResizeObserver = vi.fn().mockImplementation(function () { return { disconnect, observe: vi.fn() }; }) as unknown as typeof ResizeObserver;
     const { containerEl, removeTabRoot } = createTrackedTabContainer();
     const onTabCreated = vi.fn();
     const manager = createTabManager(createPlugin(), containerEl, { onTabCreated }, {
@@ -1314,10 +1318,7 @@ describe('Tab provider execution ownership', () => {
     const wiringError = new Error('input wiring failed');
     const tabId = 'input-failure';
     const disconnect = vi.fn();
-    globalThis.ResizeObserver = vi.fn().mockImplementation(() => ({
-      disconnect,
-      observe: vi.fn(),
-    })) as unknown as typeof ResizeObserver;
+    globalThis.ResizeObserver = vi.fn().mockImplementation(function () { return { disconnect, observe: vi.fn() }; }) as unknown as typeof ResizeObserver;
     const originalInitialize = NavigationController.prototype.initialize;
     const initializeSpy = vi
       .spyOn(NavigationController.prototype, 'initialize')
@@ -1357,9 +1358,7 @@ describe('Tab provider execution ownership', () => {
     const assemblyError = new Error('UI construction failed');
     const rollbackError = new Error('DOM cleanup failed');
     const tabId = 'rollback-failure';
-    globalThis.ResizeObserver = vi.fn().mockImplementation(() => {
-      throw assemblyError;
-    }) as unknown as typeof ResizeObserver;
+    globalThis.ResizeObserver = vi.fn().mockImplementation(function () { throw assemblyError; }) as unknown as typeof ResizeObserver;
     const { containerEl, removeTabRoot } = createTrackedTabContainer();
     removeTabRoot.mockImplementation(() => { throw rollbackError; });
     const manager = createTabManager(createPlugin(), containerEl);
@@ -2348,10 +2347,7 @@ describe('Tab provider execution ownership', () => {
   it('continues teardown after a cleanup failure without reacquiring or retrying resources', async () => {
     const cleanupError = new Error('navigation cleanup failed');
     const disconnect = vi.fn();
-    globalThis.ResizeObserver = vi.fn().mockImplementation(() => ({
-      disconnect,
-      observe: vi.fn(),
-    })) as unknown as typeof ResizeObserver;
+    globalThis.ResizeObserver = vi.fn().mockImplementation(function () { return { disconnect, observe: vi.fn() }; }) as unknown as typeof ResizeObserver;
     const { containerEl, removeTabRoot } = createTrackedTabContainer();
     const tab = await createTestTab({ plugin: createPlugin(), containerEl: containerEl as any });
     const failedDispose = vi.fn(() => {
