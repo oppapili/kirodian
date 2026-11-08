@@ -1,7 +1,7 @@
 {
   "name": "kirodian",
   "version": "0.4.1",
-  "claudianVersion": "2.3.36",
+  "claudianVersion": "2.3.37",
   "description": "Kirodian - Kiro CLI and other coding agents embedded in Obsidian (fork of Claudian)",
   "main": "main.js",
   "engines": {
@@ -12,7 +12,7 @@
     "build:css": "node scripts/build-css.mjs",
     "dev": "npm run build:css && node esbuild.config.mjs",
     "build": "node scripts/build.mjs production",
-    "check:lockfile": "bun install --frozen-lockfile --ignore-scripts",
+    "check:lockfile": "bun install --frozen-lockfile --ignore-scripts && node scripts/check-lockfile-parity.mjs",
     "check:open-handles": "node scripts/check-open-handles.mjs",
     "check:performance": "node scripts/check-startup-performance.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tests/tsconfig.json",
@@ -26,7 +26,9 @@
     "test:coverage": "node scripts/run-vitest.js --coverage",
     "preversion": "bun install --frozen-lockfile",
     "version": "node scripts/sync-version.js && git add manifest.json versions.json",
-    "test:cross-platform": "node scripts/run-cross-platform-tests.js"
+    "test:cross-platform": "node scripts/run-cross-platform-tests.js",
+    "mutation": "node scripts/run-mutation.mjs",
+    "smoke:obsidian": "node scripts/run-obsidian-smoke.mjs"
   },
   "keywords": [
     "claude-code",
@@ -42,7 +44,6 @@
     "@eslint/js": "^10.0.1",
     "@testing-library/dom": "^10.4.1",
     "@types/cross-spawn": "6.0.6",
-    "@types/js-yaml": "^4.0.9",
     "@types/jsdom": "^21.1.7",
     "@types/node": "^25.5.2",
     "@types/ws": "8.18.1",

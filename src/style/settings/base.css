@@ -260,51 +260,11 @@
   flex-shrink: 0;
 }
 
-.claudian-sp-advanced-section {
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  padding: 0 12px;
-  margin: 8px 0;
+/* Focus lives on the native switch input; keep the host's visible toggle ring. */
+.claudian-setting-toggle:focus-within {
+  outline: var(--toggle-s-border-width) solid var(--background-modifier-border-focus);
 }
 
-.claudian-sp-advanced-summary {
-  cursor: pointer;
-  padding: 8px 0;
-  font-size: var(--font-ui-small);
-  color: var(--text-muted);
-  font-weight: var(--font-medium);
-}
-
-.claudian-sp-advanced-section[open] .claudian-sp-advanced-summary {
-  margin-bottom: 4px;
-}
-
-.claudian-sp-modal .modal-content {
-  max-width: 600px;
-  width: auto;
-}
-
-.claudian-sp-content-area {
-  width: 100%;
-  font-family: var(--font-monospace);
-  font-size: 13px;
-  padding: 8px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
-  background: var(--background-primary);
-  color: var(--text-normal);
-  resize: vertical;
-  margin-top: 8px;
-}
-
-.claudian-sp-content-area:focus {
-  outline: none;
-  border-color: var(--interactive-accent);
-}
-
-.claudian-sp-modal-buttons {
-  display: flex;
-  gap: 8px;
-  margin-top: 16px;
-  justify-content: flex-end;
+.modal .claudian-setting-toggle:focus-within {
+  outline-width: var(--toggle-border-width);
 }

@@ -1,4 +1,4 @@
-import { type App, Modal, Notice, setIcon, Setting } from 'obsidian';
+import { type App, Notice, setIcon } from 'obsidian';
 
 import {
   ManagedResourcePathError,
@@ -16,6 +16,8 @@ import {
 } from '@/features/agent-skills/AgentSkillRepository';
 import { AgentSkillValidationError } from '@/features/agent-skills/validateAgentSkill';
 import { t } from '@/i18n/i18n';
+import { AccessibleModal } from '@/shared/modals/AccessibleModal';
+import { AccessibleSetting } from '@/shared/settings/AccessibleSetting';
 
 function errorMessage(error: unknown): string {
   if (
@@ -54,7 +56,7 @@ interface AgentSkillEditorOptions {
   successMessage(name: string): string;
 }
 
-class AgentSkillModal extends Modal {
+class AgentSkillModal extends AccessibleModal {
   private nameInput!: HTMLInputElement;
   private descriptionInput!: HTMLInputElement;
   private instructionsArea!: HTMLTextAreaElement;
@@ -77,7 +79,7 @@ class AgentSkillModal extends Modal {
       });
     }
 
-    new Setting(this.contentEl)
+    new AccessibleSetting(this.contentEl)
       .setName(t('settings.agentSkills.modal.name'))
       .setDesc(this.options.nameDesc ?? t('settings.agentSkills.modal.nameDesc'))
       .addText(text => {
@@ -88,7 +90,7 @@ class AgentSkillModal extends Modal {
           .setPlaceholder(t('settings.agentSkills.modal.namePlaceholder'));
       });
 
-    new Setting(this.contentEl)
+    new AccessibleSetting(this.contentEl)
       .setName(t('settings.agentSkills.modal.description'))
       .setDesc(this.options.descriptionDesc ?? t('settings.agentSkills.modal.descriptionDesc'))
       .addText(text => {
@@ -99,7 +101,7 @@ class AgentSkillModal extends Modal {
           .setPlaceholder(t('settings.agentSkills.modal.descriptionPlaceholder'));
       });
 
-    new Setting(this.contentEl)
+    new AccessibleSetting(this.contentEl)
       .setName(t('settings.agentSkills.modal.instructions'))
       .setDesc(t('settings.agentSkills.modal.instructionsDesc'));
 
@@ -172,7 +174,7 @@ interface AgentSkillDeleteOptions {
   successMessage: string;
 }
 
-class AgentSkillDeleteModal extends Modal {
+class AgentSkillDeleteModal extends AccessibleModal {
   constructor(app: App, private readonly options: AgentSkillDeleteOptions) {
     super(app);
   }

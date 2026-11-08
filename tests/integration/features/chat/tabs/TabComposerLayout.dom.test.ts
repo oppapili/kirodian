@@ -2,9 +2,9 @@
 import '@/providers';
 
 import { axe } from '@test/helpers/accessibility';
-import { holdResponse } from '@test/helpers/ConversationPorts';
-import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
-import { createHarness, releaseSideChatHarnesses } from '@test/helpers/features/chat/SideChatDOMHarness';
+import { createChatFeatureHost } from '@test/helpers/features/chat/ChatFeatureHostFixture';
+import { createSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
+import { createHarness, releaseSideChatHarnesses, type SideChatDOMHarness } from '@test/helpers/features/chat/SideChatDOMHarness';
 import { fireEvent, within } from '@testing-library/dom';
 import { App, Component, TFile } from 'obsidian';
 
@@ -16,12 +16,7 @@ import { createTabRuntime } from '@/features/chat/tabs/TabRuntimeFactory';
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
-const originalResizeObserver = globalThis.ResizeObserver;
-beforeEach(() => {
-  globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
-});
 afterEach(async () => {
-  globalThis.ResizeObserver = originalResizeObserver;
   vi.restoreAllMocks();
   await releaseSideChatHarnesses();
 });
@@ -30,8 +25,11 @@ const note = Object.assign(new TFile(), {
   path: 'Notes/Plan.md', name: 'Plan.md', basename: 'Plan', extension: 'md',
 });
 
+let backend: SideChatDOMHarness['backend'];
+
 async function createTab(linkedContentPath?: string): Promise<AssembledTabRuntime> {
-  const harness = createHarness();
+  const harness = await createHarness();
+  backend = harness.backend;
   const app = new App();
   Object.assign(app.vault.adapter, { basePath: '/vault' });
   Object.assign(app.vault, {
@@ -44,8 +42,14 @@ async function createTab(linkedContentPath?: string): Promise<AssembledTabRuntim
     sessionId: 'main-session', messages: harness.tab.state.messages,
     ...(linkedContentPath ? { linkedContentPath } : {}),
   } as Conversation;
-  const plugin = {
-    ...(harness.plugin as ChatFeatureHost),
+  const pool = createSessionRuntimePool(() => plugin);
+  const plugin: ChatFeatureHost = await createChatFeatureHost({
+    executionPersistence: {
+      registerExecutionBinding() {}, releaseExecutionBinding() {},
+      assertConversationExecutionAuthority: async () => undefined,
+      persistExecutionSnapshot: async () => true, recordConversationActivity: async () => undefined,
+    },
+    providerHost: harness.plugin.providerHost, bindSessionTools: harness.plugin.bindSessionTools, projects: harness.plugin.projects, sessionRuntimes: pool,
     app,
     getCommittedSettings: () => plugin.settings,
     settings: {
@@ -56,9 +60,9 @@ async function createTab(linkedContentPath?: string): Promise<AssembledTabRuntim
     getActiveEnvironmentVariables: () => '',
     getConversationSummary: () => conversation,
     getConversationSync: () => conversation,
-    getConversationList: () => [conversation],
-  } as unknown as ChatFeatureHost;
-  if (!plugin.sessionRuntimes) installSessionRuntimePool(plugin);
+    getConversationById: async () => conversation,
+    getConversationList: () => [{ ...conversation, messageCount: conversation.messages.length, preview: '' }],
+  });
   const tab = await createTabRuntime({
     plugin,
     component: Object.assign(new Component(), { registerDomEvent: () => undefined, registerEvent: () => undefined }) as never,
@@ -94,7 +98,10 @@ it('attaches a queued follow-up to the top of the input box, under the tab bar',
     vi.spyOn(ProviderRegistry, 'getCapabilities').mockReturnValue({
       ...ProviderRegistry.getCapabilities('kiro'), supportsTurnSteer: true,
     });
-    const releaseTurn = holdResponse(tab.session.turns);
+    // A real provider handoff gives the coordinator the active execution that admits steering.
+    const handoff = backend.nextRequest(() => true);
+    const sending = tab.controllers.inputController.sendMessage({ content: 'draft the plan' });
+    await handoff;
     tab.controllers.inputController.queue.enqueue({
       content: 'also add a created date', turnRequest: { text: 'also add a created date' },
     });
@@ -115,7 +122,8 @@ it('attaches a queued follow-up to the top of the input box, under the tab bar',
     expect(strip.classList.contains('claudian-hidden')).toBe(true);
     expect(box.queryByRole('button', { name: 'Edit queued message' })).toBeNull();
     expect(tab.dom.inputEl.value).toBe('also add a created date');
-    await releaseTurn();
+    backend.latest.complete();
+    await sending;
   } finally {
     await destroyTab(tab);
   }

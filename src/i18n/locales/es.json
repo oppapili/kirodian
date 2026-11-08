@@ -761,6 +761,19 @@
     "claudeSafeMode": {
       "name": "Modo seguro",
       "desc": "Modo de permisos usado cuando el interruptor Seguro está activo."
+    },
+    "executionTarget": {
+      "installationMethod": {
+        "name": "Método de instalación",
+        "desc": "Cómo debe iniciar Claudian {provider} en Windows. Windows nativo usa una ruta de ejecutable de Windows. WSL inicia la CLI de Linux dentro de una distribución seleccionada.",
+        "nativeWindows": "Windows nativo",
+        "wsl": "WSL"
+      },
+      "wslDistroOverride": {
+        "name": "Sobrescritura de distribución WSL",
+        "desc": "Sobrescritura avanzada opcional. Déjala vacía para inferir la distribución desde una ruta de espacio de trabajo WSL cuando sea posible; si no, se usa la distribución WSL predeterminada."
+      },
+      "wslWindowsPath": "El modo WSL espera un comando Linux o una ruta absoluta de Linux, no una ruta de ejecutable de Windows."
     }
   }
 }

@@ -761,6 +761,19 @@
     "claudeSafeMode": {
       "name": "Safe mode",
       "desc": "Permission mode used when the Safe toggle is active."
+    },
+    "executionTarget": {
+      "installationMethod": {
+        "name": "Installation method",
+        "desc": "How Claudian should launch {provider} on Windows. Native Windows uses a Windows executable path. WSL launches the Linux CLI inside a selected distro.",
+        "nativeWindows": "Native Windows",
+        "wsl": "WSL"
+      },
+      "wslDistroOverride": {
+        "name": "WSL distro override",
+        "desc": "Optional advanced override. Leave empty to infer the distro from a WSL workspace path when possible, otherwise use the default WSL distro."
+      },
+      "wslWindowsPath": "WSL mode expects a Linux command or Linux absolute path, not a Windows executable path."
     }
   }
 }
