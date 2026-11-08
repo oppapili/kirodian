@@ -27,7 +27,7 @@ function setup() {
 
 beforeEach(() => {
   const execute = FakeSession.prototype.execute;
-  jest.spyOn(FakeSession.prototype, 'execute').mockImplementation(function (this: FakeSession, request) {
+  vi.spyOn(FakeSession.prototype, 'execute').mockImplementation(function (this: FakeSession, request) {
     const result = execute.call(this, request);
     const run = this.runs.at(-1)!;
     run.events.push({ type: 'turn_started', accepted: true, scope: requestedScope(this, run, 1) });
@@ -36,7 +36,7 @@ beforeEach(() => {
     return result;
   });
 });
-afterEach(() => jest.restoreAllMocks());
+afterEach(() => vi.restoreAllMocks());
 
 it.each([false, true])('resolves current titles once and carries snapshots through real handoff (queued: %s)', async queued => {
   const fixture = setup();
@@ -141,7 +141,7 @@ it.each([false, true])('restores prepared drafts when rewind begins during hydra
   const initialization = deferred<boolean>();
   const source = await fixture.plugin.getConversationById(id);
   fixture.plugin.getConversationById.mockClear().mockReturnValue(hydration.promise);
-  const initialize = jest.fn().mockReturnValue(initialization.promise);
+  const initialize = vi.fn().mockReturnValue(initialization.promise);
   fixture.deps.ensureExecutionInitialized = initialize;
   const conversation = fixture.deps.conversationController;
   fixture.state.messages = [
@@ -179,9 +179,9 @@ it.each([false, true])('restores prepared drafts when rewind begins during hydra
 });
 
 function holdNativeTurns() {
-  jest.restoreAllMocks();
+  vi.restoreAllMocks();
   const execute = FakeSession.prototype.execute;
-  return jest.spyOn(FakeSession.prototype, 'execute').mockImplementation(function (this: FakeSession, request) {
+  return vi.spyOn(FakeSession.prototype, 'execute').mockImplementation(function (this: FakeSession, request) {
     const result = execute.call(this, request);
     const run = this.runs.at(-1)!;
     run.events.push({ type: 'turn_started', accepted: true, scope: requestedScope(this, run, 1) });
@@ -233,7 +233,7 @@ it.each(['withdraw', 'cancel', 'initialization'])('restores token text and refre
 
 it.each(['cancel', 'withdraw', 'discard', 'shutdown', 'replacement'] as const)(
   'retains scheduled queued input through %s without a stray handoff', async action => {
-    jest.useFakeTimers();
+    vi.useFakeTimers();
     const fixture = setup();
     const session = fixture.session;
     fixture.deps.canStartTurn = () => session.acceptsIntents;
@@ -251,7 +251,7 @@ it.each(['cancel', 'withdraw', 'discard', 'shutdown', 'replacement'] as const)(
         case 'replacement': fixture.state.currentConversationId = 'replacement'; break;
         case 'shutdown': session.beginShutdown(); break;
       }
-      await jest.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
       expect(fixture.native.backends.get('kiro')!.sessions.flatMap(value => value.requests).length).toBe(0);
       expect(fixture.input.value).toBe(['cancel', 'withdraw', 'replacement'].includes(action) ? token : '');
       expect(fixture.native.backends.get('kiro')!.sessions.flatMap(value => value.requests)
@@ -259,7 +259,7 @@ it.each(['cancel', 'withdraw', 'discard', 'shutdown', 'replacement'] as const)(
     } finally {
       fixture.controller.queue.clear();
       await fixture.native.coordinator.dispose(); await fixture.native.registry.dispose();
-      jest.useRealTimers();
+      vi.useRealTimers();
     }
   },
 );

@@ -1,5 +1,7 @@
 import '@/providers';
 
+import type { Mocked } from 'vitest';
+
 import { ConversationRepository } from '@/app/conversations/ConversationRepository';
 import type { ConversationPersistence } from '@/app/storage/ConversationPersistenceStore';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
@@ -19,26 +21,26 @@ function createConversation(id = 'conversation-1'): Conversation {
 }
 
 function createRepository(conversation = createConversation()) {
-  const persistence: jest.Mocked<ConversationPersistence> = {
+  const persistence: Mocked<ConversationPersistence> = {
     metadataReader: {
-      revalidate: jest.fn().mockResolvedValue([]),
-      load: jest.fn().mockResolvedValue(null),
-      scan: jest.fn().mockResolvedValue({
+      revalidate: vi.fn().mockResolvedValue([]),
+      load: vi.fn().mockResolvedValue(null),
+      scan: vi.fn().mockResolvedValue({
         records: [],
         complete: true,
         invalidMetadataCount: 0,
       }),
-      loadMetadata: jest.fn().mockResolvedValue(null),
-      scanMetadata: jest.fn().mockResolvedValue({
+      loadMetadata: vi.fn().mockResolvedValue(null),
+      scanMetadata: vi.fn().mockResolvedValue({
         metadata: [],
         complete: true,
         invalidMetadataCount: 0,
       }),
-      listMetadata: jest.fn().mockResolvedValue([]),
+      listMetadata: vi.fn().mockResolvedValue([]),
     },
-    saveMetadata: jest.fn().mockResolvedValue(undefined),
-    deleteCurrentMetadata: jest.fn().mockResolvedValue(undefined),
-    assignMetadataToDevice: jest.fn().mockResolvedValue(undefined),
+    saveMetadata: vi.fn().mockResolvedValue(undefined),
+    deleteCurrentMetadata: vi.fn().mockResolvedValue(undefined),
+    assignMetadataToDevice: vi.fn().mockResolvedValue(undefined),
   };
   const repository = new ConversationRepository({
     providers: ProviderRegistry,
@@ -46,18 +48,18 @@ function createRepository(conversation = createConversation()) {
     getSettings: () => ({}),
     getVaultPath: () => '/vault',
     persistence,
-    onConversationDeleted: jest.fn().mockResolvedValue(undefined),
+    onConversationDeleted: vi.fn().mockResolvedValue(undefined),
   });
   repository.replaceAll([conversation]);
   return { repository, persistence };
 }
 
-afterEach(() => jest.restoreAllMocks());
+afterEach(() => vi.restoreAllMocks());
 
 test('does not publish recovered identity after concurrent deletion', async () => {
   const conversation = createConversation();
   const { repository, persistence } = createRepository(conversation);
-  jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+  vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
     hydrateConversationHistory: async () => ({}),
     resolveSessionIdForConversation: value => value?.sessionId ?? null,
     isPendingForkConversation: () => false,
@@ -82,7 +84,7 @@ test('keeps relocated native history readable after its metadata save fails', as
   // metadata write that follows hydration fails. Drive this through a minimal
   // history-service port (the provider-neutral contract) rather than a specific
   // provider's SDK relocation internals.
-  jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+  vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
     hydrateConversationHistory: async conv => ({ ...conv, messages }),
     resolveSessionIdForConversation: value => value?.sessionId ?? null,
     isPendingForkConversation: () => false,
@@ -99,7 +101,7 @@ test('keeps relocated native history readable after its metadata save fails', as
 test('restores the conversation when missing-session metadata removal fails', async () => {
   const conversation = createConversation();
   const { repository, persistence } = createRepository(conversation);
-  jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+  vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
     hydrateConversationHistory: async conv => conv,
     resolveSessionIdForConversation: value => value?.sessionId ?? null,
     isPendingForkConversation: () => false,
@@ -117,7 +119,7 @@ test('late accepted binding survives a missing-session decision', async () => {
   const conversation = createConversation();
   const { repository } = createRepository(conversation);
   let updating: Promise<void> | undefined;
-  jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+  vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
     hydrateConversationHistory: async () => ({}),
     resolveSessionIdForConversation: value => value?.sessionId ?? null,
     isPendingForkConversation: () => false,

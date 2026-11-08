@@ -1,11 +1,4 @@
 import type {
-  ProviderExecutionBackend,
-  ProviderExecutionSession,
-  ProviderSessionConfig,
-} from '../../../core/execution';
-import type { ProviderRuntimeHost } from '../../../core/providers/ProviderRuntimeHost';
-import type { SlashCommand } from '../../../core/types';
-import type {
   ACPLoadSessionRequest,
   ACPLoadSessionResponse,
   ACPNewSessionRequest,
@@ -20,6 +13,13 @@ import type {
   ACPSetSessionModelResponse,
   ACPSetSessionModeRequest,
 } from '../../acp';
+import type {
+  ProviderExecutionBackend,
+  ProviderExecutionSession,
+  ProviderSessionConfig,
+} from '../../../core/execution';
+import type { ProviderRuntimeHost } from '../../../core/providers/ProviderRuntimeHost';
+import type { SlashCommand } from '../../../core/types';
 import { loadKiroPromptIndexAfterAssistant } from '../history/KiroHistoryStore';
 import type { KiroModelCatalogCoordinator } from '../runtime/KiroModelCatalogCoordinator';
 import { KiroExecutionNativeConnectionImpl } from './KiroExecutionNativeConnection';

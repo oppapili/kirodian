@@ -331,6 +331,11 @@
   box-shadow: inset 0 0 0 1px var(--interactive-accent);
 }
 
+/* A lifted project keeps its own hovered look. */
+.claudian-session-sidebar .claudian-live-sorting > .claudian-session-group-header.claudian-live-sort-lifted {
+  background: var(--background-modifier-hover);
+}
+
 .claudian-session-sidebar .claudian-history-section--sessions,
 .claudian-session-sidebar .claudian-history-section--archived {
   display: flex;

@@ -1,13 +1,13 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 import '@/providers';
 
+import { axe } from '@test/helpers/accessibility';
 import { createClaudianView } from '@test/helpers/features/chat/ClaudianViewHarness';
 import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
 import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { FakeSideBackend, type FakeSideSession } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
 import { App, Component, type Scope } from 'obsidian';
 
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
@@ -39,18 +39,18 @@ beforeEach(() => {
 });
 afterEach(() => {
   globalThis.ResizeObserver = originalResizeObserver;
-  jest.restoreAllMocks();
+  vi.restoreAllMocks();
   document.body.replaceChildren();
 });
 
 /** One real tab runtime with real controllers, session pool, and the fake provider boundary. */
 async function createView() {
   const backend = new FakeSideBackend();
-  jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockReturnValue(backend);
+  vi.spyOn(ProviderRegistry, 'createExecutionBackend').mockReturnValue(backend);
   // Kiro's real capabilities set supportsFork=false; side chat forks from a checkpoint, so the
   // side-destination scenario needs fork support. Override only this flag over the real capabilities.
   const realCapabilities = ProviderRegistry.getCapabilities('kiro');
-  jest.spyOn(ProviderRegistry, 'getCapabilities').mockImplementation((providerId = 'kiro') =>
+  vi.spyOn(ProviderRegistry, 'getCapabilities').mockImplementation((providerId = 'kiro') =>
     providerId === 'kiro' ? { ...realCapabilities, supportsFork: true } : realCapabilities);
   const app = new App();
   const scopes: Scope[] = [];
@@ -120,7 +120,7 @@ async function createView() {
   tab.hydrationState = 'ready';
   await tab.executionCoordinator.bindConversation({ conversationId: conversation.id, providerId: 'kiro' });
   await tab.executionCoordinator.prepare();
-  jest.spyOn(tab.dom.messagesEl, 'getClientRects').mockImplementation(() =>
+  vi.spyOn(tab.dom.messagesEl, 'getClientRects').mockImplementation(() =>
     (tab.dom.contentEl.classList.contains('claudian-hidden') ? [] : [{}]) as unknown as DOMRectList);
   activateTab(tab);
   tab.dom.inputEl.focus();

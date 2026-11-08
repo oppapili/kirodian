@@ -35,12 +35,12 @@ describe('ProviderRegistry', () => {
     ProviderWorkspaceRegistry.clear();
     ProviderWorkspaceRegistry.setServices('kiro', {
     } as any);
-    jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized')
+    vi.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized')
       .mockResolvedValue(undefined);
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   it('returns capabilities for the default provider', () => {
@@ -152,7 +152,7 @@ describe('ProviderRegistry', () => {
   it('requires an explicit title model instead of selecting a provider automatically', async () => {
     const providerCalls: ProviderId[] = [];
     const originalCreate = ProviderRegistry.createTitleGenerationService.bind(ProviderRegistry);
-    jest.spyOn(ProviderRegistry, 'createTitleGenerationService')
+    vi.spyOn(ProviderRegistry, 'createTitleGenerationService')
       .mockImplementation((plugin: any, providerId?: ProviderId) => {
         if (!providerId) {
           return originalCreate(plugin);
@@ -169,7 +169,7 @@ describe('ProviderRegistry', () => {
         },
       },
     } as any);
-    const callback = jest.fn();
+    const callback = vi.fn();
 
     await service.generateTitle('conv-1', 'hello', callback);
 
@@ -195,7 +195,7 @@ describe('ProviderRegistry', () => {
       .toEqual({ providerId: 'kiro', model: 'kiro/sonnet' });
 
     const service = ProviderRegistry.createTitleGenerationService({ settings } as any);
-    const callback = jest.fn();
+    const callback = vi.fn();
     await service.generateTitle('conv-1', 'hello', callback);
 
     expect(ProviderWorkspaceRegistry.ensureInitialized).toHaveBeenCalledWith(
@@ -210,12 +210,12 @@ describe('ProviderRegistry', () => {
       ...kiroSettingsWithModels(['sonnet'], { enabled: true }),
       titleGenerationModel: 'kiro/sonnet',
     };
-    jest.mocked(ProviderWorkspaceRegistry.ensureInitialized).mockImplementation(async () => {
+    vi.mocked(ProviderWorkspaceRegistry.ensureInitialized).mockImplementation(async () => {
       updateKiroProviderSettings(settings, { enabled: false });
     });
-    const createService = jest.spyOn(ProviderRegistry, 'createTitleGenerationService');
+    const createService = vi.spyOn(ProviderRegistry, 'createTitleGenerationService');
     const service = ProviderRegistry.createTitleGenerationService({ settings } as any);
-    const callback = jest.fn();
+    const callback = vi.fn();
     await service.generateTitle('conversation', 'hello', callback);
     expect(createService).toHaveBeenCalledTimes(1);
     expect(callback).toHaveBeenCalledWith('conversation', {
@@ -228,8 +228,8 @@ describe('ProviderRegistry', () => {
 
 function createMockTitleService(providerId: ProviderId): TitleGenerationService {
   return {
-    cancel: jest.fn(),
-    generateTitle: jest.fn(async (conversationId, _userMessage, callback) => {
+    cancel: vi.fn(),
+    generateTitle: vi.fn(async (conversationId, _userMessage, callback) => {
       await callback(conversationId, {
         success: true,
         title: `${providerId} title`,

@@ -1,4 +1,4 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 import '@/providers';
 
 import { deserialize, serialize } from 'node:v8';
@@ -39,7 +39,7 @@ afterEach(async () => {
   globalThis.ResizeObserver = originalResizeObserver;
   globalThis.structuredClone = originalStructuredClone;
   ProviderWorkspaceRegistry.clear();
-  jest.restoreAllMocks();
+  vi.restoreAllMocks();
   await releaseSideChatHarnesses();
 });
 
@@ -87,9 +87,9 @@ function createChatHarness(settings: ClaudianSettings, id: ProviderId, selected:
   const conversations: Conversation[] = [];
   const tabs: AssembledTabRuntime[] = [];
   const sessions: FakeSideSession[] = [];
-  const persist = jest.fn(async () => undefined);
+  const persist = vi.fn(async () => undefined);
   const settingsCoordinator = new SettingsCoordinator(settings, persist);
-  jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockImplementation((_host, providerId = 'kiro') => ({
+  vi.spyOn(ProviderRegistry, 'createExecutionBackend').mockImplementation((_host, providerId = 'kiro') => ({
     providerId,
     createSession: config => {
       const session = new FakeSideSession(config);

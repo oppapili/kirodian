@@ -12,13 +12,13 @@ const browseOrders = {
 it.each(modelCatalogCases)('$id keeps native selection, aliases and metadata behind the common catalog', async ({id, populate, read}) => {
   const settings: Record<string, unknown> = {};
   populate(settings);
-  const persist = jest.fn(async () => undefined);
+  const persist = vi.fn(async () => undefined);
   const host = runtimeHostFor(
-    { settings, notifyProviderChatOptionsChanged: jest.fn() },
+    { settings, notifyProviderChatOptionsChanged: vi.fn() },
     'kiro',
     { persist },
   );
-  const discovery = jest.fn(async () => ({
+  const discovery = vi.fn(async () => ({
     catalog: null,
     changed: false,
     kind: 'completed' as const,
@@ -53,3 +53,4 @@ it.each(modelCatalogCases)('$id keeps native selection, aliases and metadata beh
   expect(catalog.getSnapshot().selectedIds).toEqual([selectedId]);
   await catalog.dispose();
 });
+

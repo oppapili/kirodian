@@ -18,14 +18,14 @@ export class EnvSnippetModal extends Modal {
   plugin: ProviderHost;
   snippet: EnvSnippet | null;
   snippetScope: EnvironmentScope;
-  onSave: (snippet: EnvSnippet) => void;
+  onSave: (snippet: EnvSnippet) => void | Promise<void>;
 
   constructor(
     app: App,
     plugin: ProviderHost,
     snippet: EnvSnippet | null,
     scope: EnvironmentScope,
-    onSave: (snippet: EnvSnippet) => void,
+    onSave: (snippet: EnvSnippet) => void | Promise<void>,
   ) {
     super(app);
     this.plugin = plugin;
@@ -48,24 +48,26 @@ export class EnvSnippetModal extends Modal {
     let contextLimitsContainer: HTMLElement | null = null;
 
     // !e.isComposing for IME support (Chinese, Japanese, Korean, etc.)
+    let saving = false;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Enter' && !e.isComposing) {
         e.preventDefault();
-        saveSnippet();
+        void saveSnippet();
       } else if (e.key === 'Escape' && !e.isComposing) {
         e.preventDefault();
         this.close();
       }
     };
 
-    const saveSnippet = () => {
+    const saveSnippet = async () => {
+      if (saving) return;
       const name = nameEl.value.trim();
       if (!name) {
         new Notice(t('settings.envSnippets.nameRequired'));
         return;
       }
 
-      const contextLimits: Record<string, number> = {};
+      const contextLimits = new Map<string, number>();
       for (const [modelId, input] of contextLimitInputs) {
         const value = input.value.trim();
         if (value) {
@@ -74,15 +76,15 @@ export class EnvSnippetModal extends Modal {
             new Notice(t('settings.customContextLimits.invalid'));
             return;
           }
-          contextLimits[modelId] = parsed;
+          contextLimits.set(modelId, parsed);
         }
       }
 
-      const modelAliases: Record<string, string> = {};
+      const modelAliases = new Map<string, string>();
       for (const [modelId, input] of modelAliasInputs) {
         const value = input.value.trim();
         if (value) {
-          modelAliases[modelId] = value;
+          modelAliases.set(modelId, value);
         }
       }
 
@@ -95,12 +97,28 @@ export class EnvSnippetModal extends Modal {
           envVarsEl.value,
           this.snippet?.scope ?? this.snippetScope,
         ),
-        contextLimits: Object.keys(contextLimits).length > 0 ? contextLimits : undefined,
-        modelAliases: modelAliasInputs.size > 0 ? modelAliases : undefined,
+        contextLimits: contextLimits.size > 0 ? Object.fromEntries(contextLimits) : undefined,
+        modelAliases: modelAliasInputs.size > 0 ? Object.fromEntries(modelAliases) : undefined,
       };
 
-      this.onSave(snippet);
-      this.close();
+      saving = true;
+      const controls = contentEl.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement>(
+        'input, textarea, button:not(.claudian-cancel-btn)',
+      );
+      for (const control of controls) control.disabled = true;
+      try {
+        await this.onSave(snippet);
+        this.close();
+      } catch (error) {
+        const committed = error !== null && typeof error === 'object'
+          && 'committed' in error && error.committed === true;
+        new Notice(committed ? 'Environment snippet was saved, but settings refresh failed.'
+          : this.snippet ? 'Could not complete environment snippet update' : 'Could not complete environment snippet save');
+        if (committed) this.close();
+      } finally {
+        saving = false;
+        for (const control of controls) control.disabled = false;
+      }
     };
 
     const renderContextLimitFields = () => {
@@ -143,7 +161,8 @@ export class EnvSnippetModal extends Modal {
           placeholder: t('settings.customModelAliases.placeholder'),
           cls: 'claudian-snippet-alias-input',
         });
-        aliasInput.value = draftAliases.get(modelId) ?? existingAliases[modelId] ?? '';
+        aliasInput.value = draftAliases.get(modelId)
+          ?? (Object.prototype.hasOwnProperty.call(existingAliases, modelId) ? existingAliases[modelId] : '');
         aliasInput.setAttribute('aria-label', `Alias for ${modelId}`);
         aliasInput.setAttribute('aria-description', t('settings.customModelAliases.ariaDescription'));
         modelAliasInputs.set(modelId, aliasInput);
@@ -154,7 +173,7 @@ export class EnvSnippetModal extends Modal {
           cls: 'claudian-snippet-limit-input',
         });
         input.value = draftLimits.get(modelId)
-          ?? (existingLimits[modelId] ? formatContextLimit(existingLimits[modelId]) : '');
+          ?? (Object.prototype.hasOwnProperty.call(existingLimits, modelId) ? formatContextLimit(existingLimits[modelId]) : '');
         input.setAttribute('aria-label', `Context window for ${modelId}`);
         contextLimitInputs.set(modelId, input);
       }
@@ -165,6 +184,7 @@ export class EnvSnippetModal extends Modal {
       .setDesc(t('settings.envSnippets.modal.namePlaceholder'))
       .addText((text) => {
         nameEl = text.inputEl;
+        nameEl.setAttribute('aria-label', t('settings.envSnippets.modal.name'));
         text.setValue(this.snippet?.name || '');
                 text.inputEl.addEventListener('keydown', handleKeyDown);
       });
@@ -174,6 +194,7 @@ export class EnvSnippetModal extends Modal {
       .setDesc(t('settings.envSnippets.modal.descPlaceholder'))
       .addText((text) => {
         descEl = text.inputEl;
+        descEl.setAttribute('aria-label', t('settings.envSnippets.modal.description'));
         text.setValue(this.snippet?.description || '');
                 text.inputEl.addEventListener('keydown', handleKeyDown);
       });
@@ -183,6 +204,7 @@ export class EnvSnippetModal extends Modal {
       .setDesc(t('settings.envSnippets.modal.envVarsPlaceholder'))
       .addTextArea((text) => {
         envVarsEl = text.inputEl;
+        envVarsEl.setAttribute('aria-label', t('settings.envSnippets.modal.envVars'));
         const envVarsToShow = this.snippet?.envVars ?? this.plugin.getEnvironmentVariablesForScope(this.snippetScope);
         text.setValue(envVarsToShow);
         text.inputEl.rows = 8;
@@ -208,7 +230,7 @@ export class EnvSnippetModal extends Modal {
       cls: 'claudian-save-btn',
       attr: { type: 'button' },
     });
-    saveBtn.addEventListener('click', () => saveSnippet());
+    saveBtn.addEventListener('click', () => { void saveSnippet(); });
 
     // Focus name input after modal is rendered (timeout for Windows compatibility)
     window.setTimeout(() => nameEl?.focus(), 50);
@@ -336,19 +358,16 @@ export class EnvSnippetManager {
       this.plugin,
       null,
       this.scope,
-      (snippet) => {
-        void (async (): Promise<void> => {
-          try {
-            await this.plugin.mutateSettings((settings) => {
-              settings.envSnippets.push(snippet);
-            });
-          } catch {
-            new Notice('Could not complete environment snippet save');
-            return;
-          }
+      async (snippet) => {
+        try {
+          await this.plugin.mutateSettings((settings) => {
+            settings.envSnippets.push(snippet);
+          });
+        } finally {
+          // The committed snapshot may have advanced even when publication failed.
           this.render();
-          new Notice(`Environment snippet "${snippet.name}" saved`);
-        })();
+        }
+        new Notice(`Environment snippet "${snippet.name}" saved`);
       }
     );
     modal.open();
@@ -384,24 +403,22 @@ export class EnvSnippetManager {
       if (snippet.modelAliases) {
         const modelIds = ProviderRegistry.getCustomModelIds(parseEnvironmentVariables(snippet.envVars));
         const modelAliases = ProviderRegistry.getChatUIConfig('claude').customModelAliases;
-        const nextAliases = modelAliases?.get(settings) ?? {};
+        const nextAliases = new Map(Object.entries(modelAliases?.get(settings) ?? {}));
         for (const modelId of modelIds) {
-          const alias = snippet.modelAliases[modelId]?.trim();
+          const alias = Object.prototype.hasOwnProperty.call(snippet.modelAliases, modelId)
+            ? snippet.modelAliases[modelId].trim() : undefined;
           if (alias) {
-            nextAliases[modelId] = alias;
+            nextAliases.set(modelId, alias);
           } else {
-            delete nextAliases[modelId];
+            nextAliases.delete(modelId);
           }
         }
-        modelAliases?.update(settings, nextAliases);
+        modelAliases?.update(settings, Object.fromEntries(nextAliases));
       }
     });
 
     this.onContextLimitsChange?.();
-    const view = this.plugin.app.workspace.getLeavesOfType('claudian-view')[0]?.view as {
-      refreshModelSelector?(): void;
-    } | undefined;
-    view?.refreshModelSelector?.();
+    if (snippet.modelAliases) this.plugin.notifyProviderChatOptionsChanged('claude');
   }
 
   #editSnippet(snippet: EnvSnippet) {
@@ -410,25 +427,21 @@ export class EnvSnippetManager {
       this.plugin,
       snippet,
       this.scope,
-      (updatedSnippet) => {
-        void (async (): Promise<void> => {
-          const exists = this.plugin.settings.envSnippets.some(s => s.id === snippet.id);
-          if (exists) {
-            try {
-              await this.plugin.mutateSettings((settings) => {
-                const index = settings.envSnippets.findIndex(s => s.id === snippet.id);
-                if (index !== -1) {
-                  settings.envSnippets[index] = updatedSnippet;
-                }
-              });
-            } catch {
-              new Notice('Could not complete environment snippet update');
-              return;
-            }
+      async (updatedSnippet) => {
+        const exists = this.plugin.settings.envSnippets.some(s => s.id === snippet.id);
+        if (exists) {
+          try {
+            await this.plugin.mutateSettings((settings) => {
+              const index = settings.envSnippets.findIndex(s => s.id === snippet.id);
+              if (index !== -1) {
+                settings.envSnippets[index] = updatedSnippet;
+              }
+            });
+          } finally {
             this.render();
-            new Notice(`Environment snippet "${updatedSnippet.name}" updated`);
           }
-        })();
+          new Notice(`Environment snippet "${updatedSnippet.name}" updated`);
+        }
       }
     );
     modal.open();
@@ -459,6 +472,8 @@ export class EnvSnippetManager {
     const envTextarea = (this.containerEl.ownerDocument ?? window.document).querySelector<HTMLTextAreaElement>(selector);
     if (envTextarea) {
       envTextarea.value = value;
+      const EventConstructor = envTextarea.ownerDocument.defaultView?.Event ?? Event;
+      envTextarea.dispatchEvent(new EventConstructor('input', { bubbles: true }));
     }
   }
 }

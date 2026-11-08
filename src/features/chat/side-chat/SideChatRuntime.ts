@@ -6,6 +6,7 @@ import type {
   ProviderExecutionLifecycleRegistry,
   ProviderSessionEvent,
   ProviderSystemInstructions,
+  ProviderTurnEventScope,
 } from '@/core/execution';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ProviderCapabilities, ProviderId, TitleGenerationService } from '@/core/providers/types';
@@ -44,6 +45,7 @@ export interface SideChatRuntimeDeps {
   readonly buildChildResumeState: () => Promise<Readonly<Record<string, unknown>>>;
   readonly workingDirectory: string;
   readonly onStatusChanged: () => void;
+  readonly onSettingsChanged?: () => void;
   readonly onError?: (error: unknown) => void;
 }
 
@@ -72,6 +74,7 @@ export class SideChatRuntime {
   readonly state: ChatState;
   readonly #transcript: SessionTranscript;
   #presentation: SideChatPresentation | null = null;
+  #visibilityObserver: IntersectionObserver | null = null;
   readonly #stream: StreamController;
   readonly #subagents: SubagentManager;
   readonly #session: SideChatSession;
@@ -80,6 +83,9 @@ export class SideChatRuntime {
   /** Fixed for the child's lifetime: its native context cannot follow later prompt-setting changes. */
   readonly #systemInstructions: ProviderSystemInstructions;
   #activeDelivery: SideChatSubmission['onDelivery'];
+  readonly #steeredAnswers = new Map<string, { message: ChatMessage; echoed: boolean }>();
+  #sawInitialProviderUserMessage = false;
+  #awaitingProviderAssistantStart = true;
   readonly #responseStream: ResponseStream;
   /** Owns the requested side turn; presentation state derives from it. */
   readonly #turns = new TurnCoordinator();
@@ -156,6 +162,7 @@ export class SideChatRuntime {
       onError: error => deps.onError?.(error),
       onInvalidated: () => {
         this.#prompts.expireAsyncQuestions();
+        this.#steeredAnswers.clear();
         this.#discardQueuedSubmissions();
         this.#backgroundResponses.discard();
         this.#lastError = ephemeral
@@ -188,6 +195,14 @@ export class SideChatRuntime {
     if (this.#presentation) throw new Error('Side chat already attached');
     this.#presentation = presentation;
     try {
+      this.#stream.setViewportVisible(true);
+      const view = presentation.messagesEl.ownerDocument.defaultView;
+      if (view?.IntersectionObserver) {
+        this.#visibilityObserver = new view.IntersectionObserver(entries => {
+          this.#stream.setViewportVisible(entries[0]?.isIntersecting ?? true);
+        });
+        this.#visibilityObserver.observe(presentation.messagesEl);
+      }
       const renderer = new MessageRenderer(this.deps.plugin, presentation.component,
         presentation.messagesEl, undefined, undefined, () => this.capabilities);
       const welcome = this.#transcript.attach(renderer, presentation.messagesEl, () => '');
@@ -200,6 +215,8 @@ export class SideChatRuntime {
   }
 
   detachPresentation(): void {
+    this.#visibilityObserver?.disconnect();
+    this.#visibilityObserver = null;
     this.#prompts.detachPresentation();
     this.#transcript.detach();
     this.#presentation = null;
@@ -217,20 +234,26 @@ export class SideChatRuntime {
       prepare: reply => ({
         steer: async () => {
           if (!this.state.isStreaming) return 'not-sent';
+          const generation = this.state.streamGeneration;
+          const message: ChatMessage = {
+            content: reply.content, displayContent: reply.displayContent,
+            id: createSideMessageId(), role: 'user', timestamp: Date.now(),
+          };
+          const answer = { message, echoed: false };
+          this.#steeredAnswers.set(reply.content, answer);
           let accepted: boolean;
           try {
             accepted = await this.#session.steer(reply.content);
           } catch {
-            return 'uncertain';
+            return answer.echoed ? 'accepted' : 'uncertain';
           }
-          if (!accepted) return 'not-sent';
-          if (!this.#disposed) {
-            const message: ChatMessage = {
-              content: reply.content, displayContent: reply.displayContent,
-              id: createSideMessageId(), role: 'user', timestamp: Date.now(),
-            };
-            this.state.addMessage(message);
-            this.renderer?.addMessage(message);
+          if (answer.echoed) return 'accepted';
+          if (!accepted) {
+            this.#steeredAnswers.delete(reply.content);
+            return 'not-sent';
+          }
+          if (!this.#disposed && generation === this.state.streamGeneration) {
+            await this.#projectSteeredAnswer(answer.message, undefined, generation);
           }
           return 'accepted';
         },
@@ -248,7 +271,7 @@ export class SideChatRuntime {
   }
 
   get capabilities(): ProviderCapabilities {
-    return ProviderRegistry.getCapabilities(this.deps.source.providerId, this.deps.source.providerState);
+    return ProviderRegistry.getCapabilities(this.deps.source.providerId);
   }
 
   get status(): SideChatStatus {
@@ -395,6 +418,8 @@ export class SideChatRuntime {
     this.#turns.beginResponse();
     this.#stream.beginResponse();
     const assistantMessage = this.#responseStream.start();
+    this.#sawInitialProviderUserMessage = false;
+    this.#awaitingProviderAssistantStart = true;
     this.state.autoScrollEnabled = true;
     this.#stream.thinkingIndicator.show();
     this.state.responseStartTime = performance.now();
@@ -494,6 +519,7 @@ export class SideChatRuntime {
       ...[...this.#pendingCommands].map(command => command.settled),
     ]);
     this.#backgroundResponses.discard();
+    this.#steeredAnswers.clear();
     this.#titleService?.cancel();
     this.#titleService = null;
     this.#prompts.expireAsyncQuestions();
@@ -542,7 +568,17 @@ export class SideChatRuntime {
       this.#backgroundResponses.reserve(event.scope.sessionInstanceId, event.scope.turnId);
     }
     if (event.type === 'user_message_started' && event.scope.kind === 'background') {
-      this.#backgroundResponses.userMessage(event.scope.sessionInstanceId, event);
+      const answer = this.#steeredAnswers.get(event.content ?? '');
+      if (answer) {
+        answer.echoed = true;
+        this.renderer?.removeMessage(answer.message.id);
+        this.state.messages = this.state.messages.filter(message => message !== answer.message);
+      }
+      const projected = this.#backgroundResponses.userMessage(event.scope.sessionInstanceId, event, answer ? {
+        displayContent: answer.message.displayContent ?? answer.message.content,
+        persistedContent: answer.message.content,
+      } : undefined);
+      if (answer && projected) answer.message = projected;
     }
     const deliver = () => this.#handleSessionEvent(event, isCurrent);
     if (event.type === 'task_notification' && event.scope.kind === 'session') return deliver();
@@ -564,8 +600,7 @@ export class SideChatRuntime {
     await this.#requestedSettlement;
     if (this.#disposed || !isCurrent()) return;
     if (event.type === 'permission_mode_changed') {
-      this.#settings.permissionMode = event.permissionMode;
-      this.#refreshStatus();
+      this.#applyPermissionMode(event.permissionMode);
       return;
     }
     if (event.type === 'async_subagent_completed') {
@@ -590,8 +625,69 @@ export class SideChatRuntime {
   async #handleExecutionEvent(event: Parameters<
     NonNullable<ConstructorParameters<typeof SideChatSession>[0]['onRequestedEvent']>
   >[0]): Promise<void> {
+    if (event.type === 'permission_mode_changed') this.#applyPermissionMode(event.permissionMode);
     if (event.type === 'turn_started' && event.accepted) this.#activeDelivery?.(true);
+    if (event.type === 'user_message_started') {
+      this.#responseStream.observe(event);
+      if (!this.#sawInitialProviderUserMessage) {
+        this.#sawInitialProviderUserMessage = true;
+        return;
+      }
+      const content = event.content ?? '';
+      const answer = this.#steeredAnswers.get(content);
+      if (answer) answer.echoed = true;
+      const message = answer?.message ?? {
+        content, displayContent: content, id: createSideMessageId(), role: 'user' as const, timestamp: Date.now(),
+      };
+      if (event.nativeUserMessageId) message.userMessageId = event.nativeUserMessageId;
+      await this.#projectSteeredAnswer(message, event.scope);
+      return;
+    }
+    if (event.type === 'assistant_message_started') {
+      this.#responseStream.observe(event);
+      if (this.#awaitingProviderAssistantStart) this.#awaitingProviderAssistantStart = false;
+      else {
+        const previous = this.#responseStream.active;
+        if (previous) await this.#responseStream.flush(previous);
+        this.#responseStream.start(event.scope);
+      }
+      return;
+    }
     await this.#responseStream.handleEvent(event);
+  }
+
+  /** An acknowledgement and its native echo share one user boundary, whichever arrives first. */
+  async #projectSteeredAnswer(message: ChatMessage, scope?: ProviderTurnEventScope, generation = this.state.streamGeneration): Promise<void> {
+    const previous = this.#responseStream.active;
+    const alreadyProjected = () => this.state.messages.includes(message);
+    const responseFollowsAnswer = () => !!this.#responseStream.active
+      && this.state.messages.indexOf(this.#responseStream.active) > this.state.messages.indexOf(message);
+    if (!scope) {
+      if (!this.#disposed && generation === this.state.streamGeneration && !alreadyProjected()) {
+        this.state.addMessage(message);
+        this.renderer?.addMessage(message);
+      }
+      return;
+    }
+    if (alreadyProjected() && responseFollowsAnswer()) return;
+    if (previous) await this.#responseStream.flush(previous);
+    if (this.#disposed || generation !== this.state.streamGeneration) return;
+    if (!alreadyProjected() && message.content) {
+      this.state.addMessage(message);
+      this.renderer?.addMessage(message);
+    }
+    // An acknowledgement retains the answer; only its native boundary splits provider output.
+    if (scope && this.#responseStream.active && !responseFollowsAnswer()) {
+      this.#responseStream.start(scope);
+      this.#awaitingProviderAssistantStart = true;
+    }
+  }
+
+  #applyPermissionMode(mode: string): void {
+    if (this.#settings.permissionMode === mode) return;
+    this.#settings.permissionMode = mode;
+    this.deps.onSettingsChanged?.();
+    this.#refreshStatus();
   }
 
   #refreshStatus(): void {

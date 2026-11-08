@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
+import { extractACPDiffResultDetails } from '../../acp/ACPToolResultNormalization';
 import { resolveToolDiffData } from '../../../core/tools/toolDiff';
 import { isWriteEditTool, TOOL_ASK_USER_QUESTION } from '../../../core/tools/toolNames';
 import type {
@@ -11,7 +12,6 @@ import type {
   ToolCallInfo,
   ToolResultDetails,
 } from '../../../core/types';
-import { extractACPDiffResultDetails } from '../../acp/ACPToolResultNormalization';
 import {
   type KiroRawToolNameResolution,
   normalizeKiroToolCall,
@@ -106,6 +106,16 @@ export function parseKiroHistoryContent(
       promptIndex: turn.timelinePromptIndex,
       ...(usage ? { usage } : {}),
     });
+    if (turn.interrupted) {
+      // Steers split one native prompt into several displayed replies.
+      for (const segment of completedTurns.filter(item => item.promptIndex === turn.timelinePromptIndex)) {
+        for (const message of segment.messages) {
+          for (const tool of message.toolCalls ?? []) {
+            if (tool.status === 'running') tool.status = 'error';
+          }
+        }
+      }
+    }
     turnIndex += 1;
     return true;
   };
@@ -424,9 +434,11 @@ function reconcileToolUpdate(turn: PendingTurn, update: Record<string, unknown>)
     title: readString(update.title),
   });
   const rawName = rawNameResolution.rawName;
-  const rawInput = update.rawInput !== undefined ? update.rawInput : current?.rawInput;
+  // ACP v1 treats null raw fields like omitted updates; an initial null remains native payload.
+  const rawInput = update.rawInput !== undefined && (update.rawInput !== null || !current)
+    ? update.rawInput : current?.rawInput;
   const renderedContent = renderToolContent(update.content);
-  const rawOutput = update.rawOutput !== undefined
+  const rawOutput = update.rawOutput !== undefined && (update.rawOutput !== null || !current)
     ? update.rawOutput
     : current?.rawOutput;
   const normalized = normalizeKiroToolCall({

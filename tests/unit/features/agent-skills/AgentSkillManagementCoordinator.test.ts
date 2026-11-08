@@ -3,6 +3,8 @@ import { AgentSkillManagementCoordinator } from '@/features/agent-skills/AgentSk
 import type { AgentSkillRepository } from '@/features/agent-skills/AgentSkillRepository';
 import { AgentSkillRevisionConflictError } from '@/features/agent-skills/AgentSkillRepository';
 
+
+
 function makeSkill(name = 'shared-skill', revision = 'revision-1'): AgentSkillDocument {
   return {
     name,
@@ -18,17 +20,17 @@ function makeSkill(name = 'shared-skill', revision = 'revision-1'): AgentSkillDo
 function createRepository() {
   const skill = makeSkill();
   return {
-    list: jest.fn().mockResolvedValue({ skills: [skill], diagnostics: [] }),
-    create: jest.fn().mockResolvedValue(skill),
-    update: jest.fn().mockResolvedValue({ ...skill, revision: 'revision-2' }),
-    trash: jest.fn().mockResolvedValue(undefined),
-  } as unknown as jest.Mocked<AgentSkillRepository>;
+    list: vi.fn().mockResolvedValue({ skills: [skill], diagnostics: [] }),
+    create: vi.fn().mockResolvedValue(skill),
+    update: vi.fn().mockResolvedValue({ ...skill, revision: 'revision-2' }),
+    trash: vi.fn().mockResolvedValue(undefined),
+  } as unknown as Mocked<AgentSkillRepository>;
 }
 
 describe('AgentSkillManagementCoordinator', () => {
   it('persists once and then invalidates provider skill resources', async () => {
     const repository = createRepository();
-    const notifyAgentSkillsChanged = jest.fn().mockResolvedValue(undefined);
+    const notifyAgentSkillsChanged = vi.fn().mockResolvedValue(undefined);
     const coordinator = new AgentSkillManagementCoordinator(
       repository,
       notifyAgentSkillsChanged,
@@ -50,7 +52,7 @@ describe('AgentSkillManagementCoordinator', () => {
     const repository = createRepository();
     const coordinator = new AgentSkillManagementCoordinator(
       repository,
-      jest.fn().mockRejectedValue(new Error('provider refresh unavailable')),
+      vi.fn().mockRejectedValue(new Error('provider refresh unavailable')),
     );
 
     const result = await coordinator.trash('shared-skill', 'revision-1');
@@ -62,7 +64,7 @@ describe('AgentSkillManagementCoordinator', () => {
   it('does not invalidate providers when persistence fails', async () => {
     const repository = createRepository();
     repository.update.mockRejectedValue(new Error('stale revision'));
-    const notify = jest.fn().mockResolvedValue(undefined);
+    const notify = vi.fn().mockResolvedValue(undefined);
     const coordinator = new AgentSkillManagementCoordinator(repository, notify);
 
     await expect(coordinator.update('shared-skill', 'stale', {
@@ -81,7 +83,7 @@ describe('AgentSkillManagementCoordinator', () => {
       .mockRejectedValueOnce(new AgentSkillRevisionConflictError('shared-skill'));
     const coordinator = new AgentSkillManagementCoordinator(
       repository,
-      jest.fn().mockResolvedValue(undefined),
+      vi.fn().mockResolvedValue(undefined),
     );
     const input: AgentSkillInput = {
       name: 'shared-skill',

@@ -113,7 +113,17 @@ class AgentSkillModal extends Modal {
     });
     this.instructionsArea.value = initial?.instructions ?? '';
 
+    let saving = false;
+    const setSaving = (value: boolean): void => {
+      saving = value;
+      this.nameInput.disabled = value;
+      this.descriptionInput.disabled = value;
+      this.instructionsArea.disabled = value;
+      saveButton.disabled = value;
+    };
     const save = async (): Promise<void> => {
+      if (saving) return;
+      setSaving(true);
       const input: AgentSkillInput = {
         name: this.nameInput.value.trim(),
         description: this.descriptionInput.value.trim(),
@@ -127,6 +137,8 @@ class AgentSkillModal extends Modal {
         this.close();
       } catch (error) {
         showSaveError(error, input.name);
+      } finally {
+        setSaving(false);
       }
     };
 
@@ -365,15 +377,18 @@ export class AgentSkillSettings {
     this.#actionButton(actions, t('settings.agentSkills.fix'), 'wrench', () => {
       void this.#openRepairEditor(name);
     });
-    this.#actionButton(actions, t('common.delete'), 'trash-2', () => {
-      this.#openDelete({
-        title: t('settings.agentSkills.delete.title'),
-        description: t('settings.agentSkills.delete.description'),
-        path: diagnostic.directoryPath,
-        remove: () => this.coordinator.trashBroken(name),
-        successMessage: t('settings.agentSkills.deleted', { name }),
-      });
-    }, 'claudian-settings-delete-btn');
+    const revision = diagnostic.repairRevision;
+    if (revision !== undefined) {
+      this.#actionButton(actions, t('common.delete'), 'trash-2', () => {
+        this.#openDelete({
+          title: t('settings.agentSkills.delete.title'),
+          description: t('settings.agentSkills.delete.description'),
+          path: diagnostic.directoryPath,
+          remove: () => this.coordinator.trashBroken(name, revision),
+          successMessage: t('settings.agentSkills.deleted', { name }),
+        });
+      }, 'claudian-settings-delete-btn');
+    }
   }
 
   async #openRepairEditor(name: string): Promise<void> {

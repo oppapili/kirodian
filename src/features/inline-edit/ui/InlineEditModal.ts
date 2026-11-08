@@ -10,9 +10,10 @@ import type { InlineEditMode, InlineEditRequest } from '@/core/prompt/inlineEdit
 import { createCatalogCommandDiscoveryStore, discoverSessionlessCommands } from '@/core/providers/commands/catalogCommandDiscovery';
 import { getHiddenCommandSet } from '@/core/providers/commands/hiddenCommands';
 import { getProviderSettingsSnapshotWithModel } from '@/core/providers/conversationModel';
+import { getEnabledProviderForModel } from '@/core/providers/modelRouting';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
-import type { ProviderId } from '@/core/providers/types';
+import type { ProviderChatUIConfig, ProviderId, ProviderUIOption } from '@/core/providers/types';
 import type { FeatureHost } from '@/features/FeatureHost';
 import type { InlineEditSessionOwner } from '@/features/inline-edit/InlineEditSessionOwner';
 import { resolveContextFiles } from '@/features/inline-edit/ui/contextMentionResolver';
@@ -26,6 +27,7 @@ import {
   diffOpsEqual,
 } from '@/features/inline-edit/ui/markdownLineDiff';
 import { normalizeInsertionText } from '@/features/inline-edit/ui/normalizeInsertionText';
+import { MarkdownRenderScope } from '@/shared/components/MarkdownRenderScope';
 import { hideSelectionHighlight, showSelectionHighlight } from '@/shared/components/SelectionHighlight';
 import {
   ComposerDropdownController,
@@ -35,8 +37,10 @@ import {
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 import { EffortSelector } from '@/shared/toolbar/EffortSelector';
 import { ModelSelector } from '@/shared/toolbar/ModelSelector';
+import { getProviderPickerModelOptions } from '@/shared/toolbar/providerPickerModelOptions';
 import { ToolbarMenuGroup } from '@/shared/toolbar/ToolbarMenu';
 import type { ModelPickerCallbacks, ModelPickerSettings } from '@/shared/toolbar/types';
+import { registerFileLinkHandler } from '@/utils/fileLink';
 import { getEditorView } from '@/utils/obsidianCompat';
 
 export type InlineEditContext =
@@ -88,6 +92,9 @@ class MarkdownDiffWidget extends WidgetType {
   }
   toDOM(): HTMLElement {
     return this.controller.createDiffPreviewDOM(this.diffOps);
+  }
+  destroy(dom: HTMLElement): void {
+    this.controller.destroyDiffPreviewDOM(dom);
   }
   eq(other: MarkdownDiffWidget): boolean {
     return diffOpsEqual(this.diffOps, other.diffOps);
@@ -177,6 +184,14 @@ interface InlineEditProviderContext {
   providerId: ProviderId;
 }
 
+/** A provider's settings for listing the models inline edit offers from it. */
+function getInlineModelOptionSettings(host: FeatureHost, providerId: ProviderId): Record<string, unknown> {
+  return {
+    ...getProviderSettingsSnapshotWithModel({ ...host.settings }, providerId),
+    environmentVariables: host.getActiveEnvironmentVariables(providerId),
+  };
+}
+
 /** The saved inline default, while its provider is enabled and still offers its model and effort. */
 function resolveSavedInlineEditModel(host: FeatureHost): InlineEditProviderContext | null {
   const saved = host.settings.inlineEditModel;
@@ -187,10 +202,8 @@ function resolveSavedInlineEditModel(host: FeatureHost): InlineEditProviderConte
   }
   const settings = getProviderSettingsSnapshotWithModel({ ...host.settings }, saved.providerId);
   const uiConfig = ProviderRegistry.getChatUIConfig(saved.providerId);
-  const offered = uiConfig.getModelOptions({
-    ...settings,
-    environmentVariables: host.getActiveEnvironmentVariables(saved.providerId),
-  }).some(option => option.value === saved.model);
+  const offered = uiConfig.getModelOptions(getInlineModelOptionSettings(host, saved.providerId))
+    .some(option => option.value === saved.model);
   if (!offered) return null;
   const reasoningOffered = uiConfig.getReasoningOptions(saved.model, settings)
     .some(option => option.value === saved.reasoning);
@@ -245,6 +258,7 @@ export class InlineEditModal {
       return { decision: 'reject' };
     }
 
+    const sourceDoc = editorView.state.doc;
     const providerContext = resolveInlineEditProviderContext(this.host);
     return new Promise((resolve) => {
       let settled = false;
@@ -277,6 +291,11 @@ export class InlineEditModal {
         'inline-edit',
       ).then(() => {
         if (settled) return;
+        if (editorView.state.doc !== sourceDoc) {
+          new Notice('Inline edit was not applied because the source document or selection changed.');
+          close();
+          return;
+        }
         session = new InlineEditSession(
           this.app,
           this.host,
@@ -314,7 +333,8 @@ export class InlineEditSession {
   private startLine: number = 0; // 1-indexed
   private mode: InlineEditMode;
   private cursorContext: CursorContext | null = null;
-  private inlineEditService: InlineEditService;
+  /** The service requests run on, and the provider it was started for. */
+  #inlineEdit: { providerId: ProviderId; service: InlineEditService };
   /** Removes the current phase's Escape/Enter listener. */
   private releaseKeyHandler: (() => void) | null = null;
   private selectionListener: ((e: Event) => void) | null = null;
@@ -322,11 +342,13 @@ export class InlineEditSession {
   private instructionDraft = '';
   private inputPlaceholder: string | null = null;
   private replyMarkdown: string | null = null;
-  private resolvedProviderId: ProviderId;
+  /** The provider the model chip shows; requests wait until its service runs. */
+  private pickedProviderId: ProviderId;
   private inputResources: {
     container: HTMLElement;
     dropdown: ComposerDropdownController;
     effortSelector: EffortSelector;
+    modelSelector: ModelSelector;
     menus: ToolbarMenuGroup;
     dispose(): void;
   } | null = null;
@@ -335,6 +357,7 @@ export class InlineEditSession {
   private reasoningOverride: string | undefined;
   private mentionDataProvider: VaultMentionDataProvider;
   private agentReplyRenderVersion = 0;
+  private readonly previewScopes = new Map<HTMLElement, MarkdownRenderScope>();
   /** The document the edit was computed against; CodeMirror documents are immutable. */
   private sourceDoc: Text | null = null;
   private settled = false;
@@ -353,10 +376,10 @@ export class InlineEditSession {
     providerContext: InlineEditProviderContext,
   ) {
     const { modelOverride, providerId, reasoningOverride } = providerContext;
-    this.inlineEditService = ProviderRegistry.createInlineEditService(host.providerHost, providerId);
+    this.#inlineEdit = { providerId, service: ProviderRegistry.createInlineEditService(host.providerHost, providerId) };
     this.modelOverride = modelOverride;
     this.reasoningOverride = reasoningOverride;
-    this.resolvedProviderId = providerId;
+    this.pickedProviderId = providerId;
     this.mentionDataProvider = new VaultMentionDataProvider(this.app, {
       onFileLoadError: () => {
         new Notice('Failed to load vault files. Vault @-mentions may be unavailable.');
@@ -476,6 +499,7 @@ export class InlineEditSession {
 
   destroyInputDOM(container: HTMLElement): void {
     if (this.inputResources?.container !== container) return;
+    this.releasePreviews(container);
     this.instructionDraft = this.inputEl?.value ?? this.instructionDraft;
     this.inputResources.dispose();
     this.inputResources = null;
@@ -492,7 +516,7 @@ export class InlineEditSession {
     const ownerDocument = this.getOwnerDocument();
     const container = createDiv({
       cls: 'claudian-inline-input-container',
-      attr: { 'data-provider': this.resolvedProviderId },
+      attr: { 'data-provider': this.#inlineEdit.providerId },
     });
     this.containerEl = container;
 
@@ -521,19 +545,21 @@ export class InlineEditSession {
     // Obsidian clips editor widgets, so the open model menu floats in a layer outside the editor.
     const menuLayer = ownerDocument.body.createDiv({
       cls: 'claudian-inline-menu-layer',
-      attr: { 'data-provider': this.resolvedProviderId },
+      attr: { 'data-provider': this.#inlineEdit.providerId },
     });
     const modelSelector = new ModelSelector(this.modelToolbarEl, this.#modelPickerCallbacks(), menus, menuLayer);
     const effortSelector = new EffortSelector(modelSelector, this.#modelPickerCallbacks());
     this.#showGenerating(this.generating);
 
-    const inlineCatalog = ProviderWorkspaceRegistry.getCommandCatalog(this.resolvedProviderId);
+    // The composer's commands and brand belong to the provider requests run on.
+    const commandProviderId = this.#inlineEdit.providerId;
+    const inlineCatalog = ProviderWorkspaceRegistry.getCommandCatalog(commandProviderId);
     const discovery = inlineCatalog
-      ? createCatalogCommandDiscoveryStore(inlineCatalog, discoverSessionlessCommands(this.host.providerHost, this.resolvedProviderId))
+      ? createCatalogCommandDiscoveryStore(inlineCatalog, discoverSessionlessCommands(this.host.providerHost, commandProviderId))
       : null;
     const slashSource = new SlashCommandSource({
       includeBuiltIns: false,
-      providerId: this.resolvedProviderId,
+      providerId: commandProviderId,
       hiddenCommands: getHiddenCommandSet(this.host.settings),
       ...(inlineCatalog && discovery ? {
         providerConfig: inlineCatalog.getDropdownConfig(),
@@ -568,6 +594,7 @@ export class InlineEditSession {
       container,
       dropdown,
       effortSelector,
+      modelSelector,
       menus,
       dispose: () => {
         window.clearTimeout(focusTimer);
@@ -588,27 +615,116 @@ export class InlineEditSession {
   #modelPickerCallbacks(): ModelPickerCallbacks {
     return {
       getSettings: () => this.#getModelPickerSettings(),
-      getUIConfig: () => ProviderRegistry.getChatUIConfig(this.resolvedProviderId),
-      getCapabilities: () => ProviderRegistry.getCapabilities(this.resolvedProviderId),
-      getEnvironmentVariables: () => this.host.getActiveEnvironmentVariables(this.resolvedProviderId),
+      getUIConfig: () => this.#getModelPickerUIConfig(),
+      getCapabilities: () => ProviderRegistry.getCapabilities(this.pickedProviderId),
+      getEnvironmentVariables: () => this.host.getActiveEnvironmentVariables(this.pickedProviderId),
       onModelChange: async (model) => {
+        const providerId = this.#getModelProvider(model);
+        if (!providerId) {
+          new Notice('Select an available model in Claudian settings.');
+          return;
+        }
+        // The chip shows the pick at once; another provider starts behind it.
+        if (providerId !== this.pickedProviderId) {
+          this.pickedProviderId = providerId;
+          this.reasoningOverride = undefined;
+        }
         this.modelOverride = model;
         // An effort the new model does not offer falls back to the saved one.
         const settings = this.#getModelPickerSettings();
-        const offered = ProviderRegistry.getChatUIConfig(this.resolvedProviderId)
+        const offered = ProviderRegistry.getChatUIConfig(providerId)
           .getReasoningOptions(settings.model, settings)
           .some(option => option.value === this.reasoningOverride);
         if (!offered) {
           this.reasoningOverride = undefined;
         }
-        this.inputResources?.effortSelector.updateDisplay();
+        this.#showPick();
+        void this.#preparePickedModel(providerId, model);
         await this.#saveInlineEditDefault();
       },
       onEffortLevelChange: async (effort) => {
         this.reasoningOverride = effort;
+        this.#showPick();
         await this.#saveInlineEditDefault();
       },
     };
+  }
+
+  /** The chip shows a pick at once; saving it as the inline default does not hold it back. */
+  #showPick(): void {
+    const resources = this.inputResources;
+    if (!resources) return;
+    resources.modelSelector.updateDisplay();
+    resources.modelSelector.renderOptions();
+    resources.effortSelector.updateDisplay();
+  }
+
+  /** Until a request starts a conversation, the picker offers every enabled provider's models. */
+  #getModelPickerUIConfig(): ProviderChatUIConfig {
+    const uiConfig = ProviderRegistry.getChatUIConfig(this.pickedProviderId);
+    if (this.#inlineEdit.service.isConversing) return uiConfig;
+    return { ...uiConfig, getModelOptions: () => this.#getProviderPickerModelOptions() };
+  }
+
+  #getProviderPickerModelOptions(): ProviderUIOption[] {
+    return getProviderPickerModelOptions(providerId => getInlineModelOptionSettings(this.host, providerId));
+  }
+
+  /** A conversation keeps its provider; before one, the model's provider resolves as in a new chat. */
+  #getModelProvider(model: string): ProviderId | null {
+    if (this.#inlineEdit.service.isConversing) return this.pickedProviderId;
+    return getEnabledProviderForModel(model, this.host.settings);
+  }
+
+  /**
+   * Starts a picked provider ahead of the request, then lets it fetch metadata the model needs, such
+   * as its effort levels, as chat does.
+   */
+  async #preparePickedModel(providerId: ProviderId, model: string): Promise<void> {
+    if (!await this.#runPickedProvider()) return;
+    try {
+      await ProviderRegistry.getChatUIConfig(providerId).prepareModelMetadata?.(
+        model,
+        getProviderSettingsSnapshotWithModel({ ...this.host.settings }, providerId, model),
+        { plugin: this.host.providerHost },
+      );
+    } catch {
+      // Metadata is opportunistic; the request still runs with the efforts already known.
+      return;
+    }
+    if (!this.settled) this.inputResources?.effortSelector.updateDisplay();
+  }
+
+  /**
+   * Moves requests onto the chip's provider, starting it first, and rebuilds the composer for its
+   * commands and brand. Follows the chip if it changes meanwhile; false when the provider cannot start.
+   */
+  async #runPickedProvider(): Promise<boolean> {
+    const providerId = this.pickedProviderId;
+    if (providerId === this.#inlineEdit.providerId) return true;
+    // The registry shares a start in flight and retries a failed one.
+    const started = await this.#startProvider(providerId);
+    if (this.settled) return false;
+    if (providerId !== this.pickedProviderId) return this.#runPickedProvider();
+    if (!started) return false;
+    if (providerId !== this.#inlineEdit.providerId) {
+      this.#inlineEdit.service.end();
+      this.#inlineEdit = { providerId, service: ProviderRegistry.createInlineEditService(this.host.providerHost, providerId) };
+      this.#updateHighlight();
+    }
+    return true;
+  }
+
+  async #startProvider(providerId: ProviderId): Promise<boolean> {
+    try {
+      await ProviderWorkspaceRegistry.ensureInitialized(this.host.providerHost, providerId, 'inline-edit');
+      return true;
+    } catch {
+      if (!this.settled && providerId === this.pickedProviderId) {
+        new Notice(`Failed to start the ${ProviderRegistry.getProviderDisplayName(providerId)} provider.`);
+      }
+      return false;
+    }
   }
 
   /** A choice on the chip becomes the model later inline edits start from; chat keeps its own. */
@@ -616,7 +732,7 @@ export class InlineEditSession {
     const { model, reasoning } = this.#getModelPickerSettings();
     if (!model) return;
     const selection = {
-      providerId: this.resolvedProviderId,
+      providerId: this.pickedProviderId,
       model,
       ...(reasoning ? { reasoning } : {}),
     };
@@ -633,11 +749,11 @@ export class InlineEditSession {
   #getModelPickerSettings(): ModelPickerSettings {
     const snapshot = getProviderSettingsSnapshotWithModel(
       { ...this.host.settings },
-      this.resolvedProviderId,
+      this.pickedProviderId,
       this.modelOverride,
     );
     const model = typeof snapshot.model === 'string' ? snapshot.model : '';
-    const offersReasoning = ProviderRegistry.getChatUIConfig(this.resolvedProviderId)
+    const offersReasoning = ProviderRegistry.getChatUIConfig(this.pickedProviderId)
       .getReasoningOptions(model, snapshot).length > 0;
     const reasoning = this.reasoningOverride
       ?? (typeof snapshot.effortLevel === 'string' ? snapshot.effortLevel : null);
@@ -650,6 +766,19 @@ export class InlineEditSession {
     if (generating) this.inputResources?.menus.closeOpenMenu();
     this.spinnerEl?.toggleClass('claudian-hidden', !generating);
     this.modelToolbarEl?.toggleClass('claudian-hidden', generating);
+  }
+
+  destroyDiffPreviewDOM(container: HTMLElement): void {
+    this.releasePreviews(container);
+    if (this.containerEl === container) this.containerEl = null;
+  }
+
+  private releasePreviews(container?: HTMLElement): void {
+    for (const [element, scope] of this.previewScopes) {
+      if (container && element !== container && !container.contains(element)) continue;
+      this.previewScopes.delete(element);
+      this.component.removeChild(scope);
+    }
   }
 
   createDiffPreviewDOM(diffOps: DiffOp[]): HTMLElement {
@@ -698,10 +827,19 @@ export class InlineEditSession {
     return button;
   }
 
-  async #renderMarkdownPreview(container: HTMLElement, markdown: string): Promise<void> {
+  async #renderMarkdownPreview(container: HTMLElement, markdown: string, owner = container): Promise<void> {
+    this.releasePreviews(owner);
+    const scope = new MarkdownRenderScope();
+    this.previewScopes.set(owner, scope);
+    scope.register(() => {
+      if (this.previewScopes.get(owner) === scope) this.previewScopes.delete(owner);
+    });
+    this.component.addChild(scope);
+    scope.load();
+    scope.register(registerFileLinkHandler(this.app, owner, this.notePath));
     await renderInlineEditMarkdownPreview({
       app: this.app,
-      component: this.component,
+      component: scope,
       container,
       markdown,
       sourcePath: this.notePath,
@@ -712,6 +850,7 @@ export class InlineEditSession {
   async #renderMarkdownDiffPreview(container: HTMLElement, diffOps: DiffOp[]): Promise<void> {
     container.empty();
     for (const document of buildMarkdownDiffDocuments(diffOps)) {
+      if (this.settled || !this.containerEl?.contains(container)) return;
       if (!document.markdown) continue;
 
       const opEl = container.createDiv({ cls: `claudian-diff-block ${getDiffBlockClass(document.type)}` });
@@ -735,10 +874,18 @@ export class InlineEditSession {
 
     let result;
     try {
+      // A provider picked just before submitting runs the request once it has started.
+      const running = await this.#runPickedProvider();
+      if (this.settled) return;
+      if (!running) {
+        // Its start failed with a notice; the instruction stays for a retry.
+        if (this.mode === 'selection') this.#attachSelectionListeners();
+        return;
+      }
       // Slash commands stay in the instruction for the provider to handle.
       // The request runs with exactly what the model chip shows.
       const { model, reasoning } = this.#getModelPickerSettings();
-      result = await this.inlineEditService.send(this.#buildRequest(userMessage), {
+      result = await this.#inlineEdit.service.send(this.#buildRequest(userMessage), {
         model: model || undefined,
         reasoning,
       });
@@ -815,11 +962,12 @@ export class InlineEditSession {
     if (!this.agentReplyEl || !this.containerEl) return;
     const replyEl = this.agentReplyEl;
     const renderVersion = ++this.agentReplyRenderVersion;
+    this.releasePreviews(replyEl);
     const renderedEl = this.agentReplyEl.createDiv();
 
     replyEl.removeClass('claudian-hidden');
     replyEl.empty();
-    void this.#renderMarkdownPreview(renderedEl, message).then(() => {
+    void this.#renderMarkdownPreview(renderedEl, message, replyEl).then(() => {
       if (renderVersion !== this.agentReplyRenderVersion || replyEl !== this.agentReplyEl) {
         return;
       }
@@ -833,7 +981,7 @@ export class InlineEditSession {
     if (!this.inputEl) return;
     this.inputEl.disabled = false;
     this.inputEl.placeholder = errorMessage;
-    if (!this.inlineEditService.isConversing) {
+    if (!this.#inlineEdit.service.isConversing) {
       this.#updatePositionsFromEditor();
       this.#updateHighlight();
       this.#attachSelectionListeners();
@@ -966,9 +1114,10 @@ export class InlineEditSession {
 
   private cleanup(options?: { keepSelectionHighlight?: boolean }) {
     this.generating = false;
+    this.releasePreviews();
     this.releaseEditorLifetime?.();
     this.releaseEditorLifetime = null;
-    this.inlineEditService.end();
+    this.#inlineEdit.service.end();
     this.#removeSelectionListeners();
     this.releaseKeyHandler?.();
     this.releaseKeyHandler = null;

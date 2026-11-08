@@ -1,4 +1,5 @@
 const crossPlatformTests = [
+  'tests/integration/providers/pi/execution/PiRecoveryContext.test.ts',
   // Filesystem, path, URI, and platform-policy regressions need native hosts even without a subprocess.
   'tests/unit/core/process/env.test.ts',
   'tests/unit/core/storage/VaultFileAdapter.test.ts',
@@ -14,7 +15,7 @@ const scriptTests = [
   'scripts/check-eslint-config.test.mjs',
   'scripts/check-open-handles.test.mjs',
   'scripts/check-release-version.test.mjs',
-  'scripts/summarize-jest-results.test.mjs',
+  'scripts/summarize-vitest-results.test.mjs',
   'scripts/sync-version.test.mjs',
   'scripts/ciTestSelection.test.mjs',
   'scripts/run-tests.test.mjs',

@@ -1,10 +1,10 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
 import '@/providers';
 
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
+import { axe } from '@test/helpers/accessibility';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
@@ -20,7 +20,7 @@ HTMLElement.prototype.removeClass = function (...classes) { this.classList.remov
 
 function setup(providerId = 'kiro', capabilityOverride: Record<string, unknown> = {}) {
   const messagesEl = document.body.createDiv();
-  const fork = jest.fn().mockResolvedValue(undefined);
+  const fork = vi.fn().mockResolvedValue(undefined);
   const settings = { mediaFolder: '', showMessageTimestamps: true };
   const renderer = new MessageRenderer(
     { app: {}, settings } as any,
@@ -45,11 +45,11 @@ const messages: ChatMessage[] = [
 
 beforeEach(() => {
   document.body.replaceChildren();
-  jest.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
+  vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
     (el as HTMLElement).createEl('p', { text: markdown });
   });
   Object.defineProperty(navigator, 'clipboard', {
-    configurable: true, value: { writeText: jest.fn().mockResolvedValue(undefined) },
+    configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) },
   });
 });
 
@@ -475,12 +475,12 @@ it('keeps time after throughput when timestamps are refreshed or toggled', () =>
 
 it('defers Markdown for collapsed thinking and notifications until their own disclosure opens', async () => {
   const { renderer, messagesEl } = setup();
-  jest.mocked(MarkdownRenderer.render).mockClear();
+  vi.mocked(MarkdownRenderer.render).mockClear();
   renderer.renderStoredMessage({ id: 'lazy', role: 'assistant', timestamp: testDate().getTime(), content: 'Answer',
     contentBlocks: [{ type: 'thinking', content: '**Reasoning**' },
       { type: 'task_notification', content: '**Notification**' }, { type: 'text', content: 'Answer' }],
   });
-  expect(jest.mocked(MarkdownRenderer.render).mock.calls.map(call => call[1])).toEqual(['Answer']);
+  expect(vi.mocked(MarkdownRenderer.render).mock.calls.map(call => call[1])).toEqual(['Answer']);
   fireEvent.click(within(messagesEl).getByRole('button', { name: 'Worked' }));
   const thinking = within(messagesEl).getByRole('button', { name: 'Thought' });
   fireEvent.keyDown(thinking, { key: 'Enter' });
@@ -489,18 +489,18 @@ it('defers Markdown for collapsed thinking and notifications until their own dis
   fireEvent.click(notification);
   fireEvent.click(notification);
   await Promise.resolve();
-  expect(jest.mocked(MarkdownRenderer.render).mock.calls.map(call => call[1])).toEqual(['Answer', '**Reasoning**', '**Notification**']);
+  expect(vi.mocked(MarkdownRenderer.render).mock.calls.map(call => call[1])).toEqual(['Answer', '**Reasoning**', '**Notification**']);
   expect((await axe(messagesEl)).violations).toEqual([]);
   renderer.dispose();
 });
 
 it('reuses created message elements instead of searching the growing history for each response', () => {
   const { renderer, messagesEl } = setup();
-  const query = jest.spyOn(messagesEl, 'querySelector');
+  const query = vi.spyOn(messagesEl, 'querySelector');
   const history: ChatMessage[] = Array.from({ length: 100 }, (_, index) => ({
     id: `indexed-${index}`, role: index % 2 ? 'assistant' : 'user', content: `Message ${index}`, timestamp: testDate().getTime(),
   }));
-  const positionLookup = jest.spyOn(history, 'indexOf');
+  const positionLookup = vi.spyOn(history, 'indexOf');
   renderer.renderMessages(history, () => 'Hello');
   expect(positionLookup).not.toHaveBeenCalled();
   expect(query.mock.calls.filter(([selector]) => selector.includes('data-message-id') || selector.includes('data-work-message-id'))).toHaveLength(0);

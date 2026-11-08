@@ -148,9 +148,8 @@ export class ProviderRegistry {
     return this.getProviderRegistration(providerId).formatQuestionReply?.(tool, answers) ?? null;
   }
 
-  static getCapabilities(providerId: ProviderId = DEFAULT_CHAT_PROVIDER_ID, providerState?: Record<string, unknown>): ProviderCapabilities {
-    const registration = this.getProviderRegistration(providerId);
-    return registration.getConversationCapabilities?.(providerState) ?? registration.capabilities;
+  static getCapabilities(providerId: ProviderId = DEFAULT_CHAT_PROVIDER_ID): ProviderCapabilities {
+    return this.getProviderRegistration(providerId).capabilities;
   }
 
   static getEnvironmentKeyPatterns(providerId: ProviderId): RegExp[] {
@@ -163,6 +162,11 @@ export class ProviderRegistry {
 
   static getChatUIConfig(providerId: ProviderId = DEFAULT_CHAT_PROVIDER_ID): ProviderChatUIConfig {
     return this.getProviderRegistration(providerId).chatUIConfig;
+  }
+
+  static prepareAssistantMarkdown(providerId: ProviderId, markdown: string): string {
+    const ui = Object.hasOwn(this.registrations, providerId) ? this.registrations[providerId]?.chatUIConfig : undefined;
+    return ui?.prepareAssistantMarkdown?.(markdown) ?? markdown;
   }
 
   static getTitleGenerationModelOptions(
@@ -183,7 +187,8 @@ export class ProviderRegistry {
         seenValues.add(option.value);
         options.push({
           ...option,
-          label: `${this.getProviderDisplayName(providerId)}: ${option.label}`,
+          // The flat list has no group headings, so an upstream group stays in the label.
+          label: `${this.getProviderDisplayName(providerId)}: ${option.group ? `${option.group}/` : ''}${option.label}`,
         });
       }
     }

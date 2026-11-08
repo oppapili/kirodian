@@ -6,17 +6,28 @@
 
 import { parser } from '@lezer/markdown';
 
-interface CodeBlock {
+interface ProtectedBlock {
   end: number;
   infoStart?: number;
 }
 
-/** The block parser owns code boundaries, including implicit container endings. */
-function getCodeBlocks(markdown: string): Map<number, CodeBlock> {
-  const blocks = new Map<number, CodeBlock>();
+/** The block parser owns code and reference-definition boundaries, including container endings. */
+function getProtectedBlocks(markdown: string, literalLinks: Array<{ from: number; to: number }>, preserveLiterals: boolean): Map<number, ProtectedBlock> {
+  const blocks = new Map<number, ProtectedBlock>();
   parser.parse(markdown).iterate({
     enter(node) {
-      if (node.name !== 'FencedCode' && node.name !== 'CodeBlock') return;
+      if (node.name === 'Link' || node.name === 'Image') {
+        if (preserveLiterals) {
+          literalLinks.push({ from: node.from, to: node.to });
+        } else {
+          for (const name of ['URL', 'LinkTitle']) {
+            const part = node.node.getChild(name);
+            if (part) literalLinks.push({ from: part.from, to: part.to });
+          }
+        }
+        return false;
+      }
+      if (node.name !== 'FencedCode' && node.name !== 'CodeBlock' && node.name !== 'LinkReference') return;
       const marker = node.name === 'FencedCode' ? node.node.getChild('CodeMark') : null;
       const lineStart = markdown.lastIndexOf('\n', node.from) + 1;
       let end = node.to;
@@ -37,6 +48,12 @@ interface ParagraphContext {
   blockquoteDepth: number;
   listIndents: number[];
   containers: ContainerToken[];
+}
+
+interface InlineScan {
+  codeBlocks: ReadonlyMap<number, ProtectedBlock>;
+  dollarClosers?: Map<number, number[]>;
+  paragraphEnds: Map<string, { start: number; end: number }>;
 }
 
 type ActiveListContext = Pick<ParagraphContext, 'blockquoteDepth' | 'listIndents'>;
@@ -289,6 +306,34 @@ function findMatchingDollarRun(
   return null;
 }
 
+/** Index closing runs once, so unmatched currency dollars do not rescan the suffix. */
+function findIndexedDollarEnd(markdown: string, start: number, runLength: number, scan: InlineScan): number | null {
+  if (runLength === 1 && !canOpenInlineMath(markdown, start)) return null;
+  if (!scan.dollarClosers) {
+    scan.dollarClosers = new Map([[1, []], [2, []]]);
+    for (let index = markdown.indexOf('$'); index !== -1;) {
+      if (isBackslashEscaped(markdown, index)) {
+        index = markdown.indexOf('$', index + 1);
+        continue;
+      }
+      const length = readDollarRun(markdown, index);
+      if (length === 2 || length === 1 && canCloseInlineMath(markdown, index)) {
+        scan.dollarClosers.get(length)!.push(index);
+      }
+      index = markdown.indexOf('$', index + length);
+    }
+  }
+  const closers = scan.dollarClosers.get(runLength)!;
+  let low = 0;
+  let high = closers.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (closers[middle] < start + runLength) low = middle + 1;
+    else high = middle;
+  }
+  return low < closers.length ? closers[low] + runLength - 1 : null;
+}
+
 function getParagraphContinuationContent(
   line: string,
   context: ParagraphContext,
@@ -318,8 +363,11 @@ function findInlineBlockEnd(
   markdown: string,
   start: number,
   context: ParagraphContext,
-  codeBlocks: ReadonlyMap<number, CodeBlock>,
+  scan: InlineScan,
 ): number {
+  const key = context.containers.map(container => container.type === 'blockquote' ? '>' : container.indent).join(',');
+  const cached = scan.paragraphEnds.get(key);
+  if (cached && cached.start <= start && start <= cached.end) return cached.end;
   let lineEnd = markdown.indexOf('\n', start);
   while (lineEnd !== -1) {
     const nextLineStart = lineEnd + 1;
@@ -332,14 +380,16 @@ function findInlineBlockEnd(
     if (
       blockContent === null
       || /^[ \t\r]*$/.test(blockContent)
-      || codeBlocks.has(nextLineStart)
+      || scan.codeBlocks.has(nextLineStart)
       || startsNonParagraphBlock(blockContent)
       || startsInterruptingHTMLBlock(blockContent)
     ) {
+      scan.paragraphEnds.set(key, { start, end: lineEnd });
       return lineEnd;
     }
     lineEnd = nextLineEnd;
   }
+  scan.paragraphEnds.set(key, { start, end: markdown.length });
   return markdown.length;
 }
 
@@ -396,7 +446,7 @@ function findAutolinkEnd(line: string, start: number): number | null {
   }
 
   const destination = line.slice(start + 1, end);
-  if (!destination || /[\s<>\\()[\]]/.test(destination)) {
+  if (!destination || /[\s<>]/.test(destination)) {
     return null;
   }
 
@@ -464,7 +514,8 @@ function splitInlineMarkdown(
   lineStart: number,
   context: ParagraphContext,
   segments: MarkdownSegment[],
-  codeBlocks: ReadonlyMap<number, CodeBlock>,
+  scan: InlineScan,
+  preserveLiterals: boolean,
 ): InlineContinuation {
   let segmentStart = 0;
   let bracketDepth = 0;
@@ -481,7 +532,7 @@ function splitInlineMarkdown(
         segmentStart = end + 1;
         index = end;
       } else {
-        const inlineBlockEnd = findInlineBlockEnd(markdown, lineStart + index, context, codeBlocks);
+        const inlineBlockEnd = findInlineBlockEnd(markdown, lineStart + index, context, scan);
         const sourceEnd = findMatchingBacktickRun(
           markdown,
           lineStart + index,
@@ -501,25 +552,20 @@ function splitInlineMarkdown(
     if (char === '$' && !isBackslashEscaped(line, index)) {
       const runLength = readDollarRun(line, index);
       if (runLength <= 2) {
-        const end = findMatchingDollarRun(line, index, runLength);
-        if (end !== null) {
+        const sourceEnd = findIndexedDollarEnd(markdown, lineStart + index, runLength, scan);
+        if (sourceEnd !== null && sourceEnd < lineStart + line.length) {
+          const end = sourceEnd - lineStart;
           appendSegment(segments, line.slice(segmentStart, index), true);
-          appendSegment(segments, line.slice(index, end + 1), true);
+          appendSegment(segments, line.slice(index, end + 1), !preserveLiterals);
           segmentStart = end + 1;
           index = end;
         } else {
           const mathEnd = runLength === 1
-            ? findInlineBlockEnd(markdown, lineStart + index, context, codeBlocks)
+            ? findInlineBlockEnd(markdown, lineStart + index, context, scan)
             : markdown.length;
-          const sourceEnd = findMatchingDollarRun(
-            markdown,
-            lineStart + index,
-            runLength,
-            mathEnd,
-          );
-          if (sourceEnd !== null && sourceEnd >= lineStart + line.length) {
+          if (sourceEnd !== null && sourceEnd - runLength + 1 < mathEnd) {
             appendSegment(segments, line.slice(segmentStart, index), true);
-            appendSegment(segments, line.slice(index), true);
+            appendSegment(segments, line.slice(index), !preserveLiterals);
             return { mathRunLength: runLength };
           }
           index += runLength - 1;
@@ -592,9 +638,10 @@ function splitInlineMarkdown(
   return {};
 }
 
-function splitMarkdown(markdown: string): MarkdownSegment[] {
+function splitMarkdown(markdown: string, literalLinks: Array<{ from: number; to: number }>, preserveLiterals: boolean): MarkdownSegment[] {
   const segments: MarkdownSegment[] = [];
-  const codeBlocks = getCodeBlocks(markdown);
+  const codeBlocks = getProtectedBlocks(markdown, literalLinks, preserveLiterals);
+  const scan: InlineScan = { codeBlocks, paragraphEnds: new Map() };
   let rawHtmlTag: string | null = null;
   let inlineCodeRunLength: number | null = null;
   let inlineHtmlEnd: number | null = null;
@@ -628,7 +675,8 @@ function splitMarkdown(markdown: string): MarkdownSegment[] {
           lineStart + codeEnd + 1,
           paragraphContext ?? { blockquoteDepth: 0, listIndents: [], containers: [] },
           segments,
-          codeBlocks,
+          scan,
+          preserveLiterals,
         );
         inlineCodeRunLength = continuation.codeRunLength ?? null;
         inlineHtmlEnd = continuation.htmlEnd ?? null;
@@ -641,9 +689,9 @@ function splitMarkdown(markdown: string): MarkdownSegment[] {
     if (inlineMathRunLength !== null) {
       const mathEnd = findMatchingDollarRun(line, -inlineMathRunLength, inlineMathRunLength);
       if (mathEnd === null) {
-        appendSegment(segments, line, true);
+        appendSegment(segments, line, !preserveLiterals);
       } else {
-        appendSegment(segments, line.slice(0, mathEnd + 1), true);
+        appendSegment(segments, line.slice(0, mathEnd + 1), !preserveLiterals);
         const remainder = line.slice(mathEnd + 1);
         const continuation = splitInlineMarkdown(
           markdown,
@@ -651,7 +699,8 @@ function splitMarkdown(markdown: string): MarkdownSegment[] {
           lineStart + mathEnd + 1,
           paragraphContext ?? { blockquoteDepth: 0, listIndents: [], containers: [] },
           segments,
-          codeBlocks,
+          scan,
+          preserveLiterals,
         );
         inlineCodeRunLength = continuation.codeRunLength ?? null;
         inlineHtmlEnd = continuation.htmlEnd ?? null;
@@ -674,7 +723,8 @@ function splitMarkdown(markdown: string): MarkdownSegment[] {
           lineStart + localEnd + 1,
           paragraphContext ?? { blockquoteDepth: 0, listIndents: [], containers: [] },
           segments,
-          codeBlocks,
+          scan,
+          preserveLiterals,
         );
         inlineCodeRunLength = continuation.codeRunLength ?? null;
         inlineHtmlEnd = continuation.htmlEnd ?? null;
@@ -776,7 +826,8 @@ function splitMarkdown(markdown: string): MarkdownSegment[] {
       lineStart,
       currentContext,
       segments,
-      codeBlocks,
+      scan,
+      preserveLiterals,
     );
     inlineCodeRunLength = continuation.codeRunLength ?? null;
     inlineHtmlEnd = continuation.htmlEnd ?? null;
@@ -792,6 +843,8 @@ function splitMarkdown(markdown: string): MarkdownSegment[] {
 }
 
 interface MarkdownTransforms {
+  /** Keep recognized math and complete links literal while transforming surrounding prose. */
+  preserveLiterals?: boolean;
   fence?: (opener: string, fence: MarkdownFenceOpening) => string;
   text?: (text: string) => string;
   rawHtml?: (text: string) => string;
@@ -803,19 +856,37 @@ export function transformMarkdownSegments(
   markdown: string,
   transforms: MarkdownTransforms,
 ): string {
-  return splitMarkdown(markdown)
+  const literalLinks: Array<{ from: number; to: number }> = [];
+  let offset = 0;
+  let nextLink = 0;
+  return splitMarkdown(markdown, literalLinks, transforms.preserveLiterals === true)
     .map(segment => {
-      if (segment.fence) {
-        return transforms.fence?.(segment.text, segment.fence) ?? segment.text;
-      }
-      if (segment.wikilink) {
-        return transforms.wikilink?.(segment.text, segment.wikilink) ?? segment.text;
-      }
-      if (segment.rawHtml) {
-        return transforms.rawHtml?.(segment.text) ?? segment.text;
-      }
-      if (segment.transformable) {
-        return transforms.text?.(segment.text) ?? segment.text;
+      const start = offset;
+      offset += segment.text.length;
+      const { fence, wikilink, rawHtml, transformable } = segment;
+      const transform = fence
+        ? (text: string) => transforms.fence?.(text, fence) ?? text
+        : wikilink
+          ? (text: string) => transforms.wikilink?.(text, wikilink) ?? text
+          : rawHtml ? transforms.rawHtml : transformable ? transforms.text : undefined;
+      if (transform) {
+        if (literalLinks.length === 0) return transform(segment.text);
+        while (nextLink < literalLinks.length && literalLinks[nextLink].to <= start) nextLink++;
+        let cursor = start;
+        const parts: string[] = [];
+        while (nextLink < literalLinks.length && literalLinks[nextLink].from < offset) {
+          const link = literalLinks[nextLink];
+          const before = markdown.slice(cursor, Math.max(cursor, link.from));
+          parts.push(transform(before));
+          const end = Math.min(offset, link.to);
+          parts.push(markdown.slice(Math.max(cursor, link.from), end));
+          cursor = end;
+          if (link.to > offset) break;
+          nextLink++;
+        }
+        const tail = markdown.slice(cursor, offset);
+        parts.push(transform(tail));
+        return parts.join('');
       }
       return segment.text;
     })

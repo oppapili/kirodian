@@ -1,12 +1,12 @@
 /**
  * Shared fixture for suites that drive a real TabManager over a mocked runtime factory.
  *
- * Each suite installs the module mocks itself so Jest can hoist them, delegating to this
- * module through `jest.requireActual`:
+ * Each suite installs the module mocks itself so Vitest can hoist them, delegating to this
+ * module through `vi.importActual`:
  *
  * ```ts
- * jest.mock('@/features/chat/tabs/TabLifecycle', () => (
- *   jest.requireActual('@test/helpers/features/chat/TabManagerTestHarness').tabLifecycleModuleMock()
+ * vi.mock('@/features/chat/tabs/TabLifecycle', async () => (
+ *   (await vi.importActual('@test/helpers/features/chat/TabManagerTestHarness')).tabLifecycleModuleMock()
  * ));
  * ```
  *
@@ -15,8 +15,10 @@
  */
 import { createProjectsFake, projectRecord } from '@test/helpers/features/chat/ProjectsFake';
 import { createMockEl } from '@test/helpers/MockElement';
+import type { Mock } from 'vitest';
 
 import { ComposerDraftController } from '@/features/chat/composer/ComposerDraftController';
+import { LinkedContentController } from '@/features/chat/linked-content/LinkedContentController';
 import { ChatSessionRuntime } from '@/features/chat/sessions/ChatSessionRuntime';
 import { ChatState } from '@/features/chat/state/ChatState';
 import type { TabManager } from '@/features/chat/tabs/TabManager';
@@ -24,13 +26,14 @@ import { TabSession } from '@/features/chat/tabs/TabSession';
 import type { TabLayoutPolicy } from '@/features/chat/tabs/types';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
-export const mockDestroyTab = jest.fn().mockResolvedValue(undefined);
-export const mockDrainTabForShutdownSnapshot = jest.fn().mockResolvedValue({
+
+export const mockDestroyTab = vi.fn().mockResolvedValue(undefined);
+export const mockDrainTabForShutdownSnapshot = vi.fn().mockResolvedValue({
   cleanupFailures: [],
 });
 export const mockTabs: any[] = [];
-export const mockCreateTab = jest.fn((options: Record<string, any>) => createMockTab(options));
-export const mockCreateTabRuntime = jest.fn(async (options: Record<string, any>) => {
+export const mockCreateTab = vi.fn((options: Record<string, any>) => createMockTab(options));
+export const mockCreateTabRuntime = vi.fn(async (options: Record<string, any>) => {
   const captureReviewableSettlement = options.captureReviewableSettlement
     ? (outcome: 'completed' | 'error' = 'completed') => (
         options.captureReviewableSettlement(tab, outcome)
@@ -47,37 +50,40 @@ export const mockCreateTabRuntime = jest.fn(async (options: Record<string, any>)
   });
   return tab;
 });
-export const mockChooseForkTarget = jest.fn();
+export const mockChooseForkTarget = vi.fn();
 
 export const commandLoader = {
-  getCacheFingerprint: jest.fn().mockReturnValue('commands-v1'),
-  isAvailable: jest.fn().mockReturnValue(true),
-  loadCommands: jest.fn().mockResolvedValue({
+  getCacheFingerprint: vi.fn().mockReturnValue('commands-v1'),
+  isAvailable: vi.fn().mockReturnValue(true),
+  loadCommands: vi.fn().mockResolvedValue({
     status: 'ready',
     items: [{ description: 'Review changes', name: 'review' }],
   }),
 };
 export const commandCatalog = {
-  getDropdownConfig: jest.fn().mockReturnValue({}),
-  listDropdownEntries: jest.fn().mockResolvedValue([]),
+  getDropdownConfig: vi.fn().mockReturnValue({}),
+  listDropdownEntries: vi.fn().mockResolvedValue([]),
 };
 
-/** Records an explicit Linked content choice the way the controller's snapshot reports it. */
-function createMockLinkedContent() {
-  let snapshot: { mode: string; path: string | null } = { mode: 'auto-draft', path: null };
-  return {
-    getSnapshot: () => snapshot,
-    selectExplicit: jest.fn((path: string | null) => { snapshot = { mode: 'explicit-draft', path }; }),
-  };
+/** The real Linked content owner over the plugin's app; only the vault index is empty. */
+function createLinkedContent(plugin: any): LinkedContentController {
+  const controller = new LinkedContentController({
+    app: plugin.app,
+    getExcludedTags: () => plugin.settings?.excludedTags ?? [],
+    getCachedVaultFiles: () => [],
+    getCachedVaultFolders: () => [],
+  });
+  controller.resetAutoDraft();
+  return controller;
 }
 
 const mockDraftSessions = new Map<string, ChatSessionRuntime>();
-const mockLinkedContent = new WeakMap<ChatSessionRuntime, ReturnType<typeof createMockLinkedContent>>();
+const mockLinkedContent = new WeakMap<ChatSessionRuntime, LinkedContentController>();
 const mockDraftProjects = new WeakMap<ChatSessionRuntime, string | null>();
 
 export function createMockTab(options: Record<string, any>): any {
   const review = new ChatState();
-  const input = { value: '', focus: jest.fn() };
+  const input = { value: '', focus: vi.fn() };
   const tab = {
     id: options.tabId ?? `tab-${mockTabs.length + 1}`,
     conversationId: options.conversation?.id ?? null,
@@ -86,7 +92,7 @@ export function createMockTab(options: Record<string, any>): any {
       getCommandSnapshot: () => undefined,
       hasBackgroundWork: false,
       publishedBackgroundWork: false,
-      prepare: jest.fn().mockResolvedValue(undefined),
+      prepare: vi.fn().mockResolvedValue(undefined),
       state: 'absent',
     },
     hydrationState: options.conversation ? 'idle' : 'ready',
@@ -96,7 +102,7 @@ export function createMockTab(options: Record<string, any>): any {
     ...options.initialState,
     captureReviewableSettlement: options.captureReviewableSettlement ?? null,
     state: {
-      acknowledgeReview: jest.fn(() => review.acknowledgeReview()),
+      acknowledgeReview: vi.fn(() => review.acknowledgeReview()),
       get reviewEpoch() { return review.reviewEpoch; },
       attention: null,
       currentConversationId: options.conversation?.id ?? null,
@@ -104,24 +110,24 @@ export function createMockTab(options: Record<string, any>): any {
       isRewinding: false,
       isStreaming: false,
       messages: [],
-      markReviewRequired: jest.fn(),
+      markReviewRequired: vi.fn(),
       requiresAction: false,
     },
     services: {
       subagentManager: {
-        hasActiveAsyncSubagents: jest.fn().mockReturnValue(false),
+        hasActiveAsyncSubagents: vi.fn().mockReturnValue(false),
       },
     },
-    composer: { focus: jest.fn() },
-    linkedContent: null as unknown as ReturnType<typeof createMockLinkedContent>,
+    composer: { focus: vi.fn() },
+    linkedContent: null as unknown as LinkedContentController,
     controllers: {
       drafts: new ComposerDraftController({ getInput: () => input as never, getImages: () => null, getDestination: () => 'main' }),
       conversationController: {
-        initializeWelcome: jest.fn(),
-        save: jest.fn().mockResolvedValue(undefined),
-        cancelBranchDraft: jest.fn(),
+        initializeWelcome: vi.fn(),
+        save: vi.fn().mockResolvedValue(undefined),
+        cancelBranchDraft: vi.fn(),
         // The project seed belongs to the session's model, so a reattached session keeps it.
-        seedDraftProject: jest.fn((projectId: string | null) => { mockDraftProjects.set(tab.session.runtime, projectId); }),
+        seedDraftProject: vi.fn((projectId: string | null) => { mockDraftProjects.set(tab.session.runtime, projectId); }),
         get project() { return { projectId: mockDraftProjects.get(tab.session.runtime) ?? undefined, changeable: true }; },
       },
       inputController: {
@@ -144,7 +150,7 @@ export function createMockTab(options: Record<string, any>): any {
     ?? new ChatSessionRuntime({ ...tab }, tab.executionCoordinator as never, () => ({
       state: tab.state,
       get hasPendingInteraction() { return tab.state.requiresAction; },
-      hydrate: jest.fn(async () => { tab.hydrationState = 'ready'; }),
+      hydrate: vi.fn(async () => { tab.hydrationState = 'ready'; }),
       acknowledgeReviewIfVisible: () => tab.state.acknowledgeReview(),
       publish: () => tab.session.runtime.notifyChanged(),
       dismissInteractions: () => undefined,
@@ -156,7 +162,7 @@ export function createMockTab(options: Record<string, any>): any {
   mockDraftSessions.set(session.sessionKey, session);
   tab.session = new TabSession(tab, session);
   // Linked content belongs to the session's model, so a reattached session keeps its choice.
-  tab.linkedContent = mockLinkedContent.get(session) ?? createMockLinkedContent();
+  tab.linkedContent = mockLinkedContent.get(session) ?? createLinkedContent(options.plugin);
   mockLinkedContent.set(session, tab.linkedContent);
   for (const key of ['conversationId', 'providerId', 'draftModel'] as const) {
     Object.defineProperty(tab, key, { get: () => tab.session[key] });
@@ -172,15 +178,15 @@ export function createMockTab(options: Record<string, any>): any {
 
 export function tabLifecycleModuleMock() {
   return {
-    activateTab: jest.fn(),
-    commitProvisionalTab: jest.fn((tab) => {
+    activateTab: vi.fn(),
+    commitProvisionalTab: vi.fn((tab) => {
       tab.session.claimUserOwnership();
       if (tab.lifecycleState === 'provisional') tab.session.commitAdmission();
     }),
-    deactivateTab: jest.fn(),
+    deactivateTab: vi.fn(),
     drainTabForShutdownSnapshot: (...args: unknown[]) => mockDrainTabForShutdownSnapshot(...args),
     destroyTab: (...args: unknown[]) => mockDestroyTab(...args),
-    getTabTitle: jest.fn().mockReturnValue('Tab'),
+    getTabTitle: vi.fn().mockReturnValue('Tab'),
   };
 }
 
@@ -199,10 +205,10 @@ export function forkTargetModalModuleMock() {
 export function providerWorkspaceRegistryModuleMock() {
   return {
     ProviderWorkspaceRegistry: {
-      ensureInitialized: jest.fn().mockResolvedValue(undefined),
-      getCommandCatalog: jest.fn().mockImplementation(() => commandCatalog),
-      getIfInitialized: jest.fn().mockReturnValue({}),
-      getCommandLoader: jest.fn().mockImplementation(() => commandLoader),
+      ensureInitialized: vi.fn().mockResolvedValue(undefined),
+      getCommandCatalog: vi.fn().mockImplementation(() => commandCatalog),
+      getIfInitialized: vi.fn().mockReturnValue({}),
+      getCommandLoader: vi.fn().mockImplementation(() => commandLoader),
     },
   };
 }
@@ -210,20 +216,20 @@ export function providerWorkspaceRegistryModuleMock() {
 export function providerRegistryModuleMock() {
   return {
     ProviderRegistry: {
-      getRegisteredProviderIds: jest.fn().mockReturnValue(['claude', 'kiro']),
-      getEnabledProviderIds: jest.fn().mockReturnValue(['claude']),
-      getBlankTabProviderIds: jest.fn().mockReturnValue(['claude']),
-      isEnabled: jest.fn().mockReturnValue(true),
-      getChatUIConfig: jest.fn().mockReturnValue({ getModelOptions: () => [{ value: 'claude-default' }], getDefaultModel: () => 'claude-default' }),
-      getModelPolicy: jest.fn().mockReturnValue({ getModelOptions: () => [{ value: 'claude-default' }], getDefaultModel: () => 'claude-default' }),
-      getCapabilities: jest.fn().mockReturnValue({
+      getRegisteredProviderIds: vi.fn().mockReturnValue(['claude', 'kiro']),
+      getEnabledProviderIds: vi.fn().mockReturnValue(['claude']),
+      getBlankTabProviderIds: vi.fn().mockReturnValue(['claude']),
+      isEnabled: vi.fn().mockReturnValue(true),
+      getChatUIConfig: vi.fn().mockReturnValue({ getModelOptions: () => [{ value: 'claude-default' }], getDefaultModel: () => 'claude-default' }),
+      getModelPolicy: vi.fn().mockReturnValue({ getModelOptions: () => [{ value: 'claude-default' }], getDefaultModel: () => 'claude-default' }),
+      getCapabilities: vi.fn().mockReturnValue({
         providerId: 'claude',
         supportsProviderCommands: true,
       }),
-      getConversationHistoryService: jest.fn().mockReturnValue({
-        buildForkProviderState: jest.fn().mockReturnValue({ fork: true }),
+      getConversationHistoryService: vi.fn().mockReturnValue({
+        buildForkProviderState: vi.fn().mockReturnValue({ fork: true }),
       }),
-      resolveProviderForModel: jest.fn().mockReturnValue('claude'),
+      resolveProviderForModel: vi.fn().mockReturnValue('claude'),
     },
   };
 }
@@ -238,48 +244,47 @@ export function createPlugin(overrides: Record<string, unknown> = {}) {
       holdDraft: (runtime: ChatSessionRuntime) => ({ key: runtime.sessionKey, runtime, release: () => undefined }),
     },
     app: {
-      vault: { adapter: { basePath: '/vault' } },
+      vault: { adapter: { basePath: '/vault' }, getAbstractFileByPath: () => null },
       workspace: {
-        revealLeaf: jest.fn(),
-        setActiveLeaf: jest.fn(),
+        getActiveFile: () => null,
+        revealLeaf: vi.fn(),
+        setActiveLeaf: vi.fn(),
       },
     },
     settings: {},
     providerHost: {
       executionLifecycleRegistry: {
-        getProviderGeneration: jest.fn().mockReturnValue(0),
+        getProviderGeneration: vi.fn().mockReturnValue(0),
       },
     },
-    createConversation: jest.fn().mockResolvedValue({
+    createConversation: vi.fn().mockResolvedValue({
       id: 'forked',
       providerId: 'claude',
     }),
-    deleteConversation: jest.fn().mockResolvedValue(undefined),
-    findConversationAcrossViews: jest.fn().mockReturnValue(null),
-    getAgentSkillResourceGeneration: jest.fn().mockReturnValue(0),
-    getCachedConversation: jest.fn().mockReturnValue(null),
-    getConversationById: jest.fn().mockResolvedValue(null),
-    getConversationList: jest.fn().mockReturnValue([]),
+    deleteConversation: vi.fn().mockResolvedValue(undefined),
+    findConversationAcrossViews: vi.fn().mockReturnValue(null),
+    getAgentSkillResourceGeneration: vi.fn().mockReturnValue(0),
+    getCachedConversation: vi.fn().mockReturnValue(null),
+    getConversationById: vi.fn().mockResolvedValue(null),
+    getConversationList: vi.fn().mockReturnValue([]),
     getConversationSummary(id: string) { return this.getCachedConversation(id); },
-    getConversationSync: jest.fn().mockReturnValue(null),
-    updateConversation: jest.fn().mockResolvedValue(undefined),
+    getConversationSync: vi.fn().mockReturnValue(null),
+    updateConversation: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   } as any;
 }
 
-export function createManager(
+export async function createManager(
   plugin = createPlugin(),
   callbacks: Record<string, unknown> = {},
   viewOverrides: Record<string, unknown> = {},
   layoutPolicy?: Partial<TabLayoutPolicy>,
 ) {
   // Loaded lazily: TabManager pulls in the mocked modules, whose factories load this module.
-  const { TabManager: TabManagerClass } = jest.requireActual<{ TabManager: typeof TabManager }>(
-    '@/features/chat/tabs/TabManager',
-  );
+  const { TabManager: TabManagerClass } = await import('@/features/chat/tabs/TabManager');
   const view = {
     leaf: {},
-    getTabManager: jest.fn(),
+    getTabManager: vi.fn(),
     ...viewOverrides,
   } as any;
   return {
@@ -329,8 +334,8 @@ export function deferred<T>(): {
 }
 
 /** Controls hydration at the runtime factory boundary, including replacement presentations. */
-export function mockNextHydration(hydrate: (conversationId: string) => Promise<unknown>): jest.Mock {
-  const hydration = jest.fn(hydrate);
+export function mockNextHydration(hydrate: (conversationId: string) => Promise<unknown>): Mock {
+  const hydration = vi.fn(hydrate);
   mockCreateTabRuntime.mockImplementationOnce(async options => {
     const tab = createMockTab(options);
     tab.session.runtime.model.hydrate = async () => {

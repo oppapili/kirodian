@@ -1,12 +1,16 @@
 import '@/providers';
 
+import type { MockedFunction } from 'vitest';
+
 import { ConversationRepository } from '@/app/conversations/ConversationRepository';
 import type { ConversationPersistence } from '@/app/storage/ConversationPersistenceStore';
 import type { SessionMetadataReader } from '@/app/storage/SessionStorage';
 import type { ProviderSessionSnapshot } from '@/core/execution';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
-import type { Conversation } from '@/core/types';
+import type { ChatMessage, Conversation } from '@/core/types';
+
+
 
 function createConversation(id = 'conversation-1'): Conversation {
   return {
@@ -21,29 +25,25 @@ function createConversation(id = 'conversation-1'): Conversation {
 }
 
 interface MockPersistence extends ConversationPersistence {
-  saveMetadata: jest.MockedFunction<ConversationPersistence['saveMetadata']>;
-  deleteCurrentMetadata: jest.MockedFunction<
-    ConversationPersistence['deleteCurrentMetadata']
-  >;
-  assignMetadataToDevice: jest.MockedFunction<
-    ConversationPersistence['assignMetadataToDevice']
-  >;
+  saveMetadata: MockedFunction<ConversationPersistence['saveMetadata']>;
+  deleteCurrentMetadata: MockedFunction<ConversationPersistence['deleteCurrentMetadata']>;
+  assignMetadataToDevice: MockedFunction<ConversationPersistence['assignMetadataToDevice']>;
 }
 
 function createPersistence(): MockPersistence {
   const metadataReader: SessionMetadataReader = {
-    revalidate: jest.fn().mockResolvedValue([]),
-    load: jest.fn(),
-    scan: jest.fn(),
-    loadMetadata: jest.fn(),
-    scanMetadata: jest.fn(),
-    listMetadata: jest.fn(),
+    revalidate: vi.fn().mockResolvedValue([]),
+    load: vi.fn(),
+    scan: vi.fn(),
+    loadMetadata: vi.fn(),
+    scanMetadata: vi.fn(),
+    listMetadata: vi.fn(),
   };
   return {
     metadataReader,
-    saveMetadata: jest.fn().mockResolvedValue(undefined),
-    deleteCurrentMetadata: jest.fn().mockResolvedValue(undefined),
-    assignMetadataToDevice: jest.fn().mockResolvedValue(undefined),
+    saveMetadata: vi.fn().mockResolvedValue(undefined),
+    deleteCurrentMetadata: vi.fn().mockResolvedValue(undefined),
+    assignMetadataToDevice: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -51,7 +51,7 @@ function createRepository(
   conversation = createConversation(),
   persistence = createPersistence(),
 ) {
-  const onConversationDeleted = jest.fn().mockResolvedValue(undefined);
+  const onConversationDeleted = vi.fn().mockResolvedValue(undefined);
   const repository = new ConversationRepository({
     providers: ProviderRegistry,
     providerSettings: ProviderSettingsCoordinator,
@@ -78,9 +78,10 @@ function deferred<T = void>(): {
   return { promise, resolve, reject };
 }
 
+
 describe('ConversationRepository persistence queue and binding fences', () => {
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   it('persists only the latest eligible snapshot revision at queued commit time', async () => {
@@ -149,6 +150,57 @@ describe('ConversationRepository persistence queue and binding fences', () => {
       retainedFutureField: 'preserve-me',
       cursor: 2,
     });
+  });
+
+  it('copies saved history once while isolating queued, persisted, and committed state', async () => {
+    const conversation = createConversation();
+    const persistence = createPersistence();
+    const barrier = deferred<void>();
+    persistence.saveMetadata.mockImplementationOnce(async () => {
+      await barrier.promise;
+    });
+    const { repository } = createRepository(conversation, persistence);
+    const messages: ChatMessage[] = [
+      { id: 'user', role: 'user', content: 'Delegate', timestamp: 1 },
+      {
+        id: 'assistant', role: 'assistant', content: '', timestamp: 2,
+        toolCalls: [{
+          id: 'agent', name: 'Agent', input: { description: 'Helper' }, status: 'completed',
+          subagent: {
+            id: 'agent', description: 'Helper', status: 'completed', result: 'Done',
+            isExpanded: false, toolCalls: [],
+          },
+        }],
+      },
+    ];
+    const blockingSave = repository.rename(conversation.id, 'Queued title');
+    const clone = vi.spyOn(globalThis, 'structuredClone');
+    const saving = repository.update(conversation.id, { messages });
+    // The caller keeps mutating live chat state while the save waits in the queue.
+    messages[1].toolCalls![0].subagent!.result = 'Changed while queued';
+    messages.push({ id: 'late', role: 'user', content: 'Late', timestamp: 3 });
+    barrier.resolve();
+    await Promise.all([blockingSave, saving]);
+    const historyCopies = clone.mock.calls.filter(([value]) => (
+      (value as { messages?: unknown[] } | null)?.messages?.length
+    ));
+    clone.mockRestore();
+
+    expect(historyCopies).toHaveLength(1);
+    const saved = persistence.saveMetadata.mock.calls.at(-1)![0];
+    expect(saved.providerState).toEqual({
+      subagentData: { agent: expect.objectContaining({ status: 'completed', result: 'Done' }) },
+    });
+    messages[1].toolCalls![0].subagent!.result = 'Changed after commit';
+    expect((saved.providerState as any).subagentData.agent.result).toBe('Done');
+    const committed = repository.getSync(conversation.id)!;
+    expect(committed.messages.map(message => message.id)).toEqual(['user', 'assistant']);
+    expect(committed.messages[1].toolCalls![0].subagent!.result).toBe('Done');
+
+    // A later save replaces committed history without reaching the earlier persisted projection.
+    await repository.update(conversation.id, { messages: [committed.messages[0]] });
+    expect((saved.providerState as any).subagentData.agent.result).toBe('Done');
+    expect(persistence.saveMetadata.mock.calls.at(-1)![0].providerState).toBeUndefined();
   });
 
   it('rejects the wrong binding or generation and lets a released binding drain', async () => {
@@ -541,7 +593,7 @@ describe('ConversationRepository persistence queue and binding fences', () => {
 
 describe('ConversationRepository deletion persistence', () => {
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   it('restores the exact live binding and replays the newest snapshot after removal failure', async () => {

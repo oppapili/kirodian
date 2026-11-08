@@ -1,48 +1,85 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
+import '@/providers';
 
-import type * as ObsidianSettingsDOMHelper from '@test/helpers/ObsidianSettingsDOM';
+import { deserialize, serialize } from 'node:v8';
+
+import { axe } from '@test/helpers/accessibility';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
 import { Notice } from 'obsidian';
+import type { Mock } from 'vitest';
 
+import { SettingsCoordinator } from '@/app/settings/SettingsCoordinator';
 import type { CLIInstallation } from '@/core/providers/cli/CLIInstallationProbe';
+import { getEnvironmentVariablesForScope, setEnvironmentVariablesForScope } from '@/core/providers/providerEnvironment';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
 import { renderCLIInstallationSetting } from '@/shared/settings/CLIInstallationSetting';
 import { renderEnvironmentSettingsSection } from '@/shared/settings/EnvironmentSettingsSection';
 
-jest.mock('obsidian', () => {
-  const actual = jest.requireActual('../../../helpers/ObsidianSettingsDOM') as typeof ObsidianSettingsDOMHelper;
-  type TextAreaCallback = Parameters<InstanceType<typeof actual.Setting>['addTextArea']>[0];
 
-  class LabeledTextAreaSetting extends actual.Setting {
-    private label = '';
 
-    setName(value: string): this {
-      this.label = value;
-      return super.setName(value);
-    }
-
-    addTextArea(callback: TextAreaCallback): this {
-      return super.addTextArea((component) => {
-        component.inputEl.setAttribute('aria-label', this.label);
-        callback(component);
-      });
-    }
-  }
-
-  return { ...actual, Setting: LabeledTextAreaSetting };
-});
+vi.mock('obsidian', async () => (await vi.importActual<typeof import('@test/helpers/ObsidianSettingsDOM')>('@test/helpers/ObsidianSettingsDOM')));
 
 afterEach(() => {
-  (Notice as unknown as jest.Mock).mockClear();
+  (Notice as unknown as Mock).mockClear();
   document.body.replaceChildren();
+});
+
+it.each([
+  { name: 'adding a review key', initial: 'PATH=/before', inserted: 'MY_TOOL_SETTING=custom', shared: 'MY_TOOL_SETTING=custom', provider: 'ANTHROPIC_MODEL=before', warning: 'Review environment ownership for: MY_TOOL_SETTING' },
+  { name: 'removing a review key', initial: 'MY_TOOL_SETTING=old', inserted: 'PATH=/after', shared: 'PATH=/after', provider: 'ANTHROPIC_MODEL=before', warning: null },
+  { name: 'a legacy snippet changing two rendered scopes', initial: 'PATH=/before', providerInitial: 'PATH=/provider-wrong', legacy: true, inserted: 'PATH=/after\nMY_TOOL_SETTING=custom\nANTHROPIC_MODEL=after', shared: 'PATH=/after\nMY_TOOL_SETTING=custom', provider: 'ANTHROPIC_MODEL=after', warning: 'Review environment ownership for: MY_TOOL_SETTING' },
+])('refreshes the review message after $name', async ({ initial, inserted, shared, provider, warning, providerInitial, legacy }) => {
+  globalThis.structuredClone ??= value => deserialize(serialize(value));
+  const settings = {
+    sharedEnvironmentVariables: initial,
+    providerConfigs: { claude: { environmentVariables: providerInitial ?? 'ANTHROPIC_MODEL=before' } },
+    envSnippets: [{ id: 'snippet', name: 'Saved configuration', scope: legacy ? undefined : 'shared', envVars: inserted }],
+  };
+  let saved = '';
+  const coordinator = new SettingsCoordinator(settings, async draft => { saved = JSON.stringify(draft); });
+  const applyEnvironmentVariables = vi.fn((scope: Parameters<typeof setEnvironmentVariablesForScope>[1], text: string) => coordinator.mutate(draft => { setEnvironmentVariablesForScope(draft, scope, text); }));
+  const applyEnvironmentVariablesBatch = vi.fn((updates: Array<{ scope: Parameters<typeof setEnvironmentVariablesForScope>[1]; envText: string }>) => coordinator.mutate(draft => { for (const update of updates) setEnvironmentVariablesForScope(draft, update.scope, update.envText); }));
+  const mutateSettings = vi.fn(coordinator.mutate.bind(coordinator));
+  const host = {
+    settings,
+    app: { workspace: { getLeavesOfType: () => [] } },
+    getEnvironmentVariablesForScope: (scope: Parameters<typeof getEnvironmentVariablesForScope>[1]) => getEnvironmentVariablesForScope(settings, scope),
+    applyEnvironmentVariables,
+    applyEnvironmentVariablesBatch,
+    mutateSettings,
+  } as unknown as ProviderHost;
+  const root = document.body.createDiv({ cls: 'claudian-settings' });
+  const general = root.createDiv();
+  const specific = root.createDiv();
+  const sharedRefresh = vi.fn();
+  const providerRefresh = vi.fn();
+  renderEnvironmentSettingsSection({ container: general, plugin: host, scope: 'shared', name: 'Shared environment', desc: '', placeholder: '', renderCustomContextLimits: sharedRefresh });
+  renderEnvironmentSettingsSection({ container: specific, plugin: host, scope: 'provider:claude', name: 'Claude environment', desc: '', placeholder: '', renderCustomContextLimits: providerRefresh });
+  const originalWarning = within(general).queryByText(/^Review environment ownership/);
+  expect(originalWarning?.textContent ?? null).toBe(initial.startsWith('MY_TOOL_SETTING') ? 'Review environment ownership for: MY_TOOL_SETTING' : null);
+  const originalProviderWarning = within(specific).queryByText(/^Review environment ownership/);
+  expect(originalProviderWarning?.textContent ?? null).toBe(legacy ? 'Review environment ownership for: PATH' : null);
+  fireEvent.click(within(general).getByRole('button', { name: 'Insert' }));
+  await waitFor(() => expect(sharedRefresh).toHaveBeenCalledTimes(2));
+  expect({ single: applyEnvironmentVariables.mock.calls.length, batch: applyEnvironmentVariablesBatch.mock.calls.length })
+    .toEqual(legacy ? { single: 0, batch: 1 } : { single: 1, batch: 0 });
+  expect(mutateSettings).toHaveBeenCalledTimes(1);
+  expect(getEnvironmentVariablesForScope(settings, 'shared')).toBe(shared);
+  expect(getEnvironmentVariablesForScope(settings, 'provider:claude')).toBe(provider);
+  expect(getEnvironmentVariablesForScope(JSON.parse(saved), 'shared')).toBe(shared);
+  expect((within(general).getByRole('textbox', { name: 'Shared environment' }) as HTMLTextAreaElement).value).toBe(shared);
+  const message = within(general).queryByText(/^Review environment ownership/);
+  expect(message?.textContent ?? null).toBe(warning);
+  expect(message?.classList.contains('claudian-hidden') ?? false).toBe(false);
+  expect(within(specific).queryByText(/^Review environment ownership/)).toBeNull();
+  expect(await axe(root)).toHaveNoViolations();
 });
 
 it('shows the generic environment update notice when the detached update fails', async () => {
   let rejectApply: (error: Error) => void = () => {
     throw new Error('applyEnvironmentVariables was not invoked');
   };
-  const applyEnvironmentVariables = jest.fn(
+  const applyEnvironmentVariables = vi.fn(
     () => new Promise<void>((_resolve, reject) => {
       rejectApply = reject;
     }),
@@ -82,13 +119,13 @@ it('refreshes the rendered CLI installation after a successful environment updat
   let resolveApply: () => void = () => {
     throw new Error('applyEnvironmentVariables was not invoked');
   };
-  const applyEnvironmentVariables = jest.fn(
+  const applyEnvironmentVariables = vi.fn(
     () => new Promise<void>((resolve) => {
       resolveApply = resolve;
     }),
   );
   let installation: CLIInstallation = { path: '/synthetic/cli-old', version: '1.0.0', source: 'auto' };
-  const inspect = jest.fn(async () => installation);
+  const inspect = vi.fn(async () => installation);
   const host = {
     settings: { envSnippets: [] },
     app: { workspace: { getLeavesOfType: () => [] } },
@@ -135,14 +172,14 @@ it('refreshes the rendered CLI installation after a successful environment updat
 
 it('recovers with a refreshed installation when a later environment update succeeds', async () => {
   const applyResults: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
-  const applyEnvironmentVariables = jest.fn(
+  const applyEnvironmentVariables = vi.fn(
     () => new Promise<void>((resolve, reject) => {
       applyResults.push({ resolve, reject });
     }),
   );
   let installation: CLIInstallation = { path: '/synthetic/cli-before', version: '1.0.0', source: 'auto' };
-  const inspect = jest.fn(async () => installation);
-  const renderCustomContextLimits = jest.fn();
+  const inspect = vi.fn(async () => installation);
+  const renderCustomContextLimits = vi.fn();
   const host = {
     settings: { envSnippets: [] },
     app: { workspace: { getLeavesOfType: () => [] } },
@@ -218,7 +255,7 @@ it.each(applyFailureCases)('shows only generic feedback without leakage for a $l
   let rejectApply: (error: Error) => void = () => {
     throw new Error('applyEnvironmentVariables was not invoked');
   };
-  const applyEnvironmentVariables = jest.fn(
+  const applyEnvironmentVariables = vi.fn(
     () => new Promise<void>((_resolve, reject) => {
       rejectApply = reject;
     }),
@@ -249,7 +286,7 @@ it.each(applyFailureCases)('shows only generic feedback without leakage for a $l
   rejectApply(error);
 
   await waitFor(() => expect(Notice).toHaveBeenCalledWith('Could not complete environment update.'));
-  const noticeMessages = (Notice as unknown as jest.Mock).mock.calls.map((args: unknown[]) => String(args[0]));
+  const noticeMessages = (Notice as unknown as Mock).mock.calls.map((args: unknown[]) => String(args[0]));
   expect(noticeMessages).toEqual(['Could not complete environment update.']);
   const renderedText = document.body.textContent ?? '';
   expect(renderedText).not.toContain('fake-secret-value');

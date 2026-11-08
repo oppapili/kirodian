@@ -1,7 +1,7 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
+import { axe } from '@test/helpers/accessibility';
 import { fireEvent, screen, waitFor, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
 import type { App } from 'obsidian';
 import { Notice } from 'obsidian';
 
@@ -9,9 +9,9 @@ import { ProjectMemoryPathTakenError, type ProjectRecord } from '@/core/types';
 import { createProject, editProject, type ProjectUIHost } from '@/features/chat/projects/projectActions';
 import { t } from '@/i18n/i18n';
 
-jest.mock('obsidian', () => ({
-  ...jest.requireActual('@test/__mocks__/obsidian'),
-  ...jest.requireActual('@test/helpers/ObsidianSettingsDOM'),
+vi.mock('obsidian', async () => ({
+  ...(await vi.importActual<typeof import('@test/__mocks__/obsidian')>('@test/__mocks__/obsidian')),
+  ...(await vi.importActual<typeof import('@test/helpers/ObsidianSettingsDOM')>('@test/helpers/ObsidianSettingsDOM')),
 }));
 
 const record: ProjectRecord = {
@@ -21,11 +21,11 @@ const record: ProjectRecord = {
 
 function host() {
   const projects = {
-    create: jest.fn(async ({ name, instructions }: { name: string; instructions: string }) => (
+    create: vi.fn(async ({ name, instructions }: { name: string; instructions: string }) => (
       { ...record, id: 'created', name, instructions }
     )),
-    update: jest.fn().mockResolvedValue(undefined),
-    readMemory: jest.fn(async () => ({ content: '# Launch\n', revision: 'r0', modifiedAt: null })),
+    update: vi.fn().mockResolvedValue(undefined),
+    readMemory: vi.fn(async () => ({ content: '# Launch\n', revision: 'r0', modifiedAt: null })),
   };
   return { app: {} as App, projects, ui: { app: {} as App, projects } as unknown as ProjectUIHost };
 }
@@ -36,12 +36,12 @@ function field(dialog: HTMLElement, name: string): HTMLInputElement {
 
 beforeEach(() => {
   document.body.replaceChildren();
-  jest.clearAllMocks();
+  vi.clearAllMocks();
 });
 
 it('creates a project with long instructions and runs the follow-up once it exists', async () => {
   const projectHost = host();
-  const afterCreate = jest.fn().mockResolvedValue(undefined);
+  const afterCreate = vi.fn().mockResolvedValue(undefined);
   createProject(projectHost.ui, { run: afterCreate, failureMessage: 'move failed' });
   const dialog = screen.getByRole('dialog', { name: t('chat.projects.editor.titleNew') });
   expect((await axe(dialog)).violations).toEqual([]);
@@ -71,12 +71,13 @@ it('keeps the editor open when saving fails', async () => {
 
   expect(field(dialog, t('chat.projects.editor.name')).value).toBe('Launch');
   expect(field(dialog, t('chat.projects.editor.instructions')).value).toBe('Keep the memory current.');
+  fireEvent.input(field(dialog, t('chat.projects.editor.instructions')), { target: { value: 'Revised instructions' } });
   fireEvent.keyDown(field(dialog, t('chat.projects.editor.name')), { key: 'Enter' });
 
   await waitFor(() => expect(Notice).toHaveBeenCalledWith(t('chat.projects.errors.update')));
   expect(screen.getByRole('dialog')).toBe(dialog);
   expect(projectHost.projects.update).toHaveBeenCalledWith('project-1', {
-    name: 'Launch', instructions: 'Keep the memory current.', memoryPath: '.claudian/projects/launch/MEMORY.md',
+    instructions: 'Revised instructions',
   });
 });
 
@@ -182,7 +183,7 @@ it('saves a custom memory path normalized, appending a missing .md extension', a
 });
 
 it.each(['../outside.md', 'Work/', '', 'C:/Docs/MEMORY.md', 'Work/what?.md'])(
-  'blocks saving the invalid memory path %p with a message on the field until it is fixed',
+  'blocks saving the invalid memory path %o with a message on the field until it is fixed',
   async (invalid) => {
     const projectHost = host();
     createProject(projectHost.ui);
@@ -251,7 +252,7 @@ it('prefills the memory path on edit, keeps it when the name changes, and saves 
 
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(projectHost.projects.update).toHaveBeenCalledWith('project-1', {
-    name: 'Launch v2', instructions: 'Keep the memory current.', memoryPath: 'Work/Launch.md',
+    name: 'Launch v2', memoryPath: 'Work/Launch.md',
   });
 });
 
@@ -268,4 +269,15 @@ it('explains on the field a move that would replace another file and keeps the e
     .toBe(t('chat.projects.editor.memoryPathTaken', { path: 'Work/Launch.md' }));
   expect(Notice).not.toHaveBeenCalled();
   expect(screen.getByRole('dialog')).toBe(dialog);
+});
+
+
+it('keeps a case-only memory path edit in the update patch', async () => {
+  const projectHost = host();
+  editProject(projectHost.ui, { ...record, memoryPath: 'Work/Launch.md' });
+  const dialog = screen.getByRole('dialog', { name: t('chat.projects.editor.titleEdit') });
+  fireEvent.input(field(dialog, t('chat.projects.editor.memoryPath')), { target: { value: 'Work/launch.md' } });
+  fireEvent.click(within(dialog).getByRole('button', { name: t('common.save') }));
+  await waitFor(() => expect(dialog.isConnected).toBe(false));
+  expect(projectHost.projects.update).toHaveBeenCalledWith(record.id, { memoryPath: 'Work/launch.md' });
 });

@@ -1,6 +1,7 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 import '@/providers';
 
+import { axe } from '@test/helpers/accessibility';
 import { createHarness, releaseSideChatHarnesses, startSideChat } from '@test/helpers/features/chat/SideChatDOMHarness';
 import { screen, waitFor } from '@testing-library/dom';
 import { MarkdownRenderer } from 'obsidian';
@@ -16,11 +17,11 @@ import { cancelSelectedDestinationTurn } from '@/features/chat/tabs/TabInputEven
 const taskResultInterpreter = ProviderRegistry.getTaskResultInterpreter('kiro');
 
 beforeEach(() => {
-  jest.spyOn(MarkdownRenderer, 'render').mockImplementation(async (_app, markdown, el) => {
+  vi.spyOn(MarkdownRenderer, 'render').mockImplementation(async (_app, markdown, el) => {
     (el as HTMLElement).textContent = markdown;
   });
 });
-afterEach(async () => { await releaseSideChatHarnesses(); jest.restoreAllMocks(); });
+afterEach(async () => { await releaseSideChatHarnesses(); vi.restoreAllMocks(); });
 
 async function finishedSide() {
   const harness = createHarness();

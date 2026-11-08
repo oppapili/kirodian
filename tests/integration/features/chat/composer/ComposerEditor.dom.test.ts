@@ -1,7 +1,7 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
 import { fireEvent, waitFor, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
+import { axe } from '@test/helpers/accessibility';
 import { type App, type Component, MarkdownRenderer, Platform, TFile } from 'obsidian';
 
 import type { ProviderCommandDiscoveryResult } from '@/core/providers/commands/ProviderCommandDiscoveryResult';
@@ -35,9 +35,9 @@ function createApp(): App {
     metadataCache: { getFirstLinkpathDest: () => file },
     vault: {
       getFiles: () => [file], getAllLoadedFiles: () => [file],
-      getAbstractFileByPath: () => file, on: jest.fn(), offref: jest.fn(),
+      getAbstractFileByPath: () => file, on: vi.fn(), offref: vi.fn(),
     },
-    workspace: { iterateAllLeaves: jest.fn(), openLinkText: jest.fn().mockResolvedValue(undefined) },
+    workspace: { iterateAllLeaves: vi.fn(), openLinkText: vi.fn().mockResolvedValue(undefined) },
   } as unknown as App;
 }
 
@@ -51,8 +51,8 @@ beforeEach(() => {
   HTMLElement.prototype.removeClass = function (...names) { this.classList.remove(...names); };
   HTMLElement.prototype.hasClass = function (name) { return this.classList.contains(name); };
   HTMLElement.prototype.toggleClass = function (name, enabled) { for (const cls of Array.isArray(name) ? name : [name]) this.classList.toggle(cls, enabled); };
-  HTMLElement.prototype.scrollIntoView = jest.fn();
-  jest.mocked(MarkdownRenderer.render).mockReset().mockImplementation(async (_app, markdown, container) => {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+  vi.mocked(MarkdownRenderer.render).mockReset().mockImplementation(async (_app, markdown, container) => {
     const fixture = nativeLinks[markdown];
     if (!fixture) throw new Error(`No native rendering fixture for ${markdown}`);
     (container as HTMLElement).createEl('p').createEl('a', {
@@ -63,11 +63,11 @@ beforeEach(() => {
 
 it('renders a wikilink through Obsidian and opens it without changing the source text', async () => {
   const parent = document.body.createDiv();
-  const openLinkText = jest.fn().mockResolvedValue(undefined);
+  const openLinkText = vi.fn().mockResolvedValue(undefined);
   const app = createApp();
   app.workspace.openLinkText = openLinkText;
   const component = {} as Component;
-  jest.mocked(MarkdownRenderer.render).mockImplementationOnce(async (_app, markdown, container) => {
+  vi.mocked(MarkdownRenderer.render).mockImplementationOnce(async (_app, markdown, container) => {
     expect(markdown).toBe('[[Notes/A note.md]]');
     (container as HTMLElement).createEl('a', {
       cls: 'internal-link', text: 'A note', attr: { href: 'Notes/A note.md', 'data-href': 'Notes/A note.md' },
@@ -176,7 +176,7 @@ it('copies wikilink source and reconstructs links through paste, undo, redo, and
     const draft = input.value;
     input.selectionStart = 0;
     input.selectionEnd = draft.length;
-    const clipboardData = { clearData: jest.fn(), setData: jest.fn() };
+    const clipboardData = { clearData: vi.fn(), setData: vi.fn() };
     fireEvent.copy(content, { clipboardData });
     expect(clipboardData.setData).toHaveBeenCalledWith('text/plain', '[[Notes/A note.md#Heading|My alias]]');
     fireEvent.keyDown(content, { key: 'z', code: 'KeyZ', ctrlKey: true });
@@ -215,7 +215,7 @@ it('refreshes native link resolution after vault changes', async () => {
     editor.element.value = '[[Notes/B.md]]';
     editor.element.focus();
     await waitFor(() => within(parent).getByRole('link', { name: 'B' }));
-    jest.mocked(MarkdownRenderer.render).mockImplementationOnce(async (_app, _markdown, container) => {
+    vi.mocked(MarkdownRenderer.render).mockImplementationOnce(async (_app, _markdown, container) => {
       (container as HTMLElement).createEl('a', {
         cls: 'internal-link is-unresolved', text: 'B', attr: { href: 'Notes/B.md' },
       });
@@ -282,7 +282,7 @@ it('keeps the explicit send shortcut focused inside the editor', () => {
   const parent = document.body.createDiv();
   const editor = createEditor(parent);
   editor.element.focus();
-  const sendMessage = jest.fn().mockResolvedValue(undefined);
+  const sendMessage = vi.fn().mockResolvedValue(undefined);
   const tab = { dom: { inputEl: editor.element }, controllers: { inputController: { sendMessage } } };
   const event = new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: !Platform.isMacOS, metaKey: Platform.isMacOS, cancelable: true });
   expect(sendTabInputMessageFromExplicitEnterShortcut(tab as never, event, { requireInputFocus: true })).toBe(true);
@@ -294,7 +294,7 @@ it('keeps the explicit send shortcut focused inside the editor', () => {
 it('lets image attachment handling consume image paste before the rich editor inserts fallback text', () => {
   const parent = document.body.createDiv({ cls: 'claudian-input-wrapper' });
   const editor = createEditor(parent);
-  const keymap = { pushScope: jest.fn(), popScope: jest.fn() } as never;
+  const keymap = { pushScope: vi.fn(), popScope: vi.fn() } as never;
   const images = new ImageContextManager(keymap, parent, editor.element, {});
   editor.element.value = 'Keep this';
   editor.element.focus();
@@ -313,10 +313,10 @@ it('focuses an already open note when its composer link is clicked', async () =>
   const app = createApp();
   const leaf = {
     getViewState: () => ({ type: 'markdown', state: { file: 'Notes/A note.md' } }),
-    setEphemeralState: jest.fn(),
+    setEphemeralState: vi.fn(),
   };
-  jest.mocked(app.workspace.iterateAllLeaves).mockImplementation(visit => visit(leaf as never));
-  app.workspace.revealLeaf = jest.fn().mockResolvedValue(undefined);
+  vi.mocked(app.workspace.iterateAllLeaves).mockImplementation(visit => visit(leaf as never));
+  app.workspace.revealLeaf = vi.fn().mockResolvedValue(undefined);
   const editor = new ComposerEditor(parent, app, {} as Component);
   try {
     editor.element.value = 'Read [[Notes/A note.md|A note]] today';
@@ -516,7 +516,7 @@ it('accepts a visible prompt suggestion with Tab only, without sending', async (
   const parent = document.body.createDiv();
   const editor = createEditor(parent);
   const suggestion = new ComposerPromptSuggestion(editor.element, () => true, parent);
-  const send = jest.fn();
+  const send = vi.fn();
   editor.element.addEventListener('keydown', event => {
     if (suggestion.handleKeydown(event)) return;
     if (event.key === 'Enter') send();

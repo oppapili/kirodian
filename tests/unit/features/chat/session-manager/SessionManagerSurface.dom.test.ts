@@ -1,12 +1,12 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
 import '@/providers';
 
+import { axe } from '@test/helpers/accessibility';
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@test/helpers/defaultSettings';
 import { createProjectsFake, projectRecord } from '@test/helpers/features/chat/ProjectsFake';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
 import { Menu, setIcon } from 'obsidian';
 
 import { ClaudianSettingsStorage } from '@/app/settings/ClaudianSettingsStorage';
@@ -20,9 +20,9 @@ import { SessionManagerSurface } from '@/features/chat/session-manager/SessionMa
 import { ChatViewPublisher } from '@/features/chat/workspace/ChatViewPublisher';
 import { t } from '@/i18n/i18n';
 
-jest.mock('@/features/chat/projects/projectActions', () => ({
-  ...jest.requireActual('@/features/chat/projects/projectActions'),
-  createProject: jest.fn(),
+vi.mock('@/features/chat/projects/projectActions', async () => ({
+  ...(await vi.importActual<typeof import('@/features/chat/projects/projectActions')>('@/features/chat/projects/projectActions')),
+  createProject: vi.fn(),
 }));
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
@@ -59,22 +59,22 @@ function createSurface() {
     getConversationList: () => conversations,
     projects: createProjectsFake(),
   };
-  const requestNew = jest.fn();
+  const requestNew = vi.fn();
   const surface = new SessionManagerSurface({
     plugin: plugin as unknown as ChatFeatureHost,
     navigation: {
       contentExists: () => true,
       getConversationStatus: () => ({ openState: 'closed', isRunning: false }),
-      openConversation: jest.fn().mockResolvedValue(undefined),
-      openSessionConversation: jest.fn().mockResolvedValue(undefined),
-      startLinkedContentConversation: jest.fn().mockResolvedValue(undefined),
-      startProjectConversation: jest.fn().mockResolvedValue(undefined),
+      openConversation: vi.fn().mockResolvedValue(undefined),
+      openSessionConversation: vi.fn().mockResolvedValue(undefined),
+      startLinkedContentConversation: vi.fn().mockResolvedValue(undefined),
+      startProjectConversation: vi.fn().mockResolvedValue(undefined),
     },
     getActiveTab: () => null,
     isWide: () => true,
     canCreateTab: () => true,
     requestNew,
-    notifyOtherViews: jest.fn(),
+    notifyOtherViews: vi.fn(),
   });
   const host = document.body.createDiv();
   surface.mountSidebar(host);
@@ -86,8 +86,35 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 
+it.each(['editing query', 'list invalidation'])('preserves the search caret and selection while %s', async action => {
+  const { host, surface } = createSurface();
+  const ui = within(host);
+  try {
+    fireEvent.click(ui.getByRole('button', { name: 'Search' }));
+    fireEvent.input(ui.getByRole('searchbox', { name: 'Search sessions' }), { target: { value: 'abcdef' } });
+    const input = ui.getByRole('searchbox', { name: 'Search sessions' }) as HTMLInputElement;
+    if (action === 'editing query') {
+      input.value = 'abXcdef';
+      input.setSelectionRange(3, 3);
+      fireEvent.input(input);
+    } else {
+      input.setSelectionRange(1, 4, 'backward');
+      surface.invalidate();
+    }
+    const current = ui.getByRole('searchbox', { name: 'Search sessions' }) as HTMLInputElement;
+    expect(document.activeElement).toBe(current);
+    expect([current.selectionStart, current.selectionEnd, current.selectionDirection]).toEqual(
+      action === 'editing query' ? [3, 3, 'none'] : [1, 4, 'backward'],
+    );
+    expect(current.value).toBe(action === 'editing query' ? 'abXcdef' : 'abcdef');
+    expect(await axe(host)).toHaveNoViolations();
+  } finally {
+    surface.dispose();
+  }
+});
+
 it.each([false, true])('opens selectable history rows by keyboard (metadata popovers: %s)', async showMetadataPopover => {
-  const onSelectConversation = jest.fn().mockResolvedValue(undefined);
+  const onSelectConversation = vi.fn().mockResolvedValue(undefined);
   const browser = new SessionBrowser({
     plugin: {
       settings: { enableAutoTitleGeneration: false },
@@ -173,7 +200,7 @@ describe('projects section', () => {
   const menus = (): Array<{ items: MenuEntry[] }> => (Menu as unknown as { instances: Array<{ items: MenuEntry[] }> }).instances;
   const sectionName = (name: string, _count: number) => name;
   /** The icon most recently drawn inside a project toggle. */
-  const folderIcon = (toggle: HTMLElement) => jest.mocked(setIcon).mock.calls
+  const folderIcon = (toggle: HTMLElement) => vi.mocked(setIcon).mock.calls
     .filter(([element]) => toggle.contains(element)).at(-1)?.[1];
 
   function createProjectSurface({ wide = true, persisted }: {
@@ -203,7 +230,7 @@ describe('projects section', () => {
         projectRecord({ id: 'launch', name: 'Launch', createdAt: testDate({ days: -10 }).getTime() }),
         projectRecord({ id: 'empty', name: 'Empty', createdAt: testDate({ days: -2 }).getTime() }),
       ]),
-      mutateSettings: jest.fn(async (mutation: (value: ClaudianSettings) => void) => {
+      mutateSettings: vi.fn(async (mutation: (value: ClaudianSettings) => void) => {
         if (coordinator) return coordinator.mutate(mutation);
         mutation(settings);
         views.surface?.invalidate();
@@ -212,10 +239,10 @@ describe('projects section', () => {
     const navigation = {
       contentExists: () => true,
       getConversationStatus: () => ({ openState: 'closed', isRunning: false }) as const,
-      openConversation: jest.fn().mockResolvedValue(undefined),
-      openSessionConversation: jest.fn().mockResolvedValue(undefined),
-      startLinkedContentConversation: jest.fn().mockResolvedValue(undefined),
-      startProjectConversation: jest.fn().mockResolvedValue(undefined),
+      openConversation: vi.fn().mockResolvedValue(undefined),
+      openSessionConversation: vi.fn().mockResolvedValue(undefined),
+      startLinkedContentConversation: vi.fn().mockResolvedValue(undefined),
+      startProjectConversation: vi.fn().mockResolvedValue(undefined),
     };
     const surface = new SessionManagerSurface({
       plugin: plugin as unknown as ChatFeatureHost,
@@ -223,8 +250,8 @@ describe('projects section', () => {
       getActiveTab: () => null,
       isWide: () => wide,
       canCreateTab: () => true,
-      requestNew: jest.fn(),
-      notifyOtherViews: jest.fn(),
+      requestNew: vi.fn(),
+      notifyOtherViews: vi.fn(),
     });
     views.surface = surface;
     const host = document.body.createDiv();
@@ -236,7 +263,7 @@ describe('projects section', () => {
 
   afterEach(() => {
     menus().length = 0;
-    jest.mocked(createProject).mockReset();
+    vi.mocked(createProject).mockReset();
   });
 
   it.each([true, false])('restores project expansion after reloading persisted settings (wide: %s)', async wide => {
@@ -288,12 +315,12 @@ describe('projects section', () => {
     ui.surface.dispose();
   });
 
-  it('heads the projects with New project and a sort menu, without a By project organization', async () => {
-    const { host, plugin, region, settings, view } = createProjectSurface();
+  it('heads the projects with New project only, without a By project organization', async () => {
+    const { host, plugin, region, view } = createProjectSurface();
     const projectToggles = () => within(region()).getAllByRole('button', { expanded: false })
       .map(toggle => toggle.textContent);
-    // Projects start collapsed, above the sessions.
-    expect(projectToggles()).toEqual([sectionName('Launch', 1), sectionName('Empty', 0)]);
+    // Projects start collapsed, above the sessions, newest first until the user reorders them.
+    expect(projectToggles()).toEqual([sectionName('Empty', 0), sectionName('Launch', 1)]);
     expect(within(view.getByRole('region', { name: 'Sessions' })).queryByText('Member session')).toBeNull();
 
     const newProject = within(region()).getByRole('button', { name: t('chat.projects.newProjectAction') });
@@ -303,16 +330,10 @@ describe('projects section', () => {
     expect(createProject).toHaveBeenCalledWith(plugin);
     expect((await axe(host)).violations).toEqual([]);
 
-    fireEvent.click(within(region()).getByRole('button', { name: t('chat.projects.options') }));
-    const sortMenu = menus().at(-1)!;
-    expect(sortMenu.items.map(entry => entry.title)).toEqual([
-      t('chat.projects.sortBy'), t('chat.projects.sort.lastActivity'), t('chat.projects.sort.created'),
-    ]);
-    expect(sortMenu.items.find(entry => entry.title === t('chat.projects.sort.lastActivity'))!.checked).toBe(true);
-    sortMenu.items.find(entry => entry.title === t('chat.projects.sort.created'))!.clickHandler!();
-    await Promise.resolve();
-    expect(settings.projectSort).toBe('created');
-    expect(projectToggles()).toEqual([sectionName('Empty', 0), sectionName('Launch', 1)]);
+    // Projects keep the user's dragged order, so the header has no sort menu.
+    const header = region().querySelector<HTMLElement>('.claudian-session-projects-header')!;
+    expect(within(header).getAllByRole('button').map(button => button.getAttribute('aria-label') ?? button.textContent))
+      .toEqual([t('chat.projects.header'), t('chat.projects.newProjectAction')]);
 
     fireEvent.click(view.getByRole('button', { name: 'Session options' }));
     const sessionMenu = menus().at(-1)!;
@@ -334,11 +355,9 @@ describe('projects section', () => {
 
     // Same header actions and collapsed project rows as the sidebar.
     expect(projects().getAllByRole('button', { expanded: false }).map(toggle => toggle.textContent))
-      .toEqual([sectionName('Launch', 1), sectionName('Empty', 0)]);
+      .toEqual([sectionName('Empty', 0), sectionName('Launch', 1)]);
     fireEvent.click(projects().getByRole('button', { name: t('chat.projects.newProjectAction') }));
     expect(createProject).toHaveBeenCalledWith(plugin);
-    fireEvent.click(projects().getByRole('button', { name: t('chat.projects.options') }));
-    expect(titles()[0]).toBe(t('chat.projects.sortBy'));
     // Members leave the session list; without a Pinned section, pinned sessions stay in it.
     const sessions = within(history().getByRole('region', { name: 'Sessions' }));
     expect(sessions.queryByText('Member session')).toBeNull();
@@ -378,7 +397,7 @@ describe('projects section', () => {
     // jsdom has no layout: stack every row 40px tall in document order inside a 400px list.
     const rowSelector = '.claudian-history-item, .claudian-session-group-header, .claudian-history-header, .claudian-history-archive-control';
     const rect = (top: number, height: number) => ({ top, bottom: top + height, height, left: 0, right: 300, width: 300 }) as DOMRect;
-    const layout = jest.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const layout = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const list = menuEl.querySelector<HTMLElement>('.claudian-history-list')!;
       if (this === list) return rect(0, 400);
       const rows = Array.from(list.querySelectorAll<HTMLElement>(rowSelector));
@@ -391,6 +410,33 @@ describe('projects section', () => {
       fireEvent.click(within(menuEl).getByRole('button', { name: sectionName('Launch', 1) }));
       expect(within(menuEl).getByText('Member session')).toBeTruthy();
       expect(launchHeader().getBoundingClientRect().top).toBe(before);
+    } finally {
+      layout.mockRestore();
+    }
+  });
+
+  it('keeps the wide session list at the top when newer sessions load above it, as after startup', () => {
+    const { host, plugin, surface } = createProjectSurface();
+    const sessionList = () => host.querySelector<HTMLElement>('.claudian-session-list-items')!;
+    // jsdom has no layout: stack every session row 40px tall in document order.
+    const layout = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const list = sessionList();
+      const index = Array.from(list.querySelectorAll<HTMLElement>('.claudian-history-item, .claudian-session-group-header')).indexOf(this);
+      const top = this === list ? 0 : index * 40 - list.scrollTop;
+      const height = this === list ? 400 : index < 0 ? 0 : 40;
+      return { top, bottom: top + height, height, left: 0, right: 300, width: 300 } as DOMRect;
+    });
+    try {
+      const newer = (minutes: number) => conversation(`newer-${minutes}`, { lastActivityAt: testDate({ minutes }).getTime() });
+      plugin.getConversationList().push(...Array.from({ length: 20 }, (_, index) => newer(-index)));
+      surface.invalidate();
+      expect(sessionList().scrollTop).toBe(0);
+
+      // A scrolled list keeps its first visible row in place instead.
+      sessionList().scrollTop = 80;
+      plugin.getConversationList().push(newer(1));
+      surface.invalidate();
+      expect(sessionList().scrollTop).toBe(120);
     } finally {
       layout.mockRestore();
     }
@@ -456,7 +502,6 @@ describe('projects section', () => {
     expect(sessionRow()).not.toBeNull();
 
     // The header actions sit beside the toggle and never collapse their section.
-    fireEvent.click(within(region()).getByRole('button', { name: t('chat.projects.options') }));
     fireEvent.click(within(region()).getByRole('button', { name: t('chat.projects.newProjectAction') }));
     fireEvent.click(within(sessions()).getByRole('button', { name: 'Session options' }));
     fireEvent.click(within(sessions()).getByRole('button', { name: 'Collapse all groups' }));

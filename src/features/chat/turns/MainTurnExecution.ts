@@ -150,6 +150,8 @@ export class MainTurnExecution {
       }
       // Unadmitted interaction replies stay with their prompt; queued replies use normal draft recovery.
       if (turn.assertBeforeHandoff) return;
+      // Restore later submissions first so this turn precedes them and any newer unsent draft.
+      this.deps.queue.restoreToComposer();
       this.deps.queue.returnMessageToComposer(createQueuedMessage(displayContent, request), { merge });
     };
     // Capture and consume the main submission before native navigation can yield
@@ -234,7 +236,7 @@ export class MainTurnExecution {
       if ((turn.origin === 'user' && this.#retainUnsentTurnOnClose(signal)) || restoreCancelledInput()) return;
     } catch (error) {
       admission.rollbackIfUncreated();
-      restoreUnsentInput(turnRequest, false);
+      restoreUnsentInput(turnRequest);
       rollbackFailedTurn();
       throw error;
     }
@@ -408,7 +410,11 @@ export class MainTurnExecution {
           this.#syncScrollToBottomAfterRenderUpdates();
 
           const saveExtras = didEnqueueToSdk ? { resumeAtMessageId: undefined } : undefined;
-          await conversationController.save(true, saveExtras);
+          await conversationController.save(true, saveExtras).catch(error => {
+            // No continuation was admitted: leave its unsent input available for an explicit retry.
+            this.deps.queue.restoreToComposer();
+            throw error;
+          });
           const userMsgIndex = state.messages.indexOf(userMsg);
           this.deps.renderer?.refreshActionButtons(userMsg, state.messages, userMsgIndex >= 0 ? userMsgIndex : undefined);
           scheduledContinuation = this.deps.queue.scheduleContinuation();

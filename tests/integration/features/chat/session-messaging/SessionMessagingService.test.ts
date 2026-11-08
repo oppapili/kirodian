@@ -1,4 +1,4 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 import '@/providers';
 
 import { deferred } from '@test/helpers/ChatInputHarness';
@@ -25,11 +25,11 @@ function setup() {
   const app = new App();
   Object.assign(app.vault.adapter, { basePath: '/vault' });
   const backend = new FakeSideBackend();
-  jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockReturnValue(backend);
+  vi.spyOn(ProviderRegistry, 'createExecutionBackend').mockReturnValue(backend);
   // Kiro's real capabilities set supportsTurnSteer=false; the session-message steer path gates on it,
   // so enable only that flag over the real capabilities to exercise steering delivery.
   const realCapabilities = ProviderRegistry.getCapabilities('kiro');
-  jest.spyOn(ProviderRegistry, 'getCapabilities').mockImplementation((providerId = 'kiro') =>
+  vi.spyOn(ProviderRegistry, 'getCapabilities').mockImplementation((providerId = 'kiro') =>
     providerId === 'kiro' ? { ...realCapabilities, supportsTurnSteer: true } : realCapabilities);
   ProviderWorkspaceRegistry.setServices('kiro', {});
   // Selections carry the `kiro/` prefix; the backend receives the selection id. Sonnet has effort control; Haiku has none.
@@ -59,7 +59,7 @@ function setup() {
     providers: ProviderRegistry, providerSettings: ProviderSettingsCoordinator,
     getSettings: () => settings, getVaultPath: () => '/vault', onConversationDeleted: async () => undefined,
     persistence: {
-      metadataReader: { revalidate: jest.fn(), load: jest.fn(), scan: jest.fn(), loadMetadata: jest.fn(), scanMetadata: jest.fn(), listMetadata: jest.fn() },
+      metadataReader: { revalidate: vi.fn(), load: vi.fn(), scan: vi.fn(), loadMetadata: vi.fn(), scanMetadata: vi.fn(), listMetadata: vi.fn() },
       saveMetadata: async () => undefined, deleteCurrentMetadata: async () => undefined, assignMetadataToDevice: async () => undefined,
     } as ConversationPersistence,
   });
@@ -81,7 +81,7 @@ function setup() {
       saves.push(structuredClone(patch));
       await repository.update(id, patch);
     },
-    createConversation: jest.fn(async () => { const created = record('created'); records.set(created.id, created); return created; }),
+    createConversation: vi.fn(async () => { const created = record('created'); records.set(created.id, created); return created; }),
     mutateSettings: async (mutate: (settings: ClaudianSettings) => void) => mutate(settings),
     executionPersistence: {
       registerExecutionBinding() {}, releaseExecutionBinding() {},
@@ -90,7 +90,7 @@ function setup() {
     },
   } as unknown as ChatFeatureHost;
   const pool = installSessionRuntimePool(host);
-  const refreshModelControls = jest.fn();
+  const refreshModelControls = vi.fn();
   const service = new SessionMessagingService({ getHost: () => host, getActiveConversationId: () => 'sender', refreshModelControls });
   Object.assign(host, { bindSessionTools: (id: string) => service.bindSessionTools(id) });
   const binding = service.bindSessionTools('sender');
@@ -99,7 +99,7 @@ function setup() {
 const requestText = (request: ProviderExecutionRequest) => request.input.filter(block => block.type === 'text').map(block => block.text).join('');
 const signal = () => new AbortController().signal;
 const modelChoice = ({ configuration }: ProviderExecutionRequest) => ({ model: configuration.model, reasoning: configuration.reasoning });
-afterEach(() => { ProviderWorkspaceRegistry.clear(); jest.restoreAllMocks(); });
+afterEach(() => { ProviderWorkspaceRegistry.clear(); vi.restoreAllMocks(); });
 
 const listArgs = (overrides: Partial<{ includeProviders: boolean; limit: number }> = {}) => ({ includeProviders: false, limit: 50, ...overrides });
 
@@ -288,7 +288,7 @@ it('queues a steer while the recipient waits on a question, and never resends an
   await h.binding.port.send({ sessionId: 'recipient', text: 'Start' }, signal());
   await waitFor(() => expect(h.backend.sessions[0]?.requests).toHaveLength(1));
   const native = h.backend.latest;
-  const steer = jest.fn(async (_request: ProviderExecutionRequest) => true);
+  const steer = vi.fn(async (_request: ProviderExecutionRequest) => true);
   Object.assign(native, { steer });
   const port = native.config.interactionPort;
   const question = port.askUserQuestion({
@@ -350,7 +350,7 @@ it('keeps a published shell on cancellation and joins creation during shutdown',
   const h = setup();
   const created = h.record('created');
   const completion = deferred<Conversation>();
-  jest.mocked(h.host.createConversation).mockImplementation(async () => {
+  vi.mocked(h.host.createConversation).mockImplementation(async () => {
     h.records.set(created.id, created);
     return completion.promise;
   });
@@ -384,7 +384,7 @@ it('revokes released caller bindings without cancelling an already admitted reci
 it('defers a message when native background work starts during preparation, then resumes once', async () => {
   const h = setup();
   const preparing = deferred<void>();
-  jest.spyOn(h.host.executionPersistence, 'assertConversationExecutionAuthority').mockImplementationOnce(() => preparing.promise);
+  vi.spyOn(h.host.executionPersistence, 'assertConversationExecutionAuthority').mockImplementationOnce(() => preparing.promise);
   await h.binding.port.send({ sessionId: 'recipient', text: 'After background' }, signal());
   await waitFor(() => expect(h.host.executionPersistence.assertConversationExecutionAuthority).toHaveBeenCalled());
   const native = h.backend.latest;
@@ -421,7 +421,7 @@ it('waits for a published first-turn shell to adopt its original draft runtime',
   Object.assign(h.host.app.workspace, { getActiveFile: () => null });
   const created = h.record('created');
   const completion = deferred<Conversation>();
-  jest.mocked(h.host.createConversation).mockImplementation(async () => {
+  vi.mocked(h.host.createConversation).mockImplementation(async () => {
     h.records.set(created.id, created);
     return completion.promise;
   });

@@ -1,9 +1,9 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 import '@/providers';
 
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
+import { axe } from '@test/helpers/accessibility';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import type { ChatMessage } from '@/core/types';
@@ -23,7 +23,7 @@ HTMLElement.prototype.removeClass = function (...classes) { this.classList.remov
 
 const cleanups: Array<() => void> = [];
 beforeEach(() => {
-  jest.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
+  vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
     (el as HTMLElement).createEl('p', { text: markdown });
   });
 });

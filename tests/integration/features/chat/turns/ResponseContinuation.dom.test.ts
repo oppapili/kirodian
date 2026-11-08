@@ -1,9 +1,8 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 import '@/providers';
 
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
@@ -27,7 +26,7 @@ HTMLElement.prototype.removeClass = function (...classes) { this.classList.remov
 
 beforeEach(() => {
   document.body.replaceChildren();
-  jest.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
+  vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
     (el as HTMLElement).createEl('p', { text: markdown });
   });
 });

@@ -1,3 +1,4 @@
+import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { waitFor } from '@testing-library/dom';
 import { Component } from 'obsidian';
@@ -5,8 +6,13 @@ import { Component } from 'obsidian';
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ProviderCapabilities, ProviderConversationHistoryService, ProviderRegistration } from '@/core/providers/types';
+import { getChatSettingsSnapshot } from '@/features/chat/ChatSettings';
 import { ComposerDraftController } from '@/features/chat/composer/ComposerDraftController';
-import { captureLatestCompletedForkSource, findLatestForkCheckpoint, type LiveForkSourceOwner } from '@/features/chat/sessions/SessionForkSource';
+import {
+  captureLatestCompletedForkSource,
+  type LiveForkSourceOwner,
+} from '@/features/chat/sessions/SessionForkSource';
+import { getSessionSelectedModel } from '@/features/chat/sessions/sessionSettings';
 import { SideChatController } from '@/features/chat/side-chat/SideChatController';
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 
@@ -44,13 +50,11 @@ const cleanups: Array<() => Promise<void>> = [];
 export async function releaseSideChatHarnesses(): Promise<void> {
   for (const cleanup of cleanups.splice(0)) await cleanup();
   document.body.replaceChildren();
-  jest.clearAllMocks();
+  vi.clearAllMocks();
 }
 
 export function createHarness(options: {
   formatQuestionReply?: ProviderRegistration['formatQuestionReply'];
-  getConversationCapabilities?: ProviderRegistration['getConversationCapabilities'];
-  providerState?: Record<string, unknown>;
   onDestinationChanged?: () => void;
   subagentAdapter?: ProviderRegistration['subagentAdapter'];
   taskResultInterpreter?: ProviderRegistration['taskResultInterpreter'];
@@ -124,7 +128,7 @@ export function createHarness(options: {
     app,
     getConversationSummary(id: string) { return (this as unknown as { getConversationSync: (id: string) => any }).getConversationSync(id); },
     getConversationSync: () => options.providerState ? { id: 'conversation-1', providerId: 'kiro', providerState: options.providerState } : null,
-    projects: { get: () => null },
+    projects: createProjectsFake(),
     providerHost: { app, settings, executionLifecycleRegistry: lifecycleRegistry },
     settings,
   } as never;
@@ -139,8 +143,7 @@ export function createHarness(options: {
       get conversationId() { return tab.conversationId; },
       get providerId() { return tab.providerId; },
       get isLive() { return true; },
-      get isStreaming() { return tab.state.isStreaming; },
-      readLatestForkCheckpoint: async () => findLatestForkCheckpoint(tab.state.messages),
+      getSettings: () => getChatSettingsSnapshot(settings, tab.providerId!, getSessionSelectedModel(tab, plugin)),
       captureForkSource: () => captureLatestCompletedForkSource(tab, plugin, () => true),
     },
     onDestinationChanged: () => { destinationChanges.push(controller.destination); options.onDestinationChanged?.(); },

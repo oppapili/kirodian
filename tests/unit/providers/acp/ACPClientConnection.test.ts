@@ -4,11 +4,11 @@ import { PassThrough } from 'node:stream';
 import type {
   ACPSessionNotification,
   JSONRPCRequestOptions,
-} from '../../../../src/providers/acp';
+} from '@/providers/acp';
 import {
   ACPClientConnection,
   ACPJSONRPCTransport
-} from '../../../../src/providers/acp';
+} from '@/providers/acp';
 
 interface ConnectionHarness {
   close: () => void;
@@ -59,30 +59,11 @@ function createConnectionHarness(
 }
 
 describe('ACPClientConnection', () => {
-  it('forks a session through the ACP protocol and returns the new identity', async () => {
-    const harness = createConnectionHarness(transport => new ACPClientConnection({ transport }));
-    harness.transport.start();
-    try {
-      const pending = harness.connection.forkSession({ sessionId: 'source', cwd: '/workspace', mcpServers: [] });
-      const outbound = await harness.nextOutbound();
-      expect(outbound).toMatchObject({ method: 'session/fork', params: { sessionId: 'source', cwd: '/workspace', mcpServers: [] } });
-      harness.sendInbound({ jsonrpc: '2.0', id: outbound.id, result: { sessionId: 'child' } });
-      await expect(pending).resolves.toEqual({ sessionId: 'child' });
-    } finally {
-      harness.connection.dispose();
-      harness.transport.dispose();
-      harness.close();
-    }
-  });
-
-  it('advertises derived client capabilities and dispatches session notifications', async () => {
+  it('initializes with client info and dispatches session notifications to the delegate', async () => {
     const notifications: ACPSessionNotification[] = [];
     const harness = createConnectionHarness((transport) => new ACPClientConnection({
       clientInfo: { name: 'claudian', version: '0.0.0-test' },
       delegate: {
-        fileSystem: {
-          readTextFile: async () => ({ content: 'hello' }),
-        },
         onSessionNotification: async (notification) => {
           notifications.push(notification);
         },
@@ -95,12 +76,7 @@ describe('ACPClientConnection', () => {
       const outbound = await harness.nextOutbound();
 
       expect(outbound.method).toBe('initialize');
-      expect(outbound.params).toMatchObject({
-        clientCapabilities: {
-          fs: {
-            readTextFile: true,
-          },
-        },
+      expect(outbound.params).toEqual({
         clientInfo: { name: 'claudian', version: '0.0.0-test' },
         protocolVersion: 1,
       });
@@ -109,13 +85,15 @@ describe('ACPClientConnection', () => {
         id: outbound.id,
         jsonrpc: '2.0',
         result: {
-          agentCapabilities: { loadSession: true },
-          agentInfo: { name: 'gemini', version: '1.0.0' },
+          agentCapabilities: { _meta: { 'vendor.example/hooks': true } },
           protocolVersion: 1,
         },
       });
 
-      await initializePromise;
+      await expect(initializePromise).resolves.toEqual({
+        agentCapabilities: { _meta: { 'vendor.example/hooks': true } },
+        protocolVersion: 1,
+      });
 
       harness.sendInbound({
         jsonrpc: '2.0',
@@ -144,7 +122,7 @@ describe('ACPClientConnection', () => {
     }
   });
 
-  it('preserves opaque metadata across initialize, session lifecycle, and notifications', async () => {
+  it('preserves opaque metadata across initialize responses, session lifecycle, and notifications', async () => {
     const notifications: ACPSessionNotification[] = [];
     const harness = createConnectionHarness((transport) => new ACPClientConnection({
       delegate: {
@@ -156,22 +134,9 @@ describe('ACPClientConnection', () => {
     }));
 
     try {
-      const initializePromise = harness.connection.initialize({
-        _meta: {
-          nested: { enabled: true },
-          'vendor.example/trace': 'trace-1',
-        },
-      });
+      const initializePromise = harness.connection.initialize();
       const initializeRequest = await harness.nextOutbound();
-      expect(initializeRequest).toMatchObject({
-        method: 'initialize',
-        params: {
-          _meta: {
-            nested: { enabled: true },
-            'vendor.example/trace': 'trace-1',
-          },
-        },
-      });
+      expect(initializeRequest).toMatchObject({ method: 'initialize', params: { clientInfo: null, protocolVersion: 1 } });
       harness.sendInbound({
         id: initializeRequest.id,
         jsonrpc: '2.0',
@@ -268,7 +233,7 @@ describe('ACPClientConnection', () => {
 
   it('propagates unsupported methods without retrying a retired alias', async () => {
     const harness = createConnectionHarness(transport => new ACPClientConnection({ transport }));
-    const requestSpy = jest.spyOn(harness.transport, 'request');
+    const requestSpy = vi.spyOn(harness.transport, 'request');
     try {
       const pending = harness.connection.setMode({ modeId: 'plan', sessionId: 'session-1' });
       const outcome = pending.catch(error => error);
@@ -328,7 +293,7 @@ describe('ACPClientConnection', () => {
 
   it('sends one cancel notification using the standard method', async () => {
     const harness = createConnectionHarness(transport => new ACPClientConnection({ transport }));
-    const notifySpy = jest.spyOn(harness.transport, 'notify');
+    const notifySpy = vi.spyOn(harness.transport, 'notify');
     try {
       harness.connection.cancel({ sessionId: 'session-1' });
       await expect(harness.nextOutbound()).resolves.toMatchObject({ method: 'session/cancel', params: { sessionId: 'session-1' } });

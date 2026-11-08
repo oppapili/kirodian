@@ -1,8 +1,8 @@
 /**
- * @jest-environment jsdom
+ * @vitest-environment jsdom
  */
+import { axe } from '@test/helpers/accessibility';
 import { fireEvent, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
 
 import { processFileLinks, registerFileLinkHandler } from '@/utils/fileLink';
 
@@ -11,12 +11,12 @@ function createMockApp(existingFiles: string[]) {
 
   return {
     metadataCache: {
-      getFirstLinkpathDest: jest.fn((linkPath: string) => {
+      getFirstLinkpathDest: vi.fn((linkPath: string) => {
         return fileSet.has(linkPath.toLowerCase()) ? { path: linkPath } : null;
       }),
     },
     vault: {
-      getAbstractFileByPath: jest.fn((filePath: string) => {
+      getAbstractFileByPath: vi.fn((filePath: string) => {
         if (fileSet.has(filePath.toLowerCase())) return { path: filePath, basename: filePath.replace(/\.md$/, '') };
         if (!filePath.endsWith('.md') && fileSet.has((filePath + '.md').toLowerCase())) {
           return { path: filePath + '.md', basename: filePath };
@@ -28,6 +28,20 @@ function createMockApp(existingFiles: string[]) {
 }
 
 describe('processFileLinks', () => {
+  it.each(['', 'note.md'])('uses only the explicit source for same-note targets (%s)', async sourcePath => {
+    const app = createMockApp(['note.md']);
+    app.workspace = { getActiveFile: vi.fn(() => ({ path: 'note.md', basename: 'note' })) };
+    const container = document.createElement('main');
+    const code = container.appendChild(document.createElement('code'));
+    code.textContent = '[[#Overview]] and [[#^quote-of-the-day]]';
+    processFileLinks(app, container, sourcePath);
+    expect(app.workspace.getActiveFile).not.toHaveBeenCalled();
+    expect(within(container).queryAllByRole('link').map(link => [link.textContent, link.getAttribute('data-href')]))
+      .toEqual(sourcePath ? [['#Overview', '#Overview'], ['#^quote-of-the-day', '#^quote-of-the-day']] : []);
+    expect(code.textContent).toBe(sourcePath ? '#Overview and #^quote-of-the-day' : '[[#Overview]] and [[#^quote-of-the-day]]');
+    expect(await axe(container)).toHaveNoViolations();
+  });
+
   describe('null/empty inputs', () => {
     it('handles null app gracefully', () => {
       const container = document.createElement('div');
@@ -157,8 +171,8 @@ describe('processFileLinks', () => {
     it('keeps inline-code labels inside existing links owned by their original anchor', async () => {
       const app = createMockApp(['note.md']);
       app.workspace = {
-        iterateAllLeaves: jest.fn(),
-        openLinkText: jest.fn().mockResolvedValue(undefined),
+        iterateAllLeaves: vi.fn(),
+        openLinkText: vi.fn().mockResolvedValue(undefined),
       };
       const container = document.createElement('div');
       container.innerHTML = '<a href="https://example.com/guide"><code>[[note.md]]</code></a> and <code>[[note.md]]</code>';

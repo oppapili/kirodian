@@ -7,11 +7,9 @@ import { createProviderHistoryPathContext } from '@/core/providers/historyPathCo
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ImageAttachment } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
-import { getChatSettingsSnapshot } from '@/features/chat/ChatSettings';
 import type { ComposerDraftController } from '@/features/chat/composer/ComposerDraftController';
 import type { ForkSourceUnavailableReason } from '@/features/chat/conversation/forkSourceTypes';
 import { resolveSessionInstructions } from '@/features/chat/execution/projectInstructions';
-import { findLatestForkCheckpoint, type ForkCheckpoint } from '@/features/chat/sessions/SessionForkSource';
 import { SideChatCommandSubmission } from '@/features/chat/side-chat/SideChatCommandSubmission';
 import { SideChatPanel } from '@/features/chat/side-chat/SideChatPanel';
 import { SideChatRuntime } from '@/features/chat/side-chat/SideChatRuntime';
@@ -31,6 +29,7 @@ export interface SideChatControllerDeps {
   readonly parent: SideChatParent;
   readonly onDestinationChanged: () => void;
   readonly onStatusChanged?: () => void;
+  readonly onSettingsChanged?: () => void;
 }
 
 export interface SideChatControllerPresentation {
@@ -306,12 +305,9 @@ export class SideChatController {
     }
   }
 
-  async #assertForkSourceCurrent(source: SideChatSource): Promise<void> {
+  #assertForkSourceCurrent(source: SideChatSource): void {
     const parent = this.deps.parent;
-    const fullSession = ProviderRegistry.getCapabilities(source.providerId, source.providerState).forkMode === 'full-session';
-    const bound = () => parent.isLive && parent.conversationId === source.conversationId
-      && !(fullSession && parent.isStreaming);
-    if (bound() && (!fullSession || (isSameCheckpoint(await parent.readLatestForkCheckpoint(), source) && bound()))) return;
+    if (parent.isLive && parent.conversationId === source.conversationId) return;
     throw new Error('The source conversation changed. Discard this side chat and start a new one.');
   }
 
@@ -335,14 +331,10 @@ export class SideChatController {
 
   #createRuntime(source: SideChatSource): void {
     const vaultPath = getVaultPath(this.deps.plugin.app);
-    const settingsSnapshot = getChatSettingsSnapshot(
-      this.deps.plugin.settings,
-      source.providerId,
-      source.selectedModel,
-    );
+    const settingsSnapshot = this.deps.parent.getSettings();
     const runtime = new SideChatRuntime({
       buildChildResumeState: async () => {
-        await this.#assertForkSourceCurrent(source);
+        this.#assertForkSourceCurrent(source);
         const state = await ProviderRegistry
           .getConversationHistoryService(source.providerId)
           .buildForkProviderState(
@@ -353,7 +345,7 @@ export class SideChatController {
             createProviderHistoryPathContext(this.deps.plugin.settings, source.providerId, vaultPath),
             { lifecycle: 'ephemeral' },
           );
-        await this.#assertForkSourceCurrent(source);
+        this.#assertForkSourceCurrent(source);
         return state;
       },
       lifecycleRegistry: this.deps.plugin.providerHost.executionLifecycleRegistry,
@@ -361,6 +353,7 @@ export class SideChatController {
         new Notice(error instanceof Error ? error.message : 'Side chat execution failed.');
       },
       onStatusChanged: () => this.#refreshPanel(),
+      onSettingsChanged: () => this.deps.onSettingsChanged?.(),
       plugin: this.deps.plugin,
       resolveBackend: providerId => ProviderRegistry.createExecutionBackend(
         this.deps.plugin.providerHost,
@@ -452,15 +445,7 @@ function describeUnavailable(reason: ForkSourceUnavailableReason): string {
     case 'no-messages':
     case 'no-checkpoint':
       return t('chat.sideChat.unavailableNoCheckpoint');
-    case 'not-latest-reply':
-      return 'This provider can fork only from the latest reply.';
     case 'no-session':
       return t('chat.sideChat.unavailableNoSession');
   }
-}
-
-function isSameCheckpoint(current: ForkCheckpoint | null, source: SideChatSource): boolean {
-  const captured = findLatestForkCheckpoint(source.messages);
-  return !!current && !!captured && current.assistantMessageId === captured.assistantMessageId
-    && current.userMessages === captured.userMessages && current.trailingMessages === captured.trailingMessages;
 }

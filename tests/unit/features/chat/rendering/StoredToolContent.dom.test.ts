@@ -1,8 +1,8 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
+import { axe } from '@test/helpers/accessibility';
 import { testClock } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
 
 import type { ChatMessage, ToolCallInfo } from '@/core/types';
 import {
@@ -26,6 +26,34 @@ HTMLElement.prototype.toggleClass = function (classes, enabled) {
 
 beforeEach(() => { document.body.replaceChildren(); });
 afterEach(() => setLocale('en'));
+
+it('attributes expanded native patch changes to their paths and rename destinations', async () => {
+  const card = renderStoredToolCall(document.body.createDiv(), {
+    id: 'multiple-files', name: 'apply_patch', status: 'completed',
+    input: { patch: '*** Begin Patch\n*** Update File: source/first.md\n@@\n-old first\n+new first\n*** Update File: source/second.md\n*** Move to: moved/second.md\n@@\n-old second\n+new second\n*** End Patch' },
+  });
+  fireEvent.click(within(card).getByRole('button', { name: /apply_patch:/ }));
+  const first = within(card).getByRole('group', { name: 'source/first.md' });
+  const moved = within(card).getByRole('group', { name: 'source/second.md -> moved/second.md' });
+  expect(within(first).getByText('new first')).toBeDefined();
+  expect(within(first).queryByText('new second')).toBeNull();
+  expect(within(moved).getByText('new second')).toBeDefined();
+  expect(within(moved).queryByText('new first')).toBeNull();
+  expect(await axe(card)).toHaveNoViolations();
+});
+
+it.each(['\n', '\r\n'])('retains legacy WebSearch source links before a %j boundary', async newline => {
+  const card = renderStoredToolCall(document.body.createDiv(), {
+    id: 'legacy-search', name: 'WebSearch', status: 'completed',
+    input: { query: 'Obsidian docs' },
+    result: `Links: [{"title":"Obsidian API","url":"https://docs.obsidian.md/"}]${newline}${newline}Answer`,
+  });
+  fireEvent.click(within(card).getByRole('button', { name: /WebSearch:/ }));
+  expect(within(card).getByRole('link', { name: 'Obsidian API' }).getAttribute('href'))
+    .toBe('https://docs.obsidian.md/');
+  expect(within(card).queryByText('Answer')).toBeNull();
+  expect(await axe(card)).toHaveNoViolations();
+});
 
 function createToolStream(expandFileEditsByDefault = false) {
   const parent = document.body.createDiv();

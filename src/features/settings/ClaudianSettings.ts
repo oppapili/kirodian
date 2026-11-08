@@ -48,12 +48,23 @@ export class ClaudianSettingTab extends PluginSettingTab {
   // Per-provider agent-skill panels this tab created (e.g. Kiro's `.kiro/skills`
   // section). Tracked so a re-render disposes them.
   private readonly agentSkillPanels: AgentSkillSettings[] = [];
+  private readonly customAliasDrafts = new Map<string, string>();
 
   constructor(app: App, plugin: Plugin, host: FeatureHost) {
     super(app, plugin);
     this.host = host;
-    this.textEdits = new DebouncedSettingsWriter(mutation => host.mutateSettings(mutation),
-      () => { new Notice('Failed to save settings'); });
+    this.textEdits = new DebouncedSettingsWriter(async (mutation) => {
+      let promptChanged = false;
+      // Compare inside the serialized transaction, then restart only after a changed prompt commits.
+      await host.mutateSettings((settings) => {
+        const { userName, systemPrompt, mediaFolder } = settings;
+        mutation(settings);
+        promptChanged = settings.userName !== userName
+          || settings.systemPrompt !== systemPrompt
+          || settings.mediaFolder !== mediaFolder;
+      });
+      if (promptChanged) await this.restartServiceForPromptChange();
+    }, () => { new Notice('Failed to save settings'); });
   }
 
   /**
@@ -267,6 +278,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
   }
 
   private renderGeneralTab(container: HTMLElement): void {
+    const textDraft = this.textEdits.projectDraft(this.host.settings);
     new Setting(container)
       .setName(t('settings.language.name'))
       .setDesc(t('settings.language.desc'))
@@ -283,9 +295,15 @@ export class ClaudianSettingTab extends PluginSettingTab {
               dropdown.setValue(this.host.settings.locale);
               return;
             }
-            await this.host.mutateSettings((settings) => {
-              settings.locale = locale;
-            });
+            try {
+              await this.host.mutateSettings((settings) => {
+                settings.locale = locale;
+              });
+            } finally {
+              const committedLocale = this.host.settings.locale;
+              setLocale(committedLocale as Locale);
+              dropdown.setValue(committedLocale);
+            }
             this.update();
           });
       });
@@ -426,7 +444,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
       .setClass('claudian-settings-textarea')
       .addTextArea((text) => {
         text
-          .setValue(this.host.settings.pluginRenderedFenceLanguages.join('\n'))
+          .setValue(textDraft.pluginRenderedFenceLanguages.join('\n'))
           .onChange((value) => {
             this.textEdits.schedule('pluginRenderedFenceLanguages', (settings) => {
               settings.pluginRenderedFenceLanguages = value
@@ -550,14 +568,14 @@ export class ClaudianSettingTab extends PluginSettingTab {
       .addText((text) => {
         text
           .setPlaceholder(t('settings.userName.name'))
-          .setValue(this.host.settings.userName)
+          .setValue(textDraft.userName)
           .onChange((value) => {
             this.textEdits.schedule('userName', (settings) => {
               settings.userName = value;
             });
           });
         text.inputEl.addEventListener('blur', () => {
-          void this.textEdits.flush().then(saved => { if (saved) return this.restartServiceForPromptChange(); });
+          void this.textEdits.flush();
         });
       });
 
@@ -568,7 +586,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
       .addTextArea((text) => {
         text
           .setPlaceholder(t('settings.systemPrompt.name'))
-          .setValue(this.host.settings.systemPrompt)
+          .setValue(textDraft.systemPrompt)
           .onChange((value) => {
             this.textEdits.schedule('systemPrompt', (settings) => {
               settings.systemPrompt = value;
@@ -577,7 +595,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
         text.inputEl.rows = 6;
         text.inputEl.cols = 50;
         text.inputEl.addEventListener('blur', () => {
-          void this.textEdits.flush().then(saved => { if (saved) return this.restartServiceForPromptChange(); });
+          void this.textEdits.flush();
         });
       });
 
@@ -588,7 +606,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
       .addTextArea((text) => {
         text
           .setPlaceholder('System\nprivate\ndraft')
-          .setValue(this.host.settings.excludedTags.join('\n'))
+          .setValue(textDraft.excludedTags.join('\n'))
           .onChange((value) => {
             this.textEdits.schedule('excludedTags', (settings) => {
               settings.excludedTags = value
@@ -608,7 +626,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
       .addText((text) => {
         text
           .setPlaceholder('Attachments')
-          .setValue(this.host.settings.mediaFolder)
+          .setValue(textDraft.mediaFolder)
           .onChange((value) => {
             this.textEdits.schedule('mediaFolder', (settings) => {
               settings.mediaFolder = value.trim();
@@ -616,7 +634,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
           });
         text.inputEl.addClass('claudian-settings-media-input');
         text.inputEl.addEventListener('blur', () => {
-          void this.textEdits.flush().then(saved => { if (saved) return this.restartServiceForPromptChange(); });
+          void this.textEdits.flush();
         });
       });
 
@@ -651,7 +669,8 @@ export class ClaudianSettingTab extends PluginSettingTab {
             saveTimeout = null;
           }
 
-          const result = parseNavMappings(pendingValue);
+          const submittedValue = pendingValue;
+          const result = parseNavMappings(submittedValue);
           if (!result.settings) {
             if (showError) {
               new Notice(`${t('common.error')}: ${result.error}`);
@@ -666,6 +685,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
             settings.keyboardNavigation.scrollDownKey = result.settings!.scrollDown;
             settings.keyboardNavigation.focusInputKey = result.settings!.focusInput;
           });
+          if (pendingValue !== submittedValue) return;
           pendingValue = buildNavMappingText(this.host.settings.keyboardNavigation);
           text.setValue(pendingValue);
         };
@@ -755,8 +775,11 @@ export class ClaudianSettingTab extends PluginSettingTab {
     const listEl = container.createDiv({ cls: 'claudian-context-limits-list' });
 
     for (const modelId of uniqueModelIds) {
-      const currentValue = this.host.settings.customContextLimits?.[modelId];
-      const currentAlias = (modelAliases?.get(this.host.settings) ?? {})[modelId] ?? '';
+      const aliasDraftKey = JSON.stringify([providerId, modelId]);
+      const limits = this.host.settings.customContextLimits ?? {};
+      const currentValue = Object.hasOwn(limits, modelId) ? limits[modelId] : undefined;
+      const currentAliases = modelAliases?.get(this.host.settings) ?? {};
+      const currentAlias = Object.hasOwn(currentAliases, modelId) ? currentAliases[modelId] : '';
 
       const itemEl = listEl.createDiv({ cls: 'claudian-context-limits-item' });
       const nameEl = itemEl.createDiv({ cls: 'claudian-context-limits-model' });
@@ -767,7 +790,7 @@ export class ClaudianSettingTab extends PluginSettingTab {
         type: 'text',
         placeholder: t('settings.customModelAliases.placeholder'),
         cls: 'claudian-context-alias-input',
-        value: currentAlias,
+        value: this.customAliasDrafts.get(aliasDraftKey) ?? currentAlias,
       });
       aliasInputEl.setAttribute('aria-label', t('settings.customModelAliases.ariaLabel', { model: modelId }));
       aliasInputEl.setAttribute('aria-description', t('settings.customModelAliases.ariaDescription'));
@@ -783,18 +806,25 @@ export class ClaudianSettingTab extends PluginSettingTab {
       const validationEl = inputWrapper.createDiv({ cls: 'claudian-context-limit-validation claudian-hidden' });
 
       const saveAlias = async (): Promise<void> => {
-        const trimmed = aliasInputEl.value.trim();
+        const draft = aliasInputEl.value;
+        const trimmed = draft.trim();
+        this.customAliasDrafts.set(aliasDraftKey, draft);
 
-        await this.host.mutateSettings((settings) => {
-          const aliases = (modelAliases?.get(settings) ?? {});
-          if (trimmed) {
-            aliases[modelId] = trimmed;
-          } else {
-            delete aliases[modelId];
-          }
-          modelAliases?.update(settings, aliases);
-        });
-        this.notifyProviderModelOptionsChanged(providerId);
+        try {
+          await this.host.mutateSettings((settings) => {
+            const aliases = new Map(Object.entries(modelAliases?.get(settings) ?? {}));
+            if (trimmed) {
+              aliases.set(modelId, trimmed);
+            } else {
+              aliases.delete(modelId);
+            }
+            modelAliases?.update(settings, Object.fromEntries(aliases));
+          });
+          if (this.customAliasDrafts.get(aliasDraftKey) === draft) this.customAliasDrafts.delete(aliasDraftKey);
+          this.notifyProviderModelOptionsChanged(providerId);
+        } catch {
+          new Notice('Could not save model alias. Try again.');
+        }
       };
 
       const saveContextLimit = async (): Promise<void> => {
@@ -820,7 +850,10 @@ export class ClaudianSettingTab extends PluginSettingTab {
           if (!trimmed) {
             delete settings.customContextLimits[modelId];
           } else {
-            settings.customContextLimits[modelId] = parseContextLimit(trimmed)!;
+            settings.customContextLimits = Object.fromEntries([
+              ...Object.entries(settings.customContextLimits),
+              [modelId, parseContextLimit(trimmed)!],
+            ]);
           }
         });
       };
@@ -831,13 +864,19 @@ export class ClaudianSettingTab extends PluginSettingTab {
       aliasInputEl.addEventListener('blur', () => {
         void saveAlias();
       });
+      aliasInputEl.addEventListener('input', () => {
+        this.customAliasDrafts.set(aliasDraftKey, aliasInputEl.value);
+      });
       aliasInputEl.addEventListener('keydown', (event) => {
+        if (event.isComposing) return;
         if (event.key === 'Enter') {
           event.preventDefault();
           aliasInputEl.blur();
         } else if (event.key === 'Escape') {
           event.preventDefault();
-          aliasInputEl.value = (modelAliases?.get(this.host.settings) ?? {})[modelId] ?? '';
+          const aliases = modelAliases?.get(this.host.settings) ?? {};
+          this.customAliasDrafts.delete(aliasDraftKey);
+          aliasInputEl.value = Object.hasOwn(aliases, modelId) ? aliases[modelId] : '';
           aliasInputEl.blur();
         }
       });

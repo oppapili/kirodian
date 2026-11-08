@@ -14,9 +14,9 @@ function createService() {
   const service = new InlineEditService({
     backend,
     interactionPort: {
-      askUserQuestion: jest.fn(),
-      dismissInteraction: jest.fn(),
-      requestApproval: jest.fn(),
+      askUserQuestion: vi.fn(),
+      dismissInteraction: vi.fn(),
+      requestApproval: vi.fn(),
     },
     lifecycleRegistry,
     nativePersistence: 'provider-default',
@@ -106,4 +106,20 @@ describe('InlineEditService', () => {
     backend.sessions[1].complete();
     await expect(restarted).resolves.toMatchObject({ success: true });
   });
+});
+
+
+it('keeps literal replacement markup inside a cursor insertion', async () => {
+  const { backend, lifecycleRegistry, service } = createService();
+  try {
+    const result = service.send({ mode: 'cursor', notePath: 'note.md', instruction: 'Document the wrapper',
+      cursorContext: { beforeCursor: '', afterCursor: '', isInbetween: true, line: 0, column: 0 } });
+    await waitFor(() => backend.sessions[0]?.requests.length === 1);
+    backend.sessions[0].emitText('<insertion>Example: <replacement>new text</replacement></insertion>');
+    backend.sessions[0].complete();
+    await expect(result).resolves.toEqual({ success: true, insertedText: 'Example: <replacement>new text</replacement>' });
+  } finally {
+    service.end();
+    await lifecycleRegistry.dispose();
+  }
 });

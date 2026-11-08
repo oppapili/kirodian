@@ -1,4 +1,4 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 import '@/providers';
 
 import { createFixture } from '@test/helpers/ChatInputHarness';
@@ -20,7 +20,7 @@ HTMLElement.prototype.removeClass = function (...classes) { this.classList.remov
 
 const cleanups: Array<() => void> = [];
 beforeEach(() => {
-  jest.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
+  vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
     (el as HTMLElement).createEl('p', { text: markdown });
   });
 });
@@ -35,7 +35,7 @@ function visibleText(element: HTMLElement): string {
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
   const parts: string[] = [];
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-    if (!node.parentElement?.closest('[hidden]') && node.textContent?.trim()) parts.push(node.textContent.trim());
+    if (!node.parentElement?.closest('[hidden], .claudian-hidden') && node.textContent?.trim()) parts.push(node.textContent.trim());
   }
   // Line breaks within a text block read as spaces.
   return parts.join(' ').replace(/\s+/g, ' ');

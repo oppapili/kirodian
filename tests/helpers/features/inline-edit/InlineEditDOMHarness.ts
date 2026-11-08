@@ -2,11 +2,12 @@ import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { FakeAuxiliaryBackend } from '@test/helpers/core/auxiliary/AuxiliaryExecutionTestHarness';
 import { fireEvent, screen, waitFor } from '@testing-library/dom';
+import { Component } from 'obsidian';
 
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
-import type { ProviderId, ProviderModelPolicy, ProviderRegistration } from '@/core/providers/types';
+import type { ProviderChatUIConfig, ProviderId, ProviderModelPolicy, ProviderRegistration } from '@/core/providers/types';
 import { InlineEditSessionOwner } from '@/features/inline-edit/InlineEditSessionOwner';
 import { InlineEditModal, InlineEditSession } from '@/features/inline-edit/ui/InlineEditModal';
 import { KIRO_PROVIDER_ICON } from '@/shared/icons';
@@ -25,10 +26,13 @@ Object.assign(HTMLElement.prototype, {
 });
 
 const cleanups: Array<() => Promise<void>> = [];
+/** The registry cannot unregister, so fake providers stay enabled only in the test that registered them. */
+let harnessGeneration = 0;
 
 /** Call from `afterEach` in every suite that creates Inline Edit harnesses. */
 export async function disposeInlineEditHarnesses(): Promise<void> {
   for (const cleanup of cleanups.splice(0)) await cleanup();
+  harnessGeneration += 1;
   await ProviderWorkspaceRegistry.disposeInitialized();
   document.body.replaceChildren();
 }
@@ -38,10 +42,14 @@ function isProviderEnabled(providerId: ProviderId, settings: Record<string, unkn
   return configs?.[providerId]?.enabled !== false;
 }
 
-/** Two models with two effort levels, enough to drive the composer's model chip. */
-const fakeModelPolicy: ProviderModelPolicy = {
-  getModelOptions: () => [{ value: 'sonnet', label: 'Sonnet' }, { value: 'opus', label: 'Opus' }],
-  ownsModel: model => model === 'sonnet' || model === 'opus',
+type FakeModel = { value: string; label: string };
+
+/** Two efforts, and by default two models: enough to drive the composer's model chip. */
+const createFakeModelPolicy = (
+  models: FakeModel[] = [{ value: 'sonnet', label: 'Sonnet' }, { value: 'opus', label: 'Opus' }],
+): ProviderModelPolicy => ({
+  getModelOptions: () => models,
+  ownsModel: model => models.some(option => option.value === model),
   supportsReasoningEffort: () => true,
   getReasoningOptions: () => [{ value: 'low', label: 'Low' }, { value: 'high', label: 'High' }],
   getDefaultReasoningValue: () => 'high',
@@ -49,19 +57,31 @@ const fakeModelPolicy: ProviderModelPolicy = {
   applyModelDefaults: () => {},
   normalizeModelVariant: model => model,
   getCustomModelIds: () => new Set(),
-};
+});
 
-/** Registers a provider whose auxiliary sessions are fakes; enablement follows `settings.providerConfigs`. */
-export function registerFakeInlineEditProvider(providerId: ProviderId): FakeAuxiliaryBackend {
+/**
+ * Registers a provider whose auxiliary sessions are fakes; enablement follows `settings.providerConfigs`.
+ * `ui` overrides its chat UI config, such as its reasoning options or model metadata hook.
+ */
+export function registerFakeInlineEditProvider(
+  providerId: ProviderId,
+  models?: FakeModel[],
+  ui: Partial<ProviderChatUIConfig> = {},
+): FakeAuxiliaryBackend {
   const backend = new FakeAuxiliaryBackend();
+  const fakeModelPolicy = createFakeModelPolicy(models);
+  const generation = harnessGeneration;
   ProviderWorkspaceRegistry.setServices(providerId, {});
   ProviderRegistry.register(providerId, {
     blankTabOrder: 0,
+    displayName: providerId,
     capabilities: { supportsEphemeralSessions: true, supportsProviderCommands: true, reasoningControl: 'effort' },
-    chatUIConfig: { ...fakeModelPolicy, getProviderIcon: () => KIRO_PROVIDER_ICON },
+    chatUIConfig: { ...fakeModelPolicy, getProviderIcon: () => KIRO_PROVIDER_ICON, ...ui },
     modelPolicy: fakeModelPolicy,
     createExecutionBackend: () => backend,
-    isEnabled: (settings: Record<string, unknown>) => isProviderEnabled(providerId, settings),
+    isEnabled: (settings: Record<string, unknown>) => (
+      generation === harnessGeneration && isProviderEnabled(providerId, settings)
+    ),
   } as unknown as ProviderRegistration);
   return backend;
 }
@@ -75,7 +95,7 @@ export function createInlineEditHarness() {
   const app: any = {
     vault: { adapter: { basePath: '/vault' }, getFiles: () => [], getAllLoadedFiles: () => [] },
   };
-  const plugin: any = {
+  const plugin: any = Object.assign(new Component(), {
     settings: { model: 'sonnet', effortLevel: 'high' },
     getActiveEnvironmentVariables: () => '',
     getActiveModelSelection: () => null,
@@ -88,7 +108,8 @@ export function createInlineEditHarness() {
       executionLifecycleRegistry: lifecycle,
       runProviderExecutionTransition: lifecycle.runTransition.bind(lifecycle),
     },
-  };
+  });
+  plugin.load();
   const editorView = new EditorView({
     state: EditorState.create({ doc: 'hello world' }),
     parent: document.body,
@@ -102,7 +123,7 @@ export function createInlineEditHarness() {
     replaceRange: (text: string) => editorView.dispatch({ changes: { from: 0, to: end, insert: text } }),
   };
   const context = { mode: 'selection' as const, selectedText: 'hello' };
-  const settled = jest.fn();
+  const settled = vi.fn();
   const notePath = 'note.md';
   const createSession = () => new InlineEditSession(
     app, plugin, plugin, editorView, editor, context, notePath, settled, { providerId: 'claude' },
@@ -113,6 +134,7 @@ export function createInlineEditHarness() {
   cleanups.push(async () => {
     owner.dispose();
     editorView.destroy();
+    plugin.unload();
     await lifecycle.dispose();
   });
   return {

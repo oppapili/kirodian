@@ -1,11 +1,11 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 import '@/providers';
 
+import { axe } from '@test/helpers/accessibility';
 import { deferred } from '@test/helpers/ChatInputHarness';
 import { createTestSession } from '@test/helpers/ConversationPorts';
 import { createHarness, releaseSideChatHarnesses, startSideChat } from '@test/helpers/features/chat/SideChatDOMHarness';
 import { fireEvent, screen, waitFor } from '@testing-library/dom';
-import { axe } from 'jest-axe';
 import { Component, MarkdownRenderer, Notice } from 'obsidian';
 
 import type { ProviderExecutionRequest } from '@/core/execution';
@@ -41,7 +41,7 @@ const taskResultInterpreter = ProviderRegistry.getTaskResultInterpreter('kiro');
 afterEach(releaseSideChatHarnesses);
 
 it('keeps a child turn and detached approval alive, then restores the completed transcript', async () => {
-  jest.mocked(MarkdownRenderer.render).mockImplementation(async (_app, text, el) => { el.textContent = text; });
+  vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, text, el) => { el.textContent = text; });
   const harness = createHarness();
   const { started } = await startSideChat(harness);
   const runtime = harness.controller.runtime!;
@@ -219,7 +219,7 @@ it.each(['asking', 'later'] as const)('keeps an unanswered side question usable 
 async function startLaterTurnUnderQuestion() {
   const result = await showAsyncQuestion();
   const { harness, native, started } = result;
-  const steer = jest.fn(async (_request: ProviderExecutionRequest) => true);
+  const steer = vi.fn(async (_request: ProviderExecutionRequest) => true);
   Object.assign(native, { steer });
   native.complete();
   await started;
@@ -257,7 +257,7 @@ it('does not resurrect the waiting indicator when the earlier question settles a
 
 it('submits an async answer to the active side turn while preserving queued work and the composer draft', async () => {
   const { harness, native, started } = await showAsyncQuestion();
-  const steer = jest.fn(async (_request: ProviderExecutionRequest) => true);
+  const steer = vi.fn(async (_request: ProviderExecutionRequest) => true);
   Object.assign(native, { steer });
   harness.controller.runtime!.enqueue({ content: 'Unrelated follow-up' });
   harness.inputEl.value = 'Keep this draft';
@@ -280,16 +280,100 @@ it('submits an async answer to the active side turn while preserving queued work
   await started;
 });
 
+it.each([['before', 'requested'], ['after', 'requested'], ['before', 'background'], ['after', 'background']] as const)('keeps a steered answer before its response when acknowledgement arrives %s the %s echo', async (acknowledgement, channel) => {
+  vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, text, el) => { el.textContent = text; });
+  const { harness, native, started } = await showAsyncQuestion();
+  native.emitOutput({ type: 'user_message_started', content: 'Explore B' });
+  native.emitOutput({ type: 'assistant_message_started' });
+  native.emitText('Before the answer.');
+  await waitFor(() => expect(harness.controller.runtime!.state.currentTextContent).toBe('Before the answer.'));
+  const handoff = deferred<boolean>();
+  const steer = vi.fn((_request: ProviderExecutionRequest) => handoff.promise);
+  Object.assign(native, { steer });
+  submitAnswer();
+  await waitFor(() => expect(steer).toHaveBeenCalledTimes(1));
+  const answerText = (steer.mock.calls[0][0].input[0] as { text: string }).text;
+  const waitForQuestionToClose = () => waitFor(() => expect(screen.queryByRole('region', { name: 'Question' })).toBeNull());
+  const waitForResponse = () => waitFor(() => expect(screen.getByText('After the answer.')).toBeTruthy());
+  if (acknowledgement === 'before') {
+    handoff.resolve(true);
+    await waitForQuestionToClose();
+  }
+  if (channel === 'requested') {
+    native.emitOutput({ type: 'user_message_started', content: answerText, nativeUserMessageId: 'native-answer' });
+    native.emitOutput({ type: 'assistant_message_started' });
+    native.emitText('After the answer.');
+  } else {
+    native.complete();
+    await started;
+    native.emitBackgroundEvent({ type: 'background_turn_started' });
+    native.emitBackgroundEvent({ type: 'user_message_started', content: answerText, nativeUserMessageId: 'native-answer' });
+    native.emitBackgroundEvent({ type: 'assistant_message_started' });
+    native.emitBackgroundEvent({ type: 'text_delta', text: 'After the answer.' });
+    native.emitBackgroundEvent({ type: 'background_turn_completed', reason: 'completed' });
+  }
+  if (acknowledgement === 'after') {
+    await waitForResponse();
+    handoff.resolve(true);
+    await waitForQuestionToClose();
+  }
+  native.complete();
+  await started;
+  await waitFor(() => expect(harness.controller.runtime!.isWorking).toBe(false));
+  const messages = harness.controller.runtime!.state.messages;
+  const answers = messages.filter(message => message.role === 'user' && message.content === answerText);
+  expect(answers).toHaveLength(1);
+  const answerIndex = messages.indexOf(answers[0]);
+  expect(messages.slice(0, answerIndex).some(message => message.contentBlocks?.some(block => block.type === 'text' && block.content === 'Before the answer.'))).toBe(true);
+  expect(messages.slice(answerIndex + 1).some(message => message.contentBlocks?.some(block => block.type === 'text' && block.content === 'After the answer.'))).toBe(true);
+  const answerElement = screen.getByText('Before the answer.').closest('.claudian-message')!;
+  expect(harness.composerEl.querySelector(`[data-message-id="${answers[0].id}"]`)).toBeNull();
+  const responseElement = screen.getByText('After the answer.').closest('.claudian-message')!;
+  expect(answerElement.compareDocumentPosition(responseElement) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(native.requests).toHaveLength(1);
+  expect(await axe(harness.composerEl)).toHaveNoViolations();
+  const followUp = harness.controller.submitToSide('Continue with that answer', []);
+  await waitFor(() => expect(native.requests).toHaveLength(2));
+  const history = native.requests[1].conversationHistory!;
+  const historicalAnswer = history.findIndex(message => message.content === answerText);
+  expect(history.slice(historicalAnswer + 1).some(message => message.contentBlocks?.some(block => block.type === 'text' && block.content === 'After the answer.'))).toBe(true);
+  native.complete();
+  await followUp;
+});
+
+it.each(['rejected', 'ambiguous'] as const)('keeps an echoed side answer accepted after a later %s acknowledgement', async outcome => {
+  const { harness, native, started } = await showAsyncQuestion();
+  native.emitOutput({ type: 'user_message_started', content: 'Explore B' });
+  const handoff = deferred<boolean>();
+  const steer = vi.fn((_request: ProviderExecutionRequest) => handoff.promise);
+  Object.assign(native, { steer });
+  submitAnswer();
+  await waitFor(() => expect(steer).toHaveBeenCalledTimes(1));
+  const answerText = (steer.mock.calls[0][0].input[0] as { text: string }).text;
+  native.emitOutput({ type: 'user_message_started', content: answerText });
+  native.emitOutput({ type: 'assistant_message_started' });
+  native.emitText('The answer was received.');
+  await waitFor(() => expect(harness.controller.runtime!.state.currentTextContent).toBe('The answer was received.'));
+  if (outcome === 'rejected') handoff.resolve(false);
+  else handoff.reject(new Error('Acknowledgement lost'));
+  await waitFor(() => expect(screen.queryByRole('region', { name: 'Question' })).toBeNull());
+  expect(harness.controller.runtime!.queuedCount).toBe(0);
+  expect(harness.controller.runtime!.state.messages.filter(message => message.role === 'user' && message.content === answerText)).toHaveLength(1);
+  native.complete();
+  await started;
+  expect(native.requests).toHaveLength(1);
+});
+
 it.each(['rejected', 'ambiguous'] as const)('settles a %s side answer without leaving the prompt busy', async outcome => {
   const { harness, native, started } = await showAsyncQuestion();
-  const steer = outcome === 'rejected' ? jest.fn().mockResolvedValue(false) : jest.fn().mockRejectedValue(new Error('Acknowledgement lost'));
+  const steer = outcome === 'rejected' ? vi.fn().mockResolvedValue(false) : vi.fn().mockRejectedValue(new Error('Acknowledgement lost'));
   Object.assign(native, { steer });
   submitAnswer();
   await waitFor(() => expect(screen.queryByRole('region', { name: 'Question' })).toBeNull());
   expect(steer).toHaveBeenCalledTimes(1);
   expect(harness.controller.runtime!.queuedCount).toBe(outcome === 'rejected' ? 1 : 0);
   expect(native.requests).toHaveLength(1);
-  expect(jest.mocked(Notice).mock.calls.some(([message]) => String(message).includes('could not be confirmed'))).toBe(outcome === 'ambiguous');
+  expect(vi.mocked(Notice).mock.calls.some(([message]) => String(message).includes('could not be confirmed'))).toBe(outcome === 'ambiguous');
   harness.controller.cancelSide();
   await started;
 });
@@ -297,7 +381,7 @@ it.each(['rejected', 'ambiguous'] as const)('settles a %s side answer without le
 it.each(['completed', 'cancelled'] as const)('handles a side turn that is %s before its answer steer is rejected', async outcome => {
   const { harness, native, started } = await showAsyncQuestion();
   const handoff = deferred<boolean>();
-  const steer = jest.fn(() => handoff.promise);
+  const steer = vi.fn(() => handoff.promise);
   Object.assign(native, { steer });
   submitAnswer();
   await waitFor(() => expect(steer).toHaveBeenCalledTimes(1));
@@ -354,8 +438,8 @@ it('keeps a pending main question out of the side destination and restores its a
   });
   const main = new InputController({
     state, session, inlinePrompts: prompts,
-    streamController: { thinkingIndicator: { hide: jest.fn() } },
-    renderer: { updateQuestionTool: jest.fn() },
+    streamController: { thinkingIndicator: { hide: vi.fn() } },
+    renderer: { updateQuestionTool: vi.fn() },
   } as unknown as InputControllerDeps);
   try {
     const { started } = await startSideChat(harness);
@@ -377,5 +461,37 @@ it('keeps a pending main question out of the side destination and restores its a
     expect(screen.getByText('Main answer')).toBeDefined();
   } finally {
     main.dismissPendingApproval();
+  }
+});
+
+it.each(['accepted', 'rejected', 'ambiguous'] as const)('accepts an echoed side answer before rendering settles despite a %s acknowledgement', async outcome => {
+  const render = deferred<void>();
+  const rendering = deferred<void>();
+  vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, text, el) => {
+    el.textContent = text;
+    if (text === 'Before the answer.') { rendering.resolve(); await render.promise; }
+  });
+  const { harness, native, started } = await showAsyncQuestion();
+  const handoff = deferred<boolean>();
+  const steer = vi.fn((_request: ProviderExecutionRequest) => handoff.promise);
+  Object.assign(native, { steer });
+  try {
+    native.emitOutput({ type: 'user_message_started', content: 'Explore B' });
+    native.emitOutput({ type: 'assistant_message_started' });
+    native.emitText('Before the answer.');
+    await waitFor(() => expect(harness.controller.runtime!.state.currentTextContent).toBe('Before the answer.'));
+    submitAnswer();
+    await waitFor(() => expect(steer).toHaveBeenCalledTimes(1));
+    const answerText = (steer.mock.calls[0][0].input[0] as { text: string }).text;
+    native.emitOutput({ type: 'user_message_started', content: answerText, nativeUserMessageId: 'native-answer' });
+    await rendering.promise;
+    await waitFor(() => expect(harness.controller.runtime!.state.currentTextContent).toBe(''));
+    if (outcome === 'ambiguous') handoff.reject(new Error('Acknowledgement lost'));
+    else handoff.resolve(outcome === 'accepted');
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Question' })).toBeNull());
+    expect(harness.controller.runtime!.queuedCount).toBe(0);
+    expect(vi.mocked(Notice).mock.calls.some(([message]) => String(message).includes('could not be confirmed'))).toBe(false);
+  } finally {
+    render.resolve(); harness.controller.runtime!.cancel(); native.complete(); await started;
   }
 });

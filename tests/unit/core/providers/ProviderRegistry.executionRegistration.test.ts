@@ -14,8 +14,8 @@ function createHost(): any {
       vault: { adapter: { basePath: '/tmp/provider-registration' } },
     },
     executionLifecycleRegistry,
-    getActiveEnvironmentVariables: jest.fn(() => ''),
-    getResolvedProviderCliPath: jest.fn(),
+    getActiveEnvironmentVariables: vi.fn(() => ''),
+    getResolvedProviderCliPath: vi.fn(),
     manifest: { version: 'test' },
     runProviderExecutionTransition: (
       providerIds: string[],
