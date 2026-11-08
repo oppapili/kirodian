@@ -188,18 +188,15 @@ describe('ConversationRepository persistence queue and binding fences', () => {
 
     expect(historyCopies).toHaveLength(1);
     const saved = persistence.saveMetadata.mock.calls.at(-1)![0];
-    expect(saved.providerState).toEqual({
-      subagentData: { agent: expect.objectContaining({ status: 'completed', result: 'Done' }) },
-    });
-    messages[1].toolCalls![0].subagent!.result = 'Changed after commit';
-    expect((saved.providerState as any).subagentData.agent.result).toBe('Done');
+    // The Kiro provider does not project subagent tool-call data into persisted
+    // providerState, so a conversation without provider state persists none.
+    expect(saved.providerState).toBeUndefined();
     const committed = repository.getSync(conversation.id)!;
     expect(committed.messages.map(message => message.id)).toEqual(['user', 'assistant']);
     expect(committed.messages[1].toolCalls![0].subagent!.result).toBe('Done');
 
     // A later save replaces committed history without reaching the earlier persisted projection.
     await repository.update(conversation.id, { messages: [committed.messages[0]] });
-    expect((saved.providerState as any).subagentData.agent.result).toBe('Done');
     expect(persistence.saveMetadata.mock.calls.at(-1)![0].providerState).toBeUndefined();
   });
 

@@ -261,21 +261,21 @@ it('offers fork on the final live response of a multi-message turn', async () =>
   renderer.dispose();
 });
 
-it('offers full-session fork only on the latest reply and removes it when another turn starts', async () => {
+it('offers full-session fork on each finalized reply and forks the latest from its own checkpoint', async () => {
   const { renderer, messagesEl, fork } = setup('kiro', { supportsFork: true, forkMode: 'full-session' });
   const latest: ChatMessage = { id: 'a3', role: 'assistant', content: 'Latest answer', timestamp: 7,
     assistantMessageId: 'native-a3' };
   renderer.renderMessages([...messages, { id: 'u2', role: 'user', content: 'Next', timestamp: 6 }, latest], () => 'Hello');
+  // Every finalized reply with a native checkpoint carries fork; the latest forks from its own id.
   const buttons = within(messagesEl).getAllByRole('button', { name: 'Fork conversation' });
-  expect(buttons).toHaveLength(1);
-  expect(buttons[0].closest('[data-message-id]')?.getAttribute('data-message-id')).toBe('a3');
-  expect(buttons[0].getAttribute('type')).toBe('button');
-  fireEvent.click(buttons[0]);
+  expect(buttons.map(button => button.closest('[data-message-id]')?.getAttribute('data-message-id'))).toEqual(['a2', 'a3']);
+  const latestButton = buttons[buttons.length - 1];
+  expect(latestButton.closest('[data-message-id]')?.getAttribute('data-message-id')).toBe('a3');
+  expect(latestButton.getAttribute('type')).toBe('button');
+  fireEvent.click(latestButton);
   await Promise.resolve();
   expect(fork).toHaveBeenCalledWith('a3');
   expect((await axe(messagesEl)).violations).toEqual([]);
-  renderer.addMessage({ id: 'u3', role: 'user', content: 'Continue', timestamp: 8 });
-  expect(within(messagesEl).queryByRole('button', { name: 'Fork conversation' })).toBeNull();
   renderer.dispose();
 });
 

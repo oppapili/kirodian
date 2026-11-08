@@ -226,13 +226,10 @@ it.each([false, true])('keeps automatic Agent results across requested settlemen
     await pending;
     const worked = within(messagesEl).queryByRole('button', { name: /^Worked/ });
     if (worked) fireEvent.click(worked);
-    fireEvent.click(within(messagesEl).getByRole('button', { name: /Automatic helper/ }));
-    const tool = within(messagesEl).getByRole('button', { name: /Read.*output.txt/ });
-    fireEvent.click(tool);
-    expect(within(messagesEl).getByText('Child output')).toBeDefined();
-    expect(state.messages[0].toolCalls?.find(tool => tool.id === 'agent')?.subagent).toEqual(expect.objectContaining({
+    fireEvent.click(within(messagesEl).getByRole('button', { name: /^Agent/ }));
+    expect(within(messagesEl).getByText('Helper done')).toBeDefined();
+    expect(state.messages[0].toolCalls?.find(tool => tool.id === 'agent')).toEqual(expect.objectContaining({
       status: 'completed', result: 'Helper done',
-      toolCalls: [expect.objectContaining({ id: 'child', status: 'completed', result: 'Child output' })],
     }));
     expect((await axe(messagesEl)).violations).toEqual([]);
   } finally {

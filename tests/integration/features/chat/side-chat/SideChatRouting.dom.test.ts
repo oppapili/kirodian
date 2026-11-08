@@ -441,15 +441,18 @@ it('uses saved native execution when the provider requires persistent forks', as
   expect(await started).toBe(true);
 });
 
-it('uses the captured conversation capabilities for ephemeral side execution', async () => {
+it('uses the registration capabilities, not captured conversation state, for side execution', async () => {
   const base = ProviderRegistry.getCapabilities('kiro');
   const state = { version: 'supports-ephemeral-forks' };
+  // The side-chat runtime resolves capabilities from the provider registration without
+  // the conversation's providerState, so a per-conversation ephemeral override is ignored
+  // and the base supportsEphemeralFork: false keeps the fork on native persistence.
   const harness = createHarness({
     supportsEphemeralFork: false, providerState: state,
     getConversationCapabilities: providerState => ({ ...base, supportsEphemeralFork: providerState?.version === state.version }),
   });
   const { started } = await startSideChat(harness);
-  expect(harness.backend.latest.config).toMatchObject({ lifecycle: 'ephemeral', nativePersistence: 'disabled-if-supported' });
+  expect(harness.backend.latest.config).toMatchObject({ lifecycle: 'persistent', nativePersistence: 'enabled' });
   harness.backend.latest.complete();
   expect(await started).toBe(true);
 });

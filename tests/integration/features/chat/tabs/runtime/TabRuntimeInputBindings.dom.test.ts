@@ -43,6 +43,8 @@ beforeEach(async () => {
     getConversationSummary: () => conversation,
     getConversationSync: () => conversation,
     getConversationList: () => [conversation],
+    renameConversation: async () => undefined,
+    updateConversation: async () => undefined,
     executionPersistence: {
       registerExecutionBinding: () => {}, releaseExecutionBinding: () => {},
       persistExecutionSnapshot: async () => true, assertConversationExecutionAuthority: async () => {},

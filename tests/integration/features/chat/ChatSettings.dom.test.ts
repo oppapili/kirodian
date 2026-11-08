@@ -147,31 +147,24 @@ function createChatHarness(settings: ClaudianSettings, id: ProviderId, selected:
   return { createTab, tabs, sessions, persist, plugin };
 }
 
-function reasoningSlider(tab: AssembledTabRuntime): HTMLInputElement {
-  // The slider lives in the model popover, which stays closed in these tests.
-  return within(tab.dom.inputComposerEl).getByRole('slider', { hidden: true }) as HTMLInputElement;
+function reasoningList(tab: AssembledTabRuntime): HTMLElement | null {
+  // The levels live in the model popover, which stays closed in these tests.
+  return within(tab.dom.inputComposerEl).queryByRole('listbox', { name: 'Thinking', hidden: true });
 }
 
-/** The labels the slider announces at each stop, read the way assistive technology hears them. */
-function reasoningStops(tab: AssembledTabRuntime): string[] {
-  const slider = reasoningSlider(tab);
-  const original = slider.value;
-  const labels: string[] = [];
-  for (let index = Number(slider.min); index <= Number(slider.max); index++) {
-    fireEvent.input(slider, { target: { value: String(index) } });
-    labels.push(slider.getAttribute('aria-valuetext') ?? '');
-  }
-  fireEvent.input(slider, { target: { value: original } });
-  return labels;
+function reasoningLevels(tab: AssembledTabRuntime): HTMLElement[] {
+  return within(reasoningList(tab)!).getAllByRole('option', { hidden: true });
 }
 
-/** Moves the slider to the stop announcing `label` and releases it, which commits that level. */
+function levelLabel(level: HTMLElement): string {
+  return level.querySelector('.claudian-toolbar-popover-option-label')?.textContent ?? '';
+}
+
+/** Picks the level named `label`, which commits it. */
 function chooseReasoning(tab: AssembledTabRuntime, label: string): void {
-  const index = reasoningStops(tab).indexOf(label);
-  expect(index).toBeGreaterThanOrEqual(0);
-  const slider = reasoningSlider(tab);
-  fireEvent.input(slider, { target: { value: String(index) } });
-  fireEvent.change(slider);
+  const level = reasoningLevels(tab).find(item => levelLabel(item) === label);
+  expect(level).toBeDefined();
+  fireEvent.click(level!);
 }
 
 async function selectReasoning(tab: AssembledTabRuntime, reasoning: string) {
@@ -181,7 +174,7 @@ async function selectReasoning(tab: AssembledTabRuntime, reasoning: string) {
   await waitFor(() => expect(ui.getByText(label, { selector: '.claudian-thinking-current' })).toBeDefined());
   // Let the commit settle even when the level was already selected.
   await new Promise<void>(resolve => setTimeout(resolve, 0));
-  expect(reasoningSlider(tab).getAttribute('aria-valuetext')).toBe(label);
+  expect(reasoningLevels(tab).filter(level => level.getAttribute('aria-selected') === 'true').map(levelLabel)).toEqual([label]);
 }
 
 async function expectSubmission(

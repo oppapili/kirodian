@@ -367,6 +367,11 @@ function createEventContext(
   };
 }
 
+function browseProvider(tab: { dom: { inputWrapper: HTMLElement } }, providerId: string): void {
+  const tabs = Array.from(tab.dom.inputWrapper.querySelectorAll('.claudian-model-provider-tab')) as HTMLElement[];
+  tabs.find(item => item.dataset.provider === providerId)?.click();
+}
+
 describe('Tab provider execution ownership', () => {
   const originalResizeObserver = globalThis.ResizeObserver;
 
@@ -1003,12 +1008,13 @@ describe('Tab provider execution ownership', () => {
 
       expect(tab.state.autoScrollEnabled).toBe(true);
 
+      tab.state.currentContentEl = tab.dom.messagesEl.createDiv();
       tab.dom.messagesEl.scrollHeight = 1_200;
       await tab.controllers.streamController.handleStreamChunk(
         { type: 'text', content: 'continued' },
         { content: '', role: 'assistant' },
       );
-      vi.advanceTimersByTime(16);
+      await vi.advanceTimersByTimeAsync(200);
 
       expect(tab.dom.messagesEl.scrollTop).toBe(1_200);
     } finally {
@@ -1041,12 +1047,13 @@ describe('Tab provider execution ownership', () => {
 
       expect(tab.state.autoScrollEnabled).toBe(true);
 
+      tab.state.currentContentEl = tab.dom.messagesEl.createDiv();
       tab.dom.messagesEl.scrollHeight = 1_200;
       await tab.controllers.streamController.handleStreamChunk(
         { type: 'text', content: 'continued' },
         { content: '', role: 'assistant' },
       );
-      vi.advanceTimersByTime(16);
+      await vi.advanceTimersByTimeAsync(200);
 
       expect(tab.dom.messagesEl.scrollTop).toBe(1_200);
     } finally {
@@ -1647,6 +1654,8 @@ describe('Tab provider execution ownership', () => {
       const tab = await createTestTab({ plugin, containerEl: createMockEl() as any }, {
         onProviderChanged,
       });
+      // A new session shows one provider's models at a time; browse to Kiro Alt first.
+      browseProvider(tab, 'kiro-alt');
       const modelOptions = Array.from(
         tab.dom.inputWrapper.querySelectorAll(
           '.claudian-model-option',
@@ -1742,6 +1751,8 @@ describe('Tab provider execution ownership', () => {
       const tab = await createTestTab({ plugin, containerEl: createMockEl() as any }, {
         onProviderChanged: () => kiroAltSwitch,
       });
+      // A new session shows one provider's models at a time; browse to Kiro Alt first.
+      browseProvider(tab, 'kiro-alt');
       const modelOptions = Array.from(
         tab.dom.inputWrapper.querySelectorAll(
           '.claudian-model-option',

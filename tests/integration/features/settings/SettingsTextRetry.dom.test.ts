@@ -5,7 +5,8 @@ import '@test/helpers/ObsidianSettingsDOM';
 import { deserialize, serialize } from 'node:v8';
 
 import { axe } from '@test/helpers/accessibility';
-import { beginExecution, createHarness, createSubmission, requestedScope } from '@test/helpers/ChatExecutionHarness';
+import type { FakeRun, FakeSession } from '@test/helpers/ChatExecutionHarness';
+import { createHarness, createSubmission, requestedScope } from '@test/helpers/ChatExecutionHarness';
 import { DesktopVault } from '@test/helpers/core/DesktopVault';
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@test/helpers/defaultSettings';
 import { testDate } from '@test/helpers/testClock';
@@ -36,6 +37,33 @@ vi.mock('obsidian', async () => {
 });
 
 afterEach(() => { document.body.replaceChildren(); vi.clearAllMocks(); });
+
+// The settings execution transition runs only for registered providers; in this
+// fork that is 'kiro'. The shared beginExecution helper hard-codes the removed
+// 'claude' provider, so bind and start the active run on 'kiro' here instead.
+async function beginKiroExecution(
+  harness: ReturnType<typeof createHarness>,
+  submission = createSubmission(),
+): Promise<{ session: FakeSession; run: FakeRun; resultPromise: Promise<unknown> }> {
+  await harness.coordinator.bindConversation({
+    conversationId: 'conversation-1',
+    providerId: 'kiro',
+    resumeSeed: {
+      providerSessionId: 'native-session',
+      providerState: { leafId: 'leaf-1' },
+    },
+  });
+  const resultPromise = harness.coordinator.execute(submission);
+  let session: FakeSession | undefined;
+  let run: FakeRun | undefined;
+  for (let attempt = 0; attempt < 20 && !run; attempt += 1) {
+    await Promise.resolve();
+    session = harness.backends.get('kiro')!.sessions[0];
+    run = session?.runs[0];
+  }
+  if (!session || !run) throw new Error('Execution did not start');
+  return { session, run, resultPromise };
+}
 
 it('retries an unchanged user-name draft on the next blur after a rejected save', async () => {
   globalThis.structuredClone ??= value => deserialize(serialize(value));
@@ -146,7 +174,7 @@ it.each([
   tab['renderGeneralTab'](container);
   const row = within(container).getByText(t(label)).parentElement!;
   const input = within(row).getByRole<HTMLInputElement | HTMLTextAreaElement>('textbox');
-  const active = await beginExecution(execution, createSubmission({ timestamp: testDate().getTime() }));
+  const active = await beginKiroExecution(execution, createSubmission({ timestamp: testDate().getTime() }));
   active.run.events.push({ type: 'turn_started', accepted: true, scope: requestedScope(active.session, active.run, 1) });
   await waitFor(() => expect(execution.repository.recordConversationActivity).toHaveBeenCalled());
   try {

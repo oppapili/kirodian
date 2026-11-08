@@ -25,14 +25,14 @@ afterEach(() => {
 });
 
 it.each([
-  { name: 'adding a review key', initial: 'PATH=/before', inserted: 'MY_TOOL_SETTING=custom', shared: 'MY_TOOL_SETTING=custom', provider: 'ANTHROPIC_MODEL=before', warning: 'Review environment ownership for: MY_TOOL_SETTING' },
-  { name: 'removing a review key', initial: 'MY_TOOL_SETTING=old', inserted: 'PATH=/after', shared: 'PATH=/after', provider: 'ANTHROPIC_MODEL=before', warning: null },
-  { name: 'a legacy snippet changing two rendered scopes', initial: 'PATH=/before', providerInitial: 'PATH=/provider-wrong', legacy: true, inserted: 'PATH=/after\nMY_TOOL_SETTING=custom\nANTHROPIC_MODEL=after', shared: 'PATH=/after\nMY_TOOL_SETTING=custom', provider: 'ANTHROPIC_MODEL=after', warning: 'Review environment ownership for: MY_TOOL_SETTING' },
+  { name: 'adding a review key', initial: 'PATH=/before', inserted: 'MY_TOOL_SETTING=custom', shared: 'MY_TOOL_SETTING=custom', provider: 'KIRO_MODEL=before', warning: 'Review environment ownership for: MY_TOOL_SETTING' },
+  { name: 'removing a review key', initial: 'MY_TOOL_SETTING=old', inserted: 'PATH=/after', shared: 'PATH=/after', provider: 'KIRO_MODEL=before', warning: null },
+  { name: 'a legacy snippet changing two rendered scopes', initial: 'PATH=/before', providerInitial: 'PATH=/provider-wrong', legacy: true, inserted: 'PATH=/after\nMY_TOOL_SETTING=custom\nKIRO_MODEL=after', shared: 'PATH=/after\nMY_TOOL_SETTING=custom', provider: 'KIRO_MODEL=after', warning: 'Review environment ownership for: MY_TOOL_SETTING' },
 ])('refreshes the review message after $name', async ({ initial, inserted, shared, provider, warning, providerInitial, legacy }) => {
   globalThis.structuredClone ??= value => deserialize(serialize(value));
   const settings = {
     sharedEnvironmentVariables: initial,
-    providerConfigs: { claude: { environmentVariables: providerInitial ?? 'ANTHROPIC_MODEL=before' } },
+    providerConfigs: { kiro: { environmentVariables: providerInitial ?? 'KIRO_MODEL=before' } },
     envSnippets: [{ id: 'snippet', name: 'Saved configuration', scope: legacy ? undefined : 'shared', envVars: inserted }],
   };
   let saved = '';
@@ -54,7 +54,7 @@ it.each([
   const sharedRefresh = vi.fn();
   const providerRefresh = vi.fn();
   renderEnvironmentSettingsSection({ container: general, plugin: host, scope: 'shared', name: 'Shared environment', desc: '', placeholder: '', renderCustomContextLimits: sharedRefresh });
-  renderEnvironmentSettingsSection({ container: specific, plugin: host, scope: 'provider:claude', name: 'Claude environment', desc: '', placeholder: '', renderCustomContextLimits: providerRefresh });
+  renderEnvironmentSettingsSection({ container: specific, plugin: host, scope: 'provider:kiro', name: 'Kiro environment', desc: '', placeholder: '', renderCustomContextLimits: providerRefresh });
   const originalWarning = within(general).queryByText(/^Review environment ownership/);
   expect(originalWarning?.textContent ?? null).toBe(initial.startsWith('MY_TOOL_SETTING') ? 'Review environment ownership for: MY_TOOL_SETTING' : null);
   const originalProviderWarning = within(specific).queryByText(/^Review environment ownership/);
@@ -65,7 +65,7 @@ it.each([
     .toEqual(legacy ? { single: 0, batch: 1 } : { single: 1, batch: 0 });
   expect(mutateSettings).toHaveBeenCalledTimes(1);
   expect(getEnvironmentVariablesForScope(settings, 'shared')).toBe(shared);
-  expect(getEnvironmentVariablesForScope(settings, 'provider:claude')).toBe(provider);
+  expect(getEnvironmentVariablesForScope(settings, 'provider:kiro')).toBe(provider);
   expect(getEnvironmentVariablesForScope(JSON.parse(saved), 'shared')).toBe(shared);
   expect((within(general).getByRole('textbox', { name: 'Shared environment' }) as HTMLTextAreaElement).value).toBe(shared);
   const message = within(general).queryByText(/^Review environment ownership/);
