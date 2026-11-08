@@ -1,6 +1,7 @@
 import '@/providers';
 
-import { createMockEl } from '@test/helpers/MockElement';
+import { createMockEl, type MockEl } from '@test/helpers/MockElement';
+import { partialMock } from '@test/helpers/partialMock';
 import type { Mock } from 'vitest';
 
 import {
@@ -8,7 +9,7 @@ import {
   TOOL_SUBAGENT,
   TOOL_TODO_WRITE,
 } from '@/core/tools/toolNames';
-import type { ChatMessage, ToolCallInfo } from '@/core/types';
+import type { ChatMessage, SubagentInfo, ToolCallInfo, UsageInfo } from '@/core/types';
 import * as displayOnlyCodeFences from '@/features/chat/rendering/markdown/DisplayOnlyCodeFences';
 import { providerOutputEventToStreamChunk } from '@/features/chat/rendering/providerOutputChunks';
 import type { ThinkingBlockState } from '@/features/chat/rendering/ThinkingBlockRenderer';
@@ -29,10 +30,10 @@ vi.mock('@/core/tools/toolInput', async (importOriginal) => ({
 }));
 
 vi.mock('@/features/chat/subagents/SubagentRenderer', () => ({
-  createAsyncSubagentBlock: vi.fn((_parent: any, info: any) => ({ info, statusTextEl: {} })),
-  createSubagentBlock: vi.fn((_parent: any, info: any) => ({ info })),
-  updateSubagentBlock: vi.fn((state: any, info: any) => { state.info = info; }),
-  updateAsyncSubagentBlock: vi.fn((state: any, info: any) => { state.info = info; }),
+  createAsyncSubagentBlock: vi.fn((_parent: HTMLElement, info: SubagentInfo) => ({ info, statusTextEl: {} })),
+  createSubagentBlock: vi.fn((_parent: HTMLElement, info: SubagentInfo) => ({ info })),
+  updateSubagentBlock: vi.fn((state: { info: SubagentInfo }, info: SubagentInfo) => { state.info = info; }),
+  updateAsyncSubagentBlock: vi.fn((state: { info: SubagentInfo }, info: SubagentInfo) => { state.info = info; }),
 }));
 
 vi.mock('@/features/chat/rendering/ThinkingBlockRenderer', () => ({
@@ -132,7 +133,8 @@ function restoreTestWindow(): void {
   });
 }
 
-type MockStreamControllerDeps = Omit<StreamControllerDeps, 'renderer' | 'getMessagesEl'> & {
+type MockStreamControllerDeps = Omit<StreamControllerDeps, 'renderer' | 'getMessagesEl' | 'subagentManager'> & {
+  subagentManager: ReturnType<typeof createMockSubagentManager>;
   getProviderSessionId: () => string | null;
   /** The recovery shares the stream's provider, session, manager, and window ports. */
   historyRecovery: AsyncSubagentHistoryRecoveryDeps;
@@ -146,11 +148,8 @@ type MockStreamControllerDeps = Omit<StreamControllerDeps, 'renderer' | 'getMess
   getMessagesEl: () => HTMLElement;
 };
 
-function createMockDeps(): MockStreamControllerDeps {
-  const turns = new TurnCoordinator();
-  const state = new ChatState({}, undefined, turns);
-  const messagesEl = createMockEl();
-  const subagentManager = Object.assign(new SubagentManager(() => undefined), {
+function createMockSubagentManager() {
+  return Object.assign(new SubagentManager(() => undefined), {
     isPendingAsyncTask: vi.fn().mockReturnValue(false),
     isLinkedAgentOutputTool: vi.fn().mockReturnValue(false),
     handleAgentOutputToolResult: vi.fn().mockReturnValue(undefined),
@@ -169,10 +168,17 @@ function createMockDeps(): MockStreamControllerDeps {
     finalizeSyncSubagent: vi.fn().mockReturnValue(null),
     resetStreamingState: vi.fn(),
     resetLifecycleState: vi.fn(),
-  }) as any;
+  });
+}
+
+function createMockDeps(): MockStreamControllerDeps {
+  const turns = new TurnCoordinator();
+  const state = new ChatState({}, undefined, turns);
+  const messagesEl = createMockEl();
+  const subagentManager = createMockSubagentManager();
 
   const deps: MockStreamControllerDeps = {
-    plugin: {
+    plugin: partialMock<StreamControllerDeps['plugin']>({
       settings: {
         permissionMode: 'yolo',
       },
@@ -183,12 +189,12 @@ function createMockDeps(): MockStreamControllerDeps {
           },
         },
       },
-    } as any,
+    }),
     state,
-    renderer: {
+    renderer: partialMock<MockStreamControllerDeps['renderer']>({
       renderContent: vi.fn(),
       addTextCopyButton: vi.fn(),
-    } as any,
+    }),
     subagentManager,
     getMessagesEl: () => messagesEl,
     updateQueueIndicator: vi.fn(),
@@ -220,7 +226,7 @@ function createTestMessage(): ChatMessage {
   };
 }
 
-function createMockUsage(overrides: Record<string, any> = {}) {
+function createMockUsage(overrides: Partial<UsageInfo> = {}): UsageInfo {
   return {
     model: 'model-a',
     inputTokens: 10,
@@ -233,24 +239,27 @@ function createMockUsage(overrides: Record<string, any> = {}) {
   };
 }
 
-function installOrderedMockParent(parent: any): void {
-  parent.insertBefore = vi.fn((element: any, reference: any) => {
-    const existingIndex = parent.children.indexOf(element);
-    if (existingIndex >= 0) parent.children.splice(existingIndex, 1);
-    const referenceIndex = parent.children.indexOf(reference);
-    parent.children.splice(referenceIndex >= 0 ? referenceIndex : parent.children.length, 0, element);
+function installOrderedMockParent(parent: MockEl): void {
+  Object.assign(parent, {
+    insertBefore: vi.fn((element: MockEl, reference: MockEl | null) => {
+      const existingIndex = parent.children.indexOf(element);
+      if (existingIndex >= 0) parent.children.splice(existingIndex, 1);
+      const referenceIndex = reference ? parent.children.indexOf(reference) : -1;
+      parent.children.splice(referenceIndex >= 0 ? referenceIndex : parent.children.length, 0, element);
+    }),
   });
 }
 
-function mountMockChild(parent: any, child: any): any {
-  parent.children.push(child);
+function mountMockChild(parent: HTMLElement, child: MockEl): MockEl {
+  const mockParent = parent as MockEl;
+  mockParent.children.push(child);
   Object.defineProperty(child, 'parentElement', {
     configurable: true,
     value: parent,
   });
   child.remove = vi.fn(() => {
-    const index = parent.children.indexOf(child);
-    if (index >= 0) parent.children.splice(index, 1);
+    const index = mockParent.children.indexOf(child);
+    if (index >= 0) mockParent.children.splice(index, 1);
   });
   return child;
 }
@@ -458,7 +467,7 @@ describe('StreamController - Text Content', () => {
     });
 
     it('should honor disabled deferred math rendering setting during live text renders', async () => {
-      (deps.plugin.settings as any).deferMathRenderingDuringStreaming = false;
+      Object.assign(deps.plugin.settings, { deferMathRenderingDuringStreaming: false });
       deps.state.currentTextEl = createMockEl();
 
       await controller.appendText('Euler: $e^{i\\pi} + 1 = 0$');
@@ -637,7 +646,7 @@ describe('StreamController - Text Content', () => {
           name: 'Read',
           input: { file_path: 'notes/test.md' },
           status: 'running',
-        } as any,
+        },
       ];
       deps.state.currentContentEl = createMockEl();
 
@@ -782,7 +791,7 @@ describe('StreamController - Text Content', () => {
 
     it('should pass expanded default to apply_patch tool blocks when enabled', async () => {
       const { renderToolCall } = vi.mocked(await import('@/features/chat/rendering/tools/ToolCallRenderer'));
-      (deps.plugin.settings as any).expandFileEditsByDefault = true;
+      Object.assign(deps.plugin.settings, { expandFileEditsByDefault: true });
 
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
@@ -968,7 +977,7 @@ describe('StreamController - Text Content', () => {
       const { createWriteEditBlock } = vi.mocked(await import('@/features/chat/rendering/tools/WriteEditRenderer'));
       createWriteEditBlock.mockReturnValue({ wrapperEl: createMockEl() } as unknown as WriteEditState);
 
-      (deps.plugin.settings as any).expandFileEditsByDefault = true;
+      Object.assign(deps.plugin.settings, { expandFileEditsByDefault: true });
 
       const msg = createTestMessage();
       deps.state.currentContentEl = createMockEl();
@@ -1172,7 +1181,7 @@ describe('StreamController - Text Content', () => {
       const msg = createTestMessage();
       const usage = createMockUsage();
 
-      await controller.handleStreamChunk({ type: 'usage', usage } as any, msg);
+      await controller.handleStreamChunk({ type: 'usage', usage }, msg);
 
       expect(deps.state.usage).toEqual(usage);
     });
@@ -1243,7 +1252,7 @@ describe('StreamController - Text Content', () => {
 
   describe('scrollToBottom - settings', () => {
     it('should not scroll when enableAutoScroll setting is false', async () => {
-      (deps.plugin.settings as any).enableAutoScroll = false;
+      Object.assign(deps.plugin.settings, { enableAutoScroll: false });
       const messagesEl = deps.getMessagesEl();
       Object.defineProperty(messagesEl, 'scrollHeight', { value: 1000, configurable: true });
       messagesEl.scrollTop = 0;
@@ -1256,7 +1265,7 @@ describe('StreamController - Text Content', () => {
       await Promise.resolve();
       expect(messagesEl.scrollTop).toBe(0);
 
-      (deps.plugin.settings as any).enableAutoScroll = true;
+      Object.assign(deps.plugin.settings, { enableAutoScroll: true });
       await controller.handleStreamChunk({ type: 'text', content: ' again' }, msg);
       vi.advanceTimersByTime(16);
       await Promise.resolve();
@@ -1372,10 +1381,10 @@ describe('StreamController - Text Content', () => {
       deps.state.currentContentEl = createMockEl();
 
       deps.state.currentThinkingBlock = { content: 'Let me think...', startTime: Date.now() };
-      deps.state.currentThinkingState = {
+      deps.state.currentThinkingState = partialMock<ThinkingBlockState>({
         container: createMockEl(),
         contentEl: createMockEl(),
-      } as any;
+      });
 
       await controller.finalizeCurrentThinkingBlock(msg);
 
@@ -1388,10 +1397,10 @@ describe('StreamController - Text Content', () => {
     it('should not add to contentBlocks when no thinking content', async () => {
       const msg = createTestMessage();
       deps.state.currentThinkingBlock = { content: '', startTime: Date.now() };
-      deps.state.currentThinkingState = {
+      deps.state.currentThinkingState = partialMock<ThinkingBlockState>({
         container: createMockEl(),
         contentEl: createMockEl(),
-      } as any;
+      });
 
       await controller.finalizeCurrentThinkingBlock(msg);
 
@@ -1557,7 +1566,7 @@ describe('StreamController - Text Content', () => {
       const { createThinkingBlock } = vi.mocked(await import('@/features/chat/rendering/ThinkingBlockRenderer'));
       const msg = createTestMessage();
       const contentEl = createMockEl();
-      const thinkingState: Record<string, any> = {
+      const thinkingState = {
         wrapperEl: createMockEl(),
         contentEl,
         labelEl: createMockEl(),
@@ -1566,9 +1575,9 @@ describe('StreamController - Text Content', () => {
         isExpanded: false,
       };
       let onToggle: ((isExpanded: boolean) => void) | undefined;
-      createThinkingBlock.mockImplementationOnce((_parentEl: HTMLElement, options: any) => {
-        onToggle = options.onToggle;
-        return thinkingState as unknown as ThinkingBlockState;
+      createThinkingBlock.mockImplementationOnce((_parentEl: HTMLElement, options: Parameters<typeof createThinkingBlock>[1]) => {
+        onToggle = options?.onToggle;
+        return partialMock<ThinkingBlockState>(thinkingState);
       });
 
       await controller.handleStreamChunk({ type: 'thinking', content: 'Deferred reasoning' }, msg);
@@ -1753,10 +1762,10 @@ describe('StreamController - Text Content', () => {
       deps.state.currentContentEl = createMockEl();
 
       deps.state.currentThinkingBlock = { content: 'Let me think...', startTime: Date.now() };
-      deps.state.currentThinkingState = {
+      deps.state.currentThinkingState = partialMock<ThinkingBlockState>({
         container: createMockEl(),
         contentEl: createMockEl(),
-      } as any;
+      });
 
       await controller.handleStreamChunk({ type: 'text', content: 'Hello' }, msg);
 
@@ -1792,10 +1801,10 @@ describe('StreamController - Text Content', () => {
       deps.state.currentContentEl = createMockEl();
 
       deps.state.currentThinkingBlock = { content: 'Reasoning...', startTime: Date.now() };
-      deps.state.currentThinkingState = {
+      deps.state.currentThinkingState = partialMock<ThinkingBlockState>({
         container: createMockEl(),
         contentEl: createMockEl(),
-      } as any;
+      });
 
       await controller.handleStreamChunk(
         { type: 'tool_use', id: 'read-1', name: 'Read', input: { file_path: 'test.md' } },
@@ -1923,16 +1932,17 @@ describe('StreamController - Text Content', () => {
       deps.state.currentContentEl = parentEl;
       const genericEl = createMockEl();
       const writeEditEl = createMockEl();
-      let writeEditState: any;
-      renderToolCall.mockImplementationOnce((parent: any, toolCall: ToolCallInfo) => {
+      let writeEditState: WriteEditState | undefined;
+      renderToolCall.mockImplementationOnce((parent: HTMLElement, toolCall: ToolCallInfo) => {
         mountMockChild(parent, genericEl);
 
         return genericEl;
       });
-      createWriteEditBlock.mockImplementationOnce((parent: any, toolCall: ToolCallInfo) => {
+      createWriteEditBlock.mockImplementationOnce((parent: HTMLElement, toolCall: ToolCallInfo) => {
         mountMockChild(parent, writeEditEl);
-        writeEditState = { wrapperEl: writeEditEl, toolCall, isExpanded: toolCall.isExpanded };
-        return writeEditState;
+        const state = partialMock<WriteEditState>({ wrapperEl: writeEditEl, toolCall, isExpanded: toolCall.isExpanded });
+        writeEditState = state;
+        return state;
       });
       const msg = createTestMessage();
 
@@ -2018,11 +2028,11 @@ describe('StreamController - Text Content', () => {
       const writeEditEl = createMockEl();
       const genericEl = createMockEl();
       const writeEditState = { wrapperEl: writeEditEl, isExpanded: true };
-      createWriteEditBlock.mockImplementationOnce((parent: any) => {
+      createWriteEditBlock.mockImplementationOnce((parent: HTMLElement) => {
         mountMockChild(parent, writeEditEl);
-        return writeEditState as unknown as WriteEditState;
+        return partialMock<WriteEditState>(writeEditState);
       });
-      renderToolCall.mockImplementationOnce((parent: any, toolCall: ToolCallInfo) => {
+      renderToolCall.mockImplementationOnce((parent: HTMLElement, toolCall: ToolCallInfo) => {
         mountMockChild(parent, genericEl);
 
         return genericEl;
@@ -2121,7 +2131,7 @@ describe('StreamController - Text Content', () => {
       const bashEl = createMockEl();
       const unknownEl = createMockEl();
       for (const element of [initialEl, bashEl, unknownEl]) {
-        renderToolCall.mockImplementationOnce((parent: any, toolCall: ToolCallInfo) => {
+        renderToolCall.mockImplementationOnce((parent: HTMLElement, toolCall: ToolCallInfo) => {
           mountMockChild(parent, element);
 
           return element;
@@ -2220,7 +2230,7 @@ describe('StreamController - Text Content', () => {
       const initialEl = createMockEl();
       const todoEl = createMockEl();
       for (const element of [initialEl, todoEl]) {
-        renderToolCall.mockImplementationOnce((parent: any, toolCall: ToolCallInfo) => {
+        renderToolCall.mockImplementationOnce((parent: HTMLElement, toolCall: ToolCallInfo) => {
           mountMockChild(parent, element);
 
           return element;
@@ -2256,7 +2266,7 @@ describe('StreamController - Text Content', () => {
       const initialEl = createMockEl();
       const askEl = createMockEl();
       for (const element of [initialEl, askEl]) {
-        renderToolCall.mockImplementationOnce((parent: any, toolCall: ToolCallInfo) => {
+        renderToolCall.mockImplementationOnce((parent: HTMLElement, toolCall: ToolCallInfo) => {
           mountMockChild(parent, element);
 
           return element;
@@ -2452,7 +2462,7 @@ describe('StreamController - Text Content', () => {
           input: { description: 'Do something' },
           status: 'running',
           subagent: { id: 'task-1', description: 'Do something', status: 'running', toolCalls: [], isExpanded: false },
-        } as any,
+        },
       ];
 
       // getSyncSubagent returns a subagent state (indicating this is a sync subagent)
@@ -2533,15 +2543,16 @@ describe('StreamController - Text Content', () => {
           input: {},
           status: 'running',
           isExpanded: false,
-        } as any,
+        },
       ];
 
       await controller.handleStreamChunk(
-        {
+        // Provider payloads arrive as content-block arrays rather than the declared string.
+        partialMock<Parameters<StreamController['handleStreamChunk']>[0]>({
           type: 'tool_result',
           id: 'mcp-1',
           content: [{ type: 'text', text: 'Created project successfully' }],
-        } as any,
+        }),
         msg,
       );
 

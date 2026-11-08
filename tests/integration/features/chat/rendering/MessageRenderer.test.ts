@@ -1,6 +1,7 @@
 import '@/providers';
 
-import { createMockEl } from '@test/helpers/MockElement';
+import { createMockEl, type MockEl } from '@test/helpers/MockElement';
+import { partialMock } from '@test/helpers/partialMock';
 import { Component, Menu } from 'obsidian';
 import type { Mock } from 'vitest';
 
@@ -15,6 +16,7 @@ import {
 const KIRO_SPAWN_TOOL = 'task';
 const KIRO_OUTPUT_TOOL = 'task_output';
 import type { ChatMessage, ImageAttachment } from '@/core/types';
+import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { renderCitationGroup } from '@/features/chat/rendering/CitationRenderer';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 import { renderStoredThinkingBlock } from '@/features/chat/rendering/ThinkingBlockRenderer';
@@ -46,6 +48,16 @@ vi.mock('@/utils/fileLink', () => ({
   registerFileLinkHandler: vi.fn().mockImplementation(() => vi.fn()),
 }));
 
+interface MockMenuInstance {
+  items: Array<{ title: string; clickHandler: (() => void) | null }>;
+  showAtMouseEvent: Mock;
+  showAtPosition: Mock;
+}
+
+function menuInstances() {
+  return (Menu as typeof Menu & { instances: MockMenuInstance[] }).instances;
+}
+
 function createMockComponent() {
   return new Component();
 }
@@ -64,7 +76,7 @@ function mockCapabilities(providerId: 'kiro' = 'kiro') {
 }
 
 function createRenderer(
-  messagesEl?: any,
+  messagesEl?: MockEl,
   providerId: 'kiro' = 'kiro',
   settings: Record<string, unknown> = {},
 ) {
@@ -76,8 +88,8 @@ function createRenderer(
   };
   return {
     renderer: new MessageRenderer(
-      plugin as any,
-      comp as any,
+      partialMock<ChatFeatureHost>(plugin),
+      comp,
       el,
       undefined,
       undefined,
@@ -90,7 +102,7 @@ function createRenderer(
 describe('MessageRenderer', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    (Menu as typeof Menu & { instances: unknown[] }).instances.length = 0;
+    menuInstances().length = 0;
   });
 
   // ============================================
@@ -101,7 +113,7 @@ describe('MessageRenderer', () => {
     const messagesEl = createMockEl();
     const emptySpy = vi.spyOn(messagesEl, 'empty');
     const mockComponent = createMockComponent();
-    const renderer = new MessageRenderer({} as any, mockComponent as any, messagesEl);
+    const renderer = new MessageRenderer(partialMock<ChatFeatureHost>({}), mockComponent, messagesEl);
     const renderStoredSpy = vi.spyOn(renderer, 'renderStoredMessage').mockImplementation(() => {});
 
     const messages: ChatMessage[] = [
@@ -135,7 +147,7 @@ describe('MessageRenderer', () => {
   it('renders interrupt messages with interrupt styling instead of user bubble', () => {
     const messagesEl = createMockEl();
     const mockComponent = createMockComponent();
-    const renderer = new MessageRenderer({} as any, mockComponent as any, messagesEl);
+    const renderer = new MessageRenderer(partialMock<ChatFeatureHost>({}), mockComponent, messagesEl);
 
     const interruptMsg: ChatMessage = {
       id: 'interrupt-1',
@@ -203,12 +215,12 @@ describe('MessageRenderer', () => {
     const msgEl = messagesEl.children[0];
     const timestampEl = msgEl.querySelector('.claudian-message-timestamp');
     expect(timestampEl).toBeTruthy();
-    expect(timestampEl.textContent).toBe(new Date(timestamp).toLocaleTimeString(undefined, {
+    expect(timestampEl?.textContent).toBe(new Date(timestamp).toLocaleTimeString(undefined, {
       hour: '2-digit',
       minute: '2-digit',
       hourCycle: 'h23',
     }));
-    expect(timestampEl.getAttribute('aria-label')).toBe(new Date(timestamp).toLocaleString(undefined, { hourCycle: 'h23' }));
+    expect(timestampEl?.getAttribute('aria-label')).toBe(new Date(timestamp).toLocaleString(undefined, { hourCycle: 'h23' }));
   });
 
   it('does not render timestamps when the setting is disabled', () => {
@@ -256,7 +268,7 @@ describe('MessageRenderer', () => {
   it('renders bare interrupt marker for empty interrupted assistant message', () => {
     const messagesEl = createMockEl();
     const mockComponent = createMockComponent();
-    const renderer = new MessageRenderer({} as any, mockComponent as any, messagesEl);
+    const renderer = new MessageRenderer(partialMock<ChatFeatureHost>({}), mockComponent, messagesEl);
 
     const interruptMsg: ChatMessage = {
       id: 'interrupt-2',
@@ -366,7 +378,7 @@ describe('MessageRenderer', () => {
     expect(messagesEl.querySelector('.claudian-message-image')?.children[0]).not.toBeNull();
     // Only the images container, no message bubble
     const bubbles = messagesEl.children.filter(
-      (c: any) => c.hasClass('claudian-message')
+      c => c.hasClass('claudian-message')
     );
     expect(bubbles.length).toBe(0);
   });
@@ -398,8 +410,8 @@ describe('MessageRenderer', () => {
     const rewindCallback = vi.fn().mockResolvedValue(undefined);
     const forkCallback = vi.fn().mockResolvedValue(undefined);
     const renderer = new MessageRenderer(
-      { app: {}, settings: { mediaFolder: '' } } as any,
-      createMockComponent() as any,
+      partialMock<ChatFeatureHost>({ app: {}, settings: { mediaFolder: '' } }),
+      createMockComponent(),
       messagesEl,
       rewindCallback,
       forkCallback,
@@ -421,7 +433,7 @@ describe('MessageRenderer', () => {
   it('does not add a rewind button when stored render is called without context', () => {
     const messagesEl = createMockEl();
     const rewindCallback = vi.fn().mockResolvedValue(undefined);
-    const renderer = new MessageRenderer({ app: {}, settings: { mediaFolder: '' } } as any, createMockComponent() as any, messagesEl, rewindCallback, undefined, mockCapabilities());
+    const renderer = new MessageRenderer(partialMock<ChatFeatureHost>({ app: {}, settings: { mediaFolder: '' } }), createMockComponent(), messagesEl, rewindCallback, undefined, mockCapabilities());
     vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const msg: ChatMessage = {
@@ -440,7 +452,7 @@ describe('MessageRenderer', () => {
   it('positions the rewind menu for pointer and keyboard activation', async () => {
     const messagesEl = createMockEl();
     const rewindCallback = vi.fn().mockResolvedValue(undefined);
-    const renderer = new MessageRenderer({ app: {}, settings: { mediaFolder: '' } } as any, createMockComponent() as any, messagesEl, rewindCallback, undefined, mockCapabilities());
+    const renderer = new MessageRenderer(partialMock<ChatFeatureHost>({ app: {}, settings: { mediaFolder: '' } }), createMockComponent(), messagesEl, rewindCallback, undefined, mockCapabilities());
     vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const userMsg: ChatMessage = {
@@ -469,9 +481,9 @@ describe('MessageRenderer', () => {
       type: 'click',
     };
     btn!.dispatchEvent(pointerEvent);
-    const menu = (Menu as typeof Menu & { instances: any[] }).instances[0];
+    const menu = menuInstances()[0];
     expect(menu.showAtMouseEvent).toHaveBeenCalledWith(pointerEvent);
-    expect(menu.items.map((item: any) => item.title)).toEqual([
+    expect(menu.items.map(item => item.title)).toEqual([
       'Rewind conversation only',
       'Rewind code + conversation',
     ]);
@@ -488,7 +500,7 @@ describe('MessageRenderer', () => {
       type: 'click',
     });
 
-    const keyboardMenu = (Menu as typeof Menu & { instances: any[] }).instances[1];
+    const keyboardMenu = menuInstances()[1];
     expect(keyboardMenu.showAtPosition).toHaveBeenCalledWith(
       { x: 24, y: 48 },
       btn!.ownerDocument,
@@ -501,8 +513,8 @@ describe('MessageRenderer', () => {
     const rewindCallback = vi.fn().mockResolvedValue(undefined);
     const forkCallback = vi.fn().mockResolvedValue(undefined);
     const renderer = new MessageRenderer(
-      { app: {}, settings: { mediaFolder: '' } } as any,
-      createMockComponent() as any,
+      partialMock<ChatFeatureHost>({ app: {}, settings: { mediaFolder: '' } }),
+      createMockComponent(),
       messagesEl,
       rewindCallback,
       forkCallback,
@@ -536,7 +548,7 @@ describe('MessageRenderer', () => {
     const messagesEl = createMockEl();
     const mockComponent = createMockComponent();
     const renderer = new MessageRenderer(
-      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities(),
+      partialMock<ChatFeatureHost>({}), mockComponent, messagesEl, undefined, undefined, mockCapabilities(),
     );
     const renderContentSpy = vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
@@ -546,9 +558,9 @@ describe('MessageRenderer', () => {
       content: '',
       timestamp: Date.now(),
       toolCalls: [
-        { id: 'todo', name: 'TodoWrite', input: { items: [] } } as any,
-        { id: 'edit', name: 'Edit', input: { file_path: 'notes/test.md' } } as any,
-        { id: 'read', name: 'Read', input: { file_path: 'notes/test.md' } } as any,
+        { id: 'todo', name: 'TodoWrite', input: { items: [] }, status: 'completed' },
+        { id: 'edit', name: 'Edit', input: { file_path: 'notes/test.md' }, status: 'completed' },
+        { id: 'read', name: 'Read', input: { file_path: 'notes/test.md' }, status: 'completed' },
         // Async kiro subagent: background spawn carrying a task_id, resolved by a
         // matching task_output sibling.
         {
@@ -556,14 +568,14 @@ describe('MessageRenderer', () => {
           name: KIRO_SPAWN_TOOL,
           input: { description: 'Async subagent', task_id: 'task-async', run_in_background: true },
           status: 'completed',
-        } as any,
+        },
         {
           id: 'sub-1-out',
           name: KIRO_OUTPUT_TOOL,
           input: { task_id: 'task-async' },
           status: 'completed',
           result: '{"task_id":"task-async","status":"completed","output":"Async done"}',
-        } as any,
+        },
         // Sync kiro subagent: foreground spawn completes in place.
         {
           id: 'sub-2',
@@ -571,17 +583,17 @@ describe('MessageRenderer', () => {
           input: { description: 'Sync subagent' },
           status: 'completed',
           result: 'Sync done',
-        } as any,
+        },
       ],
       contentBlocks: [
-        { type: 'thinking', content: 'thinking', durationSeconds: 2 } as any,
-        { type: 'text', content: 'Text block' } as any,
-        { type: 'tool_use', toolId: 'todo' } as any,
-        { type: 'tool_use', toolId: 'edit' } as any,
-        { type: 'tool_use', toolId: 'read' } as any,
-        { type: 'tool_use', toolId: 'sub-1' } as any,
-        { type: 'tool_use', toolId: 'sub-1-out' } as any,
-        { type: 'tool_use', toolId: 'sub-2' } as any,
+        { type: 'thinking', content: 'thinking', durationSeconds: 2 },
+        { type: 'text', content: 'Text block' },
+        { type: 'tool_use', toolId: 'todo' },
+        { type: 'tool_use', toolId: 'edit' },
+        { type: 'tool_use', toolId: 'read' },
+        { type: 'tool_use', toolId: 'sub-1' },
+        { type: 'tool_use', toolId: 'sub-1-out' },
+        { type: 'tool_use', toolId: 'sub-2' },
       ],
     };
 
@@ -610,10 +622,10 @@ describe('MessageRenderer', () => {
       content: '',
       timestamp: Date.now(),
       toolCalls: [
-        { id: 'edit-1', name: 'Edit', input: { file_path: 'notes/test.md' }, status: 'completed' } as any,
+        { id: 'edit-1', name: 'Edit', input: { file_path: 'notes/test.md' }, status: 'completed' },
       ],
       contentBlocks: [
-        { type: 'tool_use', toolId: 'edit-1' } as any,
+        { type: 'tool_use', toolId: 'edit-1' },
       ],
     };
 
@@ -636,10 +648,10 @@ describe('MessageRenderer', () => {
       content: '',
       timestamp: Date.now(),
       toolCalls: [
-        { id: 'write-1', name: 'Write', input: { file_path: 'notes/test.md' }, status: 'completed' } as any,
+        { id: 'write-1', name: 'Write', input: { file_path: 'notes/test.md' }, status: 'completed' },
       ],
       contentBlocks: [
-        { type: 'tool_use', toolId: 'write-1' } as any,
+        { type: 'tool_use', toolId: 'write-1' },
       ],
     };
 
@@ -663,9 +675,9 @@ describe('MessageRenderer', () => {
       content: '',
       timestamp: Date.now(),
       contentBlocks: [
-        { type: 'text', content: '' } as any,
-        { type: 'text', content: '   ' } as any,
-        { type: 'text', content: 'Real content' } as any,
+        { type: 'text', content: '' },
+        { type: 'text', content: '   ' },
+        { type: 'text', content: 'Real content' },
       ],
     };
 
@@ -692,10 +704,10 @@ describe('MessageRenderer', () => {
           input: { changes: [{ path: 'src/main.ts', kind: 'update' }] },
           status: 'completed',
           result: 'Applied patch',
-        } as any,
+        },
       ],
       contentBlocks: [
-        { type: 'tool_use', toolId: 'patch-1' } as any,
+        { type: 'tool_use', toolId: 'patch-1' },
       ],
     };
 
@@ -720,7 +732,7 @@ describe('MessageRenderer', () => {
       content: 'Legacy response text',
       timestamp: Date.now(),
       toolCalls: [
-        { id: 'read-1', name: 'Read', input: { file_path: 'test.md' }, status: 'completed' } as any,
+        { id: 'read-1', name: 'Read', input: { file_path: 'test.md' }, status: 'completed' },
       ],
     };
 
@@ -747,10 +759,10 @@ describe('MessageRenderer', () => {
       content: '',
       timestamp: Date.now(),
       toolCalls: [
-        { id: 'read-1', name: 'Read', input: { file_path: 'a.md' }, status: 'completed' } as any,
+        { id: 'read-1', name: 'Read', input: { file_path: 'a.md' }, status: 'completed' },
       ],
       contentBlocks: [
-        { type: 'text', content: 'Only text block persisted' } as any,
+        { type: 'text', content: 'Only text block persisted' },
       ],
     };
 
@@ -782,10 +794,10 @@ describe('MessageRenderer', () => {
           input: { description: 'Run tests' },
           status: 'completed',
           result: 'All passed',
-        } as any,
+        },
       ],
       contentBlocks: [
-        { type: 'tool_use', toolId: 'task-1' } as any,
+        { type: 'tool_use', toolId: 'task-1' },
       ],
     };
 
@@ -820,10 +832,10 @@ describe('MessageRenderer', () => {
           name: KIRO_SPAWN_TOOL,
           input: { description: 'Background task', task_id: 'bg-1', run_in_background: true },
           status: 'completed',
-        } as any,
+        },
       ],
       contentBlocks: [
-        { type: 'tool_use', toolId: 'task-async-1' } as any,
+        { type: 'tool_use', toolId: 'task-async-1' },
       ],
     };
 
@@ -853,7 +865,7 @@ describe('MessageRenderer', () => {
     const messagesEl = createMockEl();
     const mockComponent = createMockComponent();
     const renderer = new MessageRenderer(
-      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities(),
+      partialMock<ChatFeatureHost>({}), mockComponent, messagesEl, undefined, undefined, mockCapabilities(),
     );
 
     (renderStoredToolCall as Mock).mockClear();
@@ -872,11 +884,11 @@ describe('MessageRenderer', () => {
           name: KIRO_SPAWN_TOOL,
           input: { description: 'Background task', task_id: 'abc', run_in_background: true },
           status: 'completed',
-        } as any,
-        { id: 'agent-output-1', name: KIRO_OUTPUT_TOOL, input: { task_id: 'abc', block: true } } as any,
+        },
+        { id: 'agent-output-1', name: KIRO_OUTPUT_TOOL, input: { task_id: 'abc', block: true }, status: 'completed' },
       ],
       contentBlocks: [
-        { type: 'tool_use', toolId: 'agent-output-1' } as any,
+        { type: 'tool_use', toolId: 'agent-output-1' },
       ],
     };
 
@@ -889,7 +901,7 @@ describe('MessageRenderer', () => {
     const messagesEl = createMockEl();
     const mockComponent = createMockComponent();
     const renderer = new MessageRenderer(
-      {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities(),
+      partialMock<ChatFeatureHost>({}), mockComponent, messagesEl, undefined, undefined, mockCapabilities(),
     );
 
     (renderStoredToolCall as Mock).mockClear();
@@ -900,20 +912,20 @@ describe('MessageRenderer', () => {
       content: '',
       timestamp: Date.now(),
       toolCalls: [
-        { id: 'read-1', name: 'Read', input: { file_path: 'test.md' }, status: 'completed' } as any,
+        { id: 'read-1', name: 'Read', input: { file_path: 'test.md' }, status: 'completed' },
         {
           id: 'spawn-1',
           name: KIRO_SPAWN_TOOL,
           input: { description: 'Background task', task_id: 'abc', run_in_background: true },
           status: 'completed',
-        } as any,
-        { id: 'agent-output-1', name: KIRO_OUTPUT_TOOL, input: { task_id: 'abc' } } as any,
-        { id: 'grep-1', name: 'Grep', input: { pattern: 'test' }, status: 'completed' } as any,
+        },
+        { id: 'agent-output-1', name: KIRO_OUTPUT_TOOL, input: { task_id: 'abc' }, status: 'completed' },
+        { id: 'grep-1', name: 'Grep', input: { pattern: 'test' }, status: 'completed' },
       ],
       contentBlocks: [
-        { type: 'tool_use', toolId: 'read-1' } as any,
-        { type: 'tool_use', toolId: 'agent-output-1' } as any,
-        { type: 'tool_use', toolId: 'grep-1' } as any,
+        { type: 'tool_use', toolId: 'read-1' },
+        { type: 'tool_use', toolId: 'agent-output-1' },
+        { type: 'tool_use', toolId: 'grep-1' },
       ],
     };
 
@@ -1047,7 +1059,7 @@ describe('MessageRenderer', () => {
     expect(containerEl.children.length).toBe(1);
     const imagesContainer = containerEl.children[0];
     expect(imagesContainer.hasClass('claudian-message-images')).toBe(true);
-    expect(imagesContainer.children.filter((child: any) => child.hasClass('claudian-message-image'))).toHaveLength(2);
+    expect(imagesContainer.children.filter(child => child.hasClass('claudian-message-image'))).toHaveLength(2);
   });
 
   it('renders the attachment data URI', () => {
@@ -1091,15 +1103,14 @@ describe('MessageRenderer', () => {
     const { renderer } = createRenderer(messagesEl);
 
     // Mock requestAnimationFrame
-    const origRAF = globalThis.requestAnimationFrame;
-    (globalThis as any).requestAnimationFrame = (cb: () => void) => { cb(); return 0; };
+    vi.stubGlobal('requestAnimationFrame', (cb: () => void) => { cb(); return 0; });
 
     try {
       renderer.scrollToBottomIfNeeded();
       // Near bottom (1000 - 950 - 0 = 50, < 100 threshold) → scrolls
       expect(messagesEl.scrollTop).toBe(1000);
     } finally {
-      (globalThis as any).requestAnimationFrame = origRAF;
+      vi.unstubAllGlobals();
     }
   });
 
@@ -1165,10 +1176,10 @@ describe('MessageRenderer', () => {
             input: { description: 'Failing task' },
             status: 'error',
             result: 'Something went wrong',
-          } as any,
+          },
         ],
         contentBlocks: [
-          { type: 'tool_use', toolId: 'task-err' } as any,
+          { type: 'tool_use', toolId: 'task-err' },
         ],
       };
 
@@ -1201,11 +1212,11 @@ describe('MessageRenderer', () => {
             id: 'task-run',
             name: KIRO_SPAWN_TOOL,
             input: { description: 'Running task' },
-            status: 'pending',
-          } as any,
+            status: 'running',
+          },
         ],
         contentBlocks: [
-          { type: 'tool_use', toolId: 'task-run' } as any,
+          { type: 'tool_use', toolId: 'task-run' },
         ],
       };
 
@@ -1239,10 +1250,10 @@ describe('MessageRenderer', () => {
             input: {},
             status: 'completed',
             result: 'Done',
-          } as any,
+          },
         ],
         contentBlocks: [
-          { type: 'tool_use', toolId: 'task-no-desc' } as any,
+          { type: 'tool_use', toolId: 'task-no-desc' },
         ],
       };
 
@@ -1284,8 +1295,7 @@ describe('MessageRenderer', () => {
       const overlayEl = createMockEl();
       const removeOverlay = vi.spyOn(overlayEl, 'remove');
       const mockBody = { createDiv: vi.fn().mockReturnValue(overlayEl) };
-      const origDocument = globalThis.document;
-      (globalThis as any).document = { body: mockBody, addEventListener: vi.fn(), removeEventListener: vi.fn() };
+      vi.stubGlobal('document', { body: mockBody, addEventListener: vi.fn(), removeEventListener: vi.fn() });
       try {
         previewButton.click();
         expect(mockBody.createDiv).toHaveBeenCalledWith({ cls: 'claudian-image-modal-overlay' });
@@ -1296,7 +1306,7 @@ describe('MessageRenderer', () => {
         expect(removeOverlay).toHaveBeenCalledTimes(1);
         expect(mockBody.createDiv).toHaveBeenCalledTimes(1);
       } finally {
-        (globalThis as any).document = origDocument;
+        vi.unstubAllGlobals();
       }
     });
   });
@@ -1341,7 +1351,7 @@ describe('MessageRenderer', () => {
         content: '',
         timestamp: Date.now(),
         contentBlocks: [
-          { type: 'thinking', content: 'deep thought', durationSeconds: 42 } as any,
+          { type: 'thinking', content: 'deep thought', durationSeconds: 42 },
         ],
       };
 
@@ -1368,7 +1378,7 @@ describe('MessageRenderer', () => {
         content: '',
         timestamp: Date.now(),
         contentBlocks: [
-          { type: 'thinking', content: 'thought without duration' } as any,
+          { type: 'thinking', content: 'thought without duration' },
         ],
       };
 

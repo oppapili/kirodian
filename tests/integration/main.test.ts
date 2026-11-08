@@ -1,6 +1,7 @@
 import { DEFAULT_CLAUDIAN_SETTINGS as DEFAULT_SETTINGS } from '@test/helpers/defaultSettings';
+import { partialMock } from '@test/helpers/partialMock';
 import { testClock } from '@test/helpers/testClock';
-import { Notice, TFile, TFolder } from 'obsidian';
+import { type App, Notice, type PluginManifest, TFile, TFolder } from 'obsidian';
 import type { Mock, MockInstance } from 'vitest';
 
 import type { ConversationRepository } from '@/app/conversations/ConversationRepository';
@@ -16,6 +17,7 @@ import { getInstallationKey as getHostnameKey } from '@/core/device/Installation
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
+import type { ProviderWorkspaceServices } from '@/core/providers/types';
 import { type ClaudianSettings, type SessionMetadata, VIEW_TYPE_CLAUDIAN } from '@/core/types';
 import { ZenModeController } from '@/features/chat/zen/ZenModeController';
 import { registerBuiltInProviders } from '@/providers';
@@ -64,14 +66,55 @@ vi.mock('@/providers/kiro/history/KiroHistoryPathResolver', async (importOrigina
 // Now import the plugin after mocking
 import ClaudianPlugin from '@/main';
 
+/** The App surface the plugin touches, as the mocks the tests configure. */
+interface MockApp {
+  vault: {
+    on: Mock;
+    getAbstractFileByPath?: Mock;
+    adapter: {
+      basePath: string;
+      exists: Mock;
+      read: Mock;
+      write: Mock;
+      remove: Mock;
+      mkdir: Mock;
+      list: Mock;
+      stat: Mock;
+      rename: Mock;
+    };
+  };
+  workspace: {
+    layoutReady: boolean;
+    detachLeavesOfType: Mock;
+    on: Mock;
+    offref: Mock;
+    onLayoutReady: Mock;
+    getLeavesOfType: Mock;
+    getMostRecentLeaf: Mock;
+    getActiveViewOfType: Mock;
+    getRightLeaf: Mock;
+    getLeftLeaf: Mock;
+    getLeaf: Mock;
+    setActiveLeaf: Mock;
+    revealLeaf: Mock;
+    trigger: Mock;
+  };
+}
+
+type ChatView = ReturnType<ClaudianViews['getAllViews']>[number];
+
+// The obsidian mock's file classes take their path as a constructor argument.
+const MockTFile = TFile as new (path: string) => TFile;
+const MockTFolder = TFolder as new (path: string) => TFolder;
+
 describe('ClaudianPlugin', () => {
   let plugin: ClaudianPlugin;
   let pluginInstances: ClaudianPlugin[];
-  let mockApp: any;
-  let mockManifest: any;
+  let mockApp: MockApp;
+  let mockManifest: PluginManifest;
 
   function createPlugin(): ClaudianPlugin {
-    const instance = new ClaudianPlugin(mockApp, mockManifest);
+    const instance = new ClaudianPlugin(partialMock<App>(mockApp), mockManifest);
     pluginInstances.push(instance);
     return instance;
   }
@@ -253,11 +296,11 @@ describe('ClaudianPlugin', () => {
       },
     };
 
-    mockManifest = {
+    mockManifest = partialMock<PluginManifest>({
       id: 'claudian',
       name: 'Claudian',
       version: '0.1.0',
-    };
+    });
 
     // Create plugin instance with mocked app
     plugin = createPlugin();
@@ -366,7 +409,7 @@ describe('ClaudianPlugin', () => {
       for (const [ready] of mockApp.workspace.onLayoutReady.mock.calls) { ready(); ready(); }
       if (mode === 'before-timer') plugin.onunload();
       await new Promise(resolve => setTimeout(resolve, 5));
-      await (plugin as any).sessionInputCleanup;
+      await plugin['sessionInputCleanup'];
       expect(files.has(inputPath)).toBe(mode !== 'run');
     });
 
@@ -389,7 +432,9 @@ describe('ClaudianPlugin', () => {
       await deleting;
       plugin.onunload();
       let stopped = false;
-      const shutdown = (plugin as any).applicationShutdownPromise.then(() => { stopped = true; });
+      const shutdownPromise = plugin['applicationShutdownPromise'];
+      if (!shutdownPromise) throw new Error('Expected the application shutdown to be in progress');
+      const shutdown = shutdownPromise.then(() => { stopped = true; });
       try {
         await new Promise(resolve => setTimeout(resolve, 0));
         expect(stopped).toBe(false);
@@ -411,17 +456,17 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
       for (const [ready] of mockApp.workspace.onLayoutReady.mock.calls) ready();
       await new Promise(resolve => setTimeout(resolve, 5));
-      await (plugin as any).sessionInputCleanup;
+      await plugin['sessionInputCleanup'];
       expect(files.has(inputPath)).toBe(true);
       expect(Notice).toHaveBeenCalledWith('Failed to clean up obsolete session files; will retry next launch');
       plugin.onunload();
-      await (plugin as any).applicationShutdownPromise;
+      await plugin['applicationShutdownPromise'];
       mockApp.workspace.onLayoutReady.mockClear();
       const nextPlugin = createPlugin();
       await nextPlugin.onload();
       for (const [ready] of mockApp.workspace.onLayoutReady.mock.calls) ready();
       await new Promise(resolve => setTimeout(resolve, 5));
-      await (nextPlugin as any).sessionInputCleanup;
+      await nextPlugin['sessionInputCleanup'];
       expect(files.has(inputPath)).toBe(false);
     });
 
@@ -601,11 +646,11 @@ describe('ClaudianPlugin', () => {
         });
       const loadSourceSpy = mockMetadataSources(deferredMetadata);
       const notifyConversationListChanged = vi.fn();
-      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([partialMock<ChatView>({
         notifyConversationListChanged,
-      } as any]);
+      })]);
       const saveSpy = vi.spyOn(getConversationPersistence(plugin), 'saveMetadata');
-      await (plugin as any).sessionMetadata.loadRemaining();
+      await plugin['sessionMetadata']['loadRemaining']();
       expect(chatHostOf(plugin).getCachedConversation(deferredMetadata.id)?.selectedModel).toBe('claude-code/retired-model');
       expect(saveSpy).not.toHaveBeenCalled();
       expect(notifyConversationListChanged).toHaveBeenCalledTimes(1);
@@ -626,7 +671,7 @@ describe('ClaudianPlugin', () => {
       const recoverySpy = vi.spyOn(repository, 'recoverMissingSelectedModels')
         .mockResolvedValue([]);
 
-      await (plugin as any).sessionMetadata.loadRemaining();
+      await plugin['sessionMetadata']['loadRemaining']();
 
       expect(recoverySpy).toHaveBeenCalledTimes(1);
 
@@ -682,7 +727,7 @@ describe('ClaudianPlugin', () => {
 
       try {
         await plugin.onload();
-        await (plugin as any).sessionMetadata.loadRemaining();
+        await plugin['sessionMetadata']['loadRemaining']();
       } finally {
         reconcileSpy.mockRestore();
         loadSpy.mockRestore();
@@ -735,7 +780,7 @@ describe('ClaudianPlugin', () => {
       ).mockImplementation((conversations) => [...conversations]);
       const saveMetadataSpy = vi.spyOn(getConversationPersistence(plugin), 'saveMetadata');
 
-      const load = (plugin as any).sessionMetadata.loadRemaining();
+      const load = plugin['sessionMetadata']['loadRemaining']();
       await batchPublished;
       await chatHostOf(plugin).deleteConversation(backgroundMetadata.id);
       saveMetadataSpy.mockClear();
@@ -774,7 +819,7 @@ describe('ClaudianPlugin', () => {
       const loadSpy = vi.spyOn(SessionStorage.prototype, 'load')
         .mockResolvedValue(null);
 
-      await (plugin as any).sessionMetadata.loadRemaining();
+      await plugin['sessionMetadata']['loadRemaining']();
 
       expect(loadSpy).toHaveBeenCalledWith(tombstonedMetadata.id);
       expect(chatHostOf(plugin).getCachedConversation(tombstonedMetadata.id)).toBeNull();
@@ -793,7 +838,7 @@ describe('ClaudianPlugin', () => {
       };
 
       await plugin.onload();
-      const shell = (plugin as any).sessionMetadata.createShell(
+      const shell = plugin['sessionMetadata'].createShell(
         tombstonedMetadata,
       );
       repositoryOf(plugin).mergeMetadataConversations([shell]);
@@ -809,7 +854,7 @@ describe('ClaudianPlugin', () => {
       const loadSpy = vi.spyOn(SessionStorage.prototype, 'load')
         .mockResolvedValue(null);
 
-      await (plugin as any).sessionMetadata.loadRemaining();
+      await plugin['sessionMetadata']['loadRemaining']();
 
       expect(chatHostOf(plugin).getCachedConversation(tombstonedMetadata.id)).toBeNull();
 
@@ -834,7 +879,7 @@ describe('ClaudianPlugin', () => {
       );
 
       plugin.onunload();
-      await (plugin as any).applicationShutdownPromise;
+      await plugin['applicationShutdownPromise'];
 
       expect(disposeSpy).toHaveBeenCalledTimes(1);
     });
@@ -869,7 +914,7 @@ describe('ClaudianPlugin', () => {
       expect(disposeWorkspaces).not.toHaveBeenCalled();
 
       resolveViewDrain();
-      await (plugin as any).applicationShutdownPromise;
+      await plugin['applicationShutdownPromise'];
 
       expect(disposeExecution).toHaveBeenCalledTimes(1);
       expect(disposeWorkspaces).toHaveBeenCalledTimes(1);
@@ -1136,12 +1181,12 @@ describe('ClaudianPlugin', () => {
         events.push('reconcile');
         return [];
       });
-      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([partialMock<ChatView>({
         refreshModelSelector: vi.fn(() => events.push('refresh')),
-      } as any]);
+      })]);
 
       chatHostOf(plugin).notifyProviderChatOptionsChanged('kiro');
-      await (plugin as any).providerChatOptions.tail;
+      await plugin['providerChatOptions']['tail'];
 
       expect(events).toEqual(['reconcile', 'refresh']);
     });
@@ -1152,12 +1197,12 @@ describe('ClaudianPlugin', () => {
       vi.spyOn(repository, 'reconcileSelectedModels')
         .mockRejectedValue(new Error('disk full'));
       const refreshModelSelector = vi.fn();
-      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([partialMock<ChatView>({
         refreshModelSelector,
-      } as any]);
+      })]);
 
       chatHostOf(plugin).notifyProviderChatOptionsChanged('kiro');
-      await (plugin as any).providerChatOptions.tail;
+      await plugin['providerChatOptions']['tail'];
 
       expect(refreshModelSelector).not.toHaveBeenCalled();
     });
@@ -1194,10 +1239,10 @@ describe('ClaudianPlugin', () => {
         events.push('reconcile');
         return [];
       });
-      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([partialMock<ChatView>({
         invalidateProviderCommandCaches: vi.fn(() => events.push('invalidate')),
         refreshModelSelector: vi.fn(() => events.push('refresh')),
-      } as any]);
+      })]);
 
       await plugin.providerHost.applyEnvironmentVariables(
         'provider:kiro',
@@ -1265,14 +1310,14 @@ describe('ClaudianPlugin', () => {
         beforeTransition: () => markStale(),
       });
       ProviderWorkspaceRegistry.setServices('kiro', {
-        modelCatalog: { markStale } as any,
+        modelCatalog: partialMock<ProviderWorkspaceServices['modelCatalog']>({ markStale }),
       });
       const invalidateProviderCommandCaches = vi.fn();
       const refreshModelSelector = vi.fn();
-      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([partialMock<ChatView>({
         invalidateProviderCommandCaches,
         refreshModelSelector,
-      } as any]);
+      })]);
       const initialGeneration = plugin.executionLifecycleRegistry
         .getProviderGeneration('kiro');
 
@@ -1331,7 +1376,7 @@ describe('ClaudianPlugin', () => {
         invalidateProviderCommandCaches: vi.fn(),
         refreshModelSelector: vi.fn(),
       };
-      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([mockView as any]);
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([partialMock<ChatView>(mockView)]);
 
       // Change env but not in a way that affects model
       await plugin.providerHost.applyEnvironmentVariables('shared', 'SOME_VAR=value');
@@ -1358,8 +1403,8 @@ describe('ClaudianPlugin', () => {
       const first = createView();
       const second = createView();
       vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([
-        first.view as any,
-        second.view as any,
+        partialMock<ChatView>(first.view),
+        partialMock<ChatView>(second.view),
       ]);
 
       await plugin.providerHost.applyEnvironmentVariables('shared', 'SOME_VAR=value');
@@ -1378,7 +1423,7 @@ describe('ClaudianPlugin', () => {
         invalidateProviderCommandCaches: vi.fn(),
         refreshModelSelector: vi.fn(),
       };
-      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([mockView as any]);
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([partialMock<ChatView>(mockView)]);
 
       await plugin.providerHost.applyEnvironmentVariables(
         'provider:kiro',
@@ -1400,7 +1445,7 @@ describe('ClaudianPlugin', () => {
         invalidateProviderCommandCaches: vi.fn(),
         refreshModelSelector: vi.fn(),
       };
-      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([mockView as any]);
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([partialMock<ChatView>(mockView)]);
 
       await plugin.providerHost.applyEnvironmentVariables(
         'provider:kiro',
@@ -1528,10 +1573,10 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
 
       const startNewConversation = vi.fn().mockResolvedValue(undefined);
-      vi.spyOn(viewsOf(plugin), 'getView').mockReturnValue({
+      vi.spyOn(viewsOf(plugin), 'getView').mockReturnValue(partialMock<ChatView>({
         getTabManager: vi.fn().mockReturnValue({}),
         startNewConversation,
-      } as any);
+      }));
 
       const command = getRegisteredCommand('new-tab');
       expect(command.name).toBe('New');
@@ -1544,12 +1589,12 @@ describe('ClaudianPlugin', () => {
     it('keeps replace and close tab commands out of dual mode', async () => {
       await plugin.onload();
 
-      vi.spyOn(viewsOf(plugin), 'getView').mockReturnValue({
+      vi.spyOn(viewsOf(plugin), 'getView').mockReturnValue(partialMock<ChatView>({
         getCompactTabManager: () => null,
         getTabManager: vi.fn().mockReturnValue({
           getActiveTab: vi.fn().mockReturnValue({ state: { isStreaming: false } }),
         }),
-      } as any);
+      }));
 
       const replaceCommand = getRegisteredCommand('new-session');
       const closeCommand = getRegisteredCommand('close-current-tab');
@@ -1573,7 +1618,7 @@ describe('ClaudianPlugin', () => {
         viewOpened = true;
       });
       vi.spyOn(viewsOf(plugin), 'getView').mockImplementation(() => (
-        viewOpened ? mockView as any : null
+        viewOpened ? partialMock<ChatView>(mockView) : null
       ));
 
       const command = getRegisteredCommand('new-tab');
@@ -1612,7 +1657,7 @@ describe('ClaudianPlugin', () => {
         viewOpened = true;
       });
       vi.spyOn(viewsOf(plugin), 'getView').mockImplementation(() => (
-        viewOpened ? mockView as any : null
+        viewOpened ? partialMock<ChatView>(mockView) : null
       ));
 
       const command = getRegisteredCommand('new-tab');
@@ -1636,7 +1681,7 @@ describe('ClaudianPlugin', () => {
         }),
       };
 
-      vi.spyOn(viewsOf(plugin), 'getView').mockReturnValue(mockView as any);
+      vi.spyOn(viewsOf(plugin), 'getView').mockReturnValue(partialMock<ChatView>(mockView));
 
       const command = getRegisteredCommand('new-tab');
 
@@ -1888,8 +1933,8 @@ describe('ClaudianPlugin', () => {
         notifyConversationListChanged: vi.fn(),
       };
       vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([
-        firstView as any,
-        secondView as any,
+        partialMock<ChatView>(firstView),
+        partialMock<ChatView>(secondView),
       ]);
 
       const conversation = await chatHostOf(plugin).createConversation();
@@ -1920,8 +1965,8 @@ describe('ClaudianPlugin', () => {
         }),
       };
       vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([
-        failingView as any,
-        healthyView as any,
+        partialMock<ChatView>(failingView),
+        partialMock<ChatView>(healthyView),
       ]);
 
       const conversation = await chatHostOf(plugin).createConversation({
@@ -1975,9 +2020,9 @@ describe('ClaudianPlugin', () => {
       const linked = await detachedLinkedContentSession();
       const second = await detachedLinkedContentSession();
       const view = { notifyConversationListChanged: vi.fn() };
-      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([view as any]);
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([partialMock<ChatView>(view)]);
       const listener = mockApp.vault.on.mock.calls.find((call: unknown[]) => call[0] === 'create')![1];
-      for (let index = 0; index < 20; index++) listener(new (TFile as any)(`note-${index}.md`));
+      for (let index = 0; index < 20; index++) listener(new MockTFile(`note-${index}.md`));
       expect(linked.handleCreated).toHaveBeenCalledTimes(20);
       expect(second.handleCreated).toHaveBeenCalledTimes(20);
       expect(view.notifyConversationListChanged).not.toHaveBeenCalled();
@@ -2006,12 +2051,12 @@ describe('ClaudianPlugin', () => {
       await chatHostOf(plugin).setLinkedContentPinned('Notes/Old.md', true);
       await chatHostOf(plugin).setLinkedContentPinned('Projects/Old/Plan.md', true);
 
-      await (plugin as any).vaultContentEvents.handleRename(
-        new (TFile as any)('Notes/New.md'),
+      await plugin['vaultContentEvents'].handleRename(
+        new MockTFile('Notes/New.md'),
         'Notes/Old.md',
       );
-      await (plugin as any).vaultContentEvents.handleRename(
-        new (TFolder as any)('Projects/New'),
+      await plugin['vaultContentEvents'].handleRename(
+        new MockTFolder('Projects/New'),
         'Projects/Old',
       );
 
@@ -2035,11 +2080,11 @@ describe('ClaudianPlugin', () => {
       await chatHostOf(plugin).setLinkedContentPinned('Projects/Archive/One.md', true);
       await chatHostOf(plugin).setLinkedContentPinned('Projects/Archive/Two.md', true);
 
-      await (plugin as any).vaultContentEvents.handleDelete(
-        new (TFile as any)('Notes/Plan.md'),
+      await plugin['vaultContentEvents'].handleDelete(
+        new MockTFile('Notes/Plan.md'),
       );
-      await (plugin as any).vaultContentEvents.handleDelete(
-        new (TFolder as any)('Projects/Archive'),
+      await plugin['vaultContentEvents'].handleDelete(
+        new MockTFolder('Projects/Archive'),
       );
 
       expect(plugin.settings.pinnedLinkedContentPaths).toEqual([]);
@@ -2051,10 +2096,10 @@ describe('ClaudianPlugin', () => {
       const view = {
         notifyConversationListChanged: vi.fn(),
       };
-      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([view as any]);
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([partialMock<ChatView>(view)]);
 
-      await (plugin as any).vaultContentEvents.handleDelete(
-        new (TFile as any)('Notes/Unpinned.md'),
+      await plugin['vaultContentEvents'].handleDelete(
+        new MockTFile('Notes/Unpinned.md'),
       );
 
       expect(linked.handleDeleted).toHaveBeenCalledWith(
@@ -2068,7 +2113,7 @@ describe('ClaudianPlugin', () => {
         (call: unknown[]) => call[0] === 'create',
       )?.[1];
       expect(createListener).toEqual(expect.any(Function));
-      createListener(new (TFile as any)('Notes/Unpinned.md'));
+      createListener(new MockTFile('Notes/Unpinned.md'));
 
       expect(linked.handleCreated).toHaveBeenCalledWith('Notes/Unpinned.md');
       await new Promise(resolve => window.setTimeout(resolve, 75));
@@ -2079,10 +2124,10 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
       const conversation = await chatHostOf(plugin).createConversation({ linkedContentPath: 'Notes/Old.md' });
       const view = { handleLinkedContentRenamed: vi.fn(), notifyConversationListChanged: vi.fn() };
-      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([view as any]);
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([partialMock<ChatView>(view)]);
       vi.spyOn(PinnedLinkedContentPathCoordinator.prototype, 'rewritePaths')
         .mockRejectedValueOnce(new Error('settings unavailable'));
-      await expect((plugin as any).vaultContentEvents.handleRename(new (TFile as any)('Notes/New.md'), 'Notes/Old.md'))
+      await expect(plugin['vaultContentEvents'].handleRename(new MockTFile('Notes/New.md'), 'Notes/Old.md'))
         .rejects.toThrow('settings unavailable');
       expect(chatHostOf(plugin).getConversationSync(conversation.id)?.linkedContentPath).toBe('Notes/New.md');
       await new Promise(resolve => window.setTimeout(resolve, 75));
@@ -2095,12 +2140,12 @@ describe('ClaudianPlugin', () => {
       const view = {
         notifyConversationListChanged: vi.fn(),
       };
-      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([view as any]);
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([partialMock<ChatView>(view)]);
       vi.spyOn(PinnedLinkedContentPathCoordinator.prototype, 'removePaths')
         .mockRejectedValueOnce(new Error('settings unavailable'));
 
-      await expect((plugin as any).vaultContentEvents.handleDelete(
-        new (TFile as any)('Notes/Unpinned.md'),
+      await expect(plugin['vaultContentEvents'].handleDelete(
+        new MockTFile('Notes/Unpinned.md'),
       )).rejects.toThrow('settings unavailable');
 
       expect(linked.handleDeleted).toHaveBeenCalledWith(
@@ -2116,9 +2161,9 @@ describe('ClaudianPlugin', () => {
     it('keeps Linked content creation-only and routes Vault renames explicitly', async () => {
       await plugin.onload();
       const notifyConversationListChanged = vi.fn();
-      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([partialMock<ChatView>({
         notifyConversationListChanged,
-      } as any]);
+      })]);
 
       const conv = await chatHostOf(plugin).createConversation({
         linkedContentPath: 'Projects/Initial.md',
@@ -2128,14 +2173,17 @@ describe('ClaudianPlugin', () => {
         .toBe('Projects/Initial.md');
       notifyConversationListChanged.mockClear();
 
-      await expect((chatHostOf(plugin).updateConversation as any)(conv.id, {
+      // The type excludes linkedContentPath; the runtime guard still has to reject it.
+      const immutableUpdate = partialMock<Parameters<ClaudianChatFeatureHost['updateConversation']>[1]>({
         linkedContentPath: 'Projects/Updated.md',
-      })).rejects.toThrow('immutable fields');
+      });
+      await expect(chatHostOf(plugin).updateConversation(conv.id, immutableUpdate))
+        .rejects.toThrow('immutable fields');
 
       // Vault renames are routed explicitly through the content-event handler
       // (a file rename, so descendants are not included).
-      await (plugin as any).vaultContentEvents.handleRename(
-        new (TFile as any)('Projects/Updated.md'),
+      await plugin['vaultContentEvents'].handleRename(
+        new MockTFile('Projects/Updated.md'),
         'Projects/Initial.md',
       );
       // The repository change notification is coalesced, so let it flush.
@@ -2302,7 +2350,7 @@ describe('ClaudianPlugin', () => {
       });
       mockMetadataSources(...sessions);
       await plugin.onload();
-      await (plugin as any).sessionMetadata.loadRemaining();
+      await plugin['sessionMetadata']['loadRemaining']();
       await new Promise(resolve => setImmediate(resolve));
       return files;
     }
@@ -2352,7 +2400,7 @@ describe('ClaudianPlugin', () => {
       const stalePath = `${getDeviceSessionsPath(getHostnameKey())}/stale-session.meta.json`;
       let releasePinWrite!: () => void;
       const pinWriteGate = new Promise<void>((resolve) => { releasePinWrite = resolve; });
-      const write = mockApp.vault.adapter.write.getMockImplementation();
+      const write = mockApp.vault.adapter.write.getMockImplementation() ?? (async () => undefined);
       let isFirstStaleWrite = true;
       mockApp.vault.adapter.write.mockImplementation(async (path: string, content: string) => {
         if (path === stalePath && isFirstStaleWrite) {
@@ -2418,8 +2466,8 @@ describe('ClaudianPlugin', () => {
 
       await chatHostOf(plugin).ensureConversationMetadataLoaded(['conv-multi-session']);
       const loaded = await chatHostOf(plugin).getConversationById('conv-multi-session');
-      expect((loaded?.providerState as any)?.previousProviderSessionIds).toEqual(['session-A']);
-      expect((loaded?.providerState as any)?.providerSessionId).toBe('session-B');
+      expect(loaded?.providerState?.previousProviderSessionIds).toEqual(['session-A']);
+      expect(loaded?.providerState?.providerSessionId).toBe('session-B');
 
       scanSpy.mockRestore();
       loadSpy.mockRestore();
@@ -2437,8 +2485,8 @@ describe('ClaudianPlugin', () => {
       });
 
       const updated = await chatHostOf(plugin).getConversationById(conv.id);
-      expect((updated?.providerState as any)?.previousProviderSessionIds).toEqual(['session-A']);
-      expect((updated?.providerState as any)?.providerSessionId).toBe('session-B');
+      expect(updated?.providerState?.previousProviderSessionIds).toEqual(['session-A']);
+      expect(updated?.providerState?.providerSessionId).toBe('session-B');
 
       // Further update should preserve previousProviderSessionIds
       await chatHostOf(plugin).updateConversation(conv.id, {
@@ -2446,7 +2494,7 @@ describe('ClaudianPlugin', () => {
       });
 
       const afterTitleUpdate = await chatHostOf(plugin).getConversationById(conv.id);
-      expect((afterTitleUpdate?.providerState as any)?.previousProviderSessionIds).toEqual(['session-A']);
+      expect(afterTitleUpdate?.providerState?.previousProviderSessionIds).toEqual(['session-A']);
     });
 
     it('should handle empty previousProviderSessionIds array', async () => {
@@ -2461,7 +2509,7 @@ describe('ClaudianPlugin', () => {
       });
 
       const updated = await chatHostOf(plugin).getConversationById(conv.id);
-      expect((updated?.providerState as any)?.previousProviderSessionIds).toEqual([]);
+      expect(updated?.providerState?.previousProviderSessionIds).toEqual([]);
     });
   });
 

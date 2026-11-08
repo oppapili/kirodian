@@ -1,7 +1,11 @@
+/** Listener or dispatched payload; the mock passes `{ type, target }` objects, not DOM events. */
+type MockEventHandler = (event: object) => void;
+type MockEventInit = { type: string; [key: string]: unknown };
+
 export interface MockElement {
   tagName: string;
-  children: MockElement[];
-  childNodes: MockElement[];
+  children: MockEl[];
+  childNodes: MockEl[];
   style: Record<string, string>;
   dataset: Record<string, string>;
   scrollLeft: number;
@@ -16,46 +20,46 @@ export interface MockElement {
     contains: (cls: string) => boolean;
     toggle: (cls: string, force?: boolean) => boolean;
   };
-  addClass: (cls: string) => MockElement;
-  removeClass: (cls: string) => MockElement;
+  addClass: (cls: string) => MockEl;
+  removeClass: (cls: string) => MockEl;
   hasClass: (cls: string) => boolean;
   getClasses: () => string[];
-  createDiv: (opts?: { cls?: string; text?: string }) => MockElement;
-  createSpan: (opts?: { cls?: string; text?: string }) => MockElement;
-  createEl: (tag: string, opts?: { cls?: string; text?: string; attr?: Record<string, string> }) => MockElement;
-  createSvg: (tag: string, opts?: { cls?: string; attr?: Record<string, string> }) => MockElement;
-  appendChild: (child: any) => any;
-  replaceChildren: (...children: MockElement[]) => void;
-  cloneNode: (deep?: boolean) => MockElement;
-  insertBefore: (el: MockElement, ref: MockElement | null) => void;
-  firstChild: MockElement | null;
+  createDiv: (opts?: { cls?: string; text?: string }) => MockEl;
+  createSpan: (opts?: { cls?: string; text?: string }) => MockEl;
+  createEl: (tag: string, opts?: { cls?: string; text?: string; attr?: Record<string, string> }) => MockEl;
+  createSvg: (tag: string, opts?: { cls?: string; attr?: Record<string, string> }) => MockEl;
+  appendChild: (child: MockEl) => MockEl;
+  replaceChildren: (...children: MockEl[]) => void;
+  cloneNode: (deep?: boolean) => MockEl;
+  insertBefore: (el: MockEl, ref: MockEl | null) => void;
+  firstChild: MockEl | null;
   remove: () => void;
   empty: () => void;
-  contains: (node: any) => boolean;
+  contains: (node: unknown) => boolean;
   scrollIntoView: () => void;
   setAttribute: (name: string, value: string) => void;
   getAttribute: (name: string) => string | undefined | null;
   removeAttribute: (name: string) => void;
   addEventListener: (
     event: string,
-    handler: (...args: any[]) => void,
+    handler: MockEventHandler,
     options?: AddEventListenerOptions | boolean,
   ) => void;
-  removeEventListener: (event: string, handler: (...args: any[]) => void) => void;
-  dispatchEvent: (eventOrType: string | { type: string; [key: string]: any }, extraArg?: any) => void;
+  removeEventListener: (event: string, handler: MockEventHandler) => void;
+  dispatchEvent: (eventOrType: string | MockEventInit, extraArg?: object) => void;
   click: () => void;
   getEventListenerCount: (event: string) => number;
   getEventListenerOptions: (event: string) => Array<AddEventListenerOptions | boolean | undefined>;
-  querySelector: (selector: string) => MockElement | null;
-  querySelectorAll: (selector: string) => MockElement[];
+  querySelector: (selector: string) => MockEl | null;
+  querySelectorAll: (selector: string) => MockEl[];
   getBoundingClientRect: () => { top: number; left: number; width: number; height: number; right: number; bottom: number; x: number; y: number; toJSON: () => void };
   setText: (text: string) => void;
   appendText: (text: string) => void;
   setCssProps: (props: Record<string, string>) => void;
   ownerDocument: {
     defaultView: {
-      addEventListener: (event: string, handler: (...args: any[]) => void) => void;
-      removeEventListener: (event: string, handler: (...args: any[]) => void) => void;
+      addEventListener: (event: string, handler: MockEventHandler) => void;
+      removeEventListener: (event: string, handler: MockEventHandler) => void;
       requestAnimationFrame: (callback: FrameRequestCallback) => number;
       cancelAnimationFrame: (handle: number) => void;
       setTimeout: (callback: () => void, timeout: number) => number;
@@ -63,22 +67,39 @@ export interface MockElement {
       setInterval: (callback: () => void, timeout: number) => number;
       clearInterval: (handle: number) => void;
     };
-    activeElement?: any;
-    body?: any;
-    addEventListener?: (event: string, handler: (...args: any[]) => void) => void;
-    removeEventListener?: (event: string, handler: (...args: any[]) => void) => void;
-    createElement: (tagName: string) => MockElement;
-    createElementNS: (namespace: string, tagName: string) => MockElement;
+    activeElement?: MockElement | null;
+    body?: MockElement;
+    addEventListener?: (event: string, handler: MockEventHandler) => void;
+    removeEventListener?: (event: string, handler: MockEventHandler) => void;
+    createElement: (tagName: string) => MockEl;
+    createElementNS: (namespace: string, tagName: string) => MockEl;
     getSelection?: () => Selection | null;
   };
   _classes: Set<string>;
   _classList: Set<string>;
   _attributes: Map<string, string>;
-  _eventListeners: Map<string, Array<(...args: any[]) => void>>;
+  _eventListeners: Map<string, MockEventHandler[]>;
   _eventListenerOptions: Map<string, Array<AddEventListenerOptions | boolean | undefined>>;
-  _children: MockElement[];
-  [key: string]: any;
+  _children: MockEl[];
+  value: string;
+  selectionStart: number;
+  selectionEnd: number;
+  clientHeight: number;
+  clientWidth: number;
+  offsetHeight: number;
+  offsetWidth: number;
+  parentElement: MockEl | null;
+  focus: () => void;
+  blur: () => void;
+  select: () => void;
+  setAttr: (name: string, value: string) => void;
+  toggleClass: (cls: string, force: boolean) => void;
+  closest: (selector?: string) => { clientHeight: number };
+  getEventListeners: () => Map<string, MockEventHandler[]>;
 }
+
+/** A mock element that also passes where production code asks for an `HTMLElement`. */
+export type MockEl = MockElement & HTMLElement;
 
 const CLASS_DISPLAY: Record<string, string> = {
   'claudian-context-meter': 'flex',
@@ -97,11 +118,11 @@ const DISPLAY_CLASSES = new Set([
   ...Object.keys(CLASS_DISPLAY),
 ]);
 
-export function createMockEl(tag = 'div'): any {
-  const children: MockElement[] = [];
+export function createMockEl(tag = 'div'): MockEl {
+  const children: MockEl[] = [];
   const classes = new Set<string>();
   const attributes = new Map<string, string>();
-  const eventListeners = new Map<string, Array<(...args: any[]) => void>>();
+  const eventListeners = new Map<string, MockEventHandler[]>();
   const eventListenerOptions = new Map<
     string,
     Array<AddEventListenerOptions | boolean | undefined>
@@ -177,7 +198,9 @@ export function createMockEl(tag = 'div'): any {
     },
   };
 
-  const currentDocument = (): any => (globalThis as any).document;
+  // Tests replace the global document with partial fakes, so only the members they provide exist.
+  const currentDocument = () =>
+    (globalThis as { document?: unknown }).document as Partial<MockElement['ownerDocument']> | undefined;
   const ownerDocument = {
     defaultView,
     get activeElement() {
@@ -186,10 +209,10 @@ export function createMockEl(tag = 'div'): any {
     get body() {
       return currentDocument()?.body;
     },
-    addEventListener(event: string, handler: (...args: any[]) => void) {
+    addEventListener(event: string, handler: MockEventHandler) {
       currentDocument()?.addEventListener?.(event, handler);
     },
-    removeEventListener(event: string, handler: (...args: any[]) => void) {
+    removeEventListener(event: string, handler: MockEventHandler) {
       currentDocument()?.removeEventListener?.(event, handler);
     },
     createElement: (tagName: string) => currentDocument()?.createElement?.(tagName) ?? createMockEl(tagName),
@@ -251,11 +274,11 @@ export function createMockEl(tag = 'div'): any {
 
     addClass(cls: string) {
       cls.split(/\s+/).filter(Boolean).forEach(c => updateClass(c, true));
-      return element;
+      return element as MockEl;
     },
     removeClass(cls: string) {
       cls.split(/\s+/).filter(Boolean).forEach(c => updateClass(c, false));
-      return element;
+      return element as MockEl;
     },
     hasClass: (cls: string) => classes.has(cls),
     getClasses: () => Array.from(classes),
@@ -298,13 +321,13 @@ export function createMockEl(tag = 'div'): any {
       return child;
     },
 
-    appendChild(child: any) {
+    appendChild(child: MockEl) {
       const existingIndex = children.indexOf(child);
       if (existingIndex >= 0) children.splice(existingIndex, 1);
       children.push(child);
       return child;
     },
-    replaceChildren(...replacementChildren: MockElement[]) {
+    replaceChildren(...replacementChildren: MockEl[]) {
       children.length = 0;
       for (const child of replacementChildren) children.push(child);
     },
@@ -325,7 +348,7 @@ export function createMockEl(tag = 'div'): any {
       }
       return clone;
     },
-    insertBefore(el: MockElement, _ref: MockElement | null) { children.unshift(el); },
+    insertBefore(el: MockEl, _ref: MockEl | null) { children.unshift(el); },
     get firstChild() { return children[0] || null; },
     remove() {},
     empty() {
@@ -333,9 +356,9 @@ export function createMockEl(tag = 'div'): any {
       element.innerHTML = '';
       textContent = '';
     },
-    contains(node: any) {
+    contains(node: unknown) {
       if (node === element) return true;
-      return children.some(child => (child as any).contains?.(node));
+      return children.some(child => child.contains(node));
     },
     scrollIntoView() {},
     focus() {
@@ -375,7 +398,7 @@ export function createMockEl(tag = 'div'): any {
 
     addEventListener(
       event: string,
-      handler: (...args: any[]) => void,
+      handler: MockEventHandler,
       options?: AddEventListenerOptions | boolean,
     ) {
       if (!eventListeners.has(event)) eventListeners.set(event, []);
@@ -383,17 +406,17 @@ export function createMockEl(tag = 'div'): any {
       if (!eventListenerOptions.has(event)) eventListenerOptions.set(event, []);
       eventListenerOptions.get(event)!.push(options);
     },
-    removeEventListener(event: string, handler: (...args: any[]) => void) {
+    removeEventListener(event: string, handler: MockEventHandler) {
       const handlers = eventListeners.get(event);
       if (handlers) {
         const idx = handlers.indexOf(handler);
         if (idx !== -1) handlers.splice(idx, 1);
       }
     },
-    dispatchEvent(eventOrType: string | { type: string; [key: string]: any }, extraArg?: any) {
+    dispatchEvent(eventOrType: string | MockEventInit, extraArg?: object) {
       if (typeof eventOrType === 'string') {
         const handlers = eventListeners.get(eventOrType) || [];
-        handlers.forEach(h => h(extraArg));
+        handlers.forEach(h => h(extraArg ?? {}));
       } else {
         const handlers = eventListeners.get(eventOrType.type) || [];
         handlers.forEach(h => h(eventOrType));
@@ -414,24 +437,24 @@ export function createMockEl(tag = 'div'): any {
       const simpleClassSelector = selector.match(/^([a-z][\w-]*)?\.([\w-]+)$/i);
       const tagName = simpleClassSelector?.[1]?.toUpperCase();
       const cls = simpleClassSelector?.[2] ?? selector.replace('.', '');
-      const find = (el: any): MockElement | null => {
-        if ((!tagName || el.tagName === tagName) && el.hasClass?.(cls)) return el;
-        for (const child of el.children || []) {
+      const find = (el: MockEl): MockEl | null => {
+        if ((!tagName || el.tagName === tagName) && el.hasClass(cls)) return el;
+        for (const child of el.children) {
           const found = find(child);
           if (found) return found;
         }
         return null;
       };
-      return find(element);
+      return find(element as MockEl);
     },
     querySelectorAll(selector: string) {
       const simpleClassSelector = selector.match(/^([a-z][\w-]*)?\.([\w-]+)$/i);
       const tagName = simpleClassSelector?.[1]?.toUpperCase();
       const cls = simpleClassSelector?.[2] ?? selector.replace('.', '');
-      const results: MockElement[] = [];
-      const collect = (el: any) => {
-        if ((!tagName || el.tagName === tagName) && el.hasClass?.(cls)) results.push(el);
-        for (const child of el.children || []) collect(child);
+      const results: MockEl[] = [];
+      const collect = (el: MockEl) => {
+        if ((!tagName || el.tagName === tagName) && el.hasClass(cls)) results.push(el);
+        for (const child of el.children) collect(child);
       };
       for (const child of children) collect(child);
       return results;
@@ -453,6 +476,13 @@ export function createMockEl(tag = 'div'): any {
       updateClass(cls, force);
     },
     value: '',
+    selectionStart: 0,
+    selectionEnd: 0,
+    clientHeight: 0,
+    clientWidth: 0,
+    offsetHeight: 0,
+    offsetWidth: 0,
+    parentElement: null,
     closest() { return { clientHeight: 600 }; },
     getEventListeners() { return eventListeners; },
     ownerDocument,
@@ -465,5 +495,5 @@ export function createMockEl(tag = 'div'): any {
     _children: children,
   };
 
-  return element;
+  return element as MockEl;
 }
