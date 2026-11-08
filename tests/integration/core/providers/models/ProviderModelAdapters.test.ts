@@ -53,4 +53,3 @@ it.each(modelCatalogCases)('$id keeps native selection, aliases and metadata beh
   expect(catalog.getSnapshot().selectedIds).toEqual([selectedId]);
   await catalog.dispose();
 });
-
