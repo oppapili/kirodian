@@ -52,7 +52,7 @@ export function createTestSession(options: SessionModelStubPorts & {
     get publishedBackgroundWork() { return coordinator?.publishedBackgroundWork ?? false; },
   };
   const session = new ChatSessionRuntime(
-    { conversationId: null, providerId: 'pi', draftModel: null },
+    { conversationId: null, providerId: 'kiro', draftModel: null },
     execution as unknown as ChatExecutionCoordinator,
     runtime => createSessionModelStub(runtime, ports),
   );

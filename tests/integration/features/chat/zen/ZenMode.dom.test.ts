@@ -5,13 +5,13 @@ import { deserialize, serialize } from 'node:v8';
 
 import { axe } from '@test/helpers/accessibility';
 import { createClaudianView } from '@test/helpers/features/chat/ClaudianViewHarness';
-import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
+import { createSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { createHarness, releaseSideChatHarnesses } from '@test/helpers/features/chat/SideChatDOMHarness';
 import { FakeSideSession } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { modelCatalogCases } from '@test/helpers/providerModelCatalogs';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, screen, waitFor as waitForDOM, within } from '@testing-library/dom';
-import { App, Component, Scope, setIcon } from 'obsidian';
+import { App, Component, Events, Scope, setIcon } from 'obsidian';
 
 import { ChatModelSelectionCoordinator } from '@/app/settings/ChatModelSelectionCoordinator';
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@/app/settings/defaultSettings';
@@ -88,7 +88,9 @@ function createWorkspace() {
   const noteEditor = rootEl.createDiv({ cls: 'workspace-leaf' }).createEl('textarea', {
     attr: { 'aria-label': 'Note editor' },
   }) as HTMLTextAreaElement;
-  const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+  // Back the workspace with a real Events instance so `on` returns valid Obsidian
+  // EventRefs that `Component.registerEvent` accepts and `offref` decrements.
+  const events = new Events();
   const leaves: Leaf[] = [];
   // Non-chat leaves sharing a sidebar's tab group, such as Outline.
   const otherLeaves: Leaf[] = [];
@@ -99,18 +101,11 @@ function createWorkspace() {
     rootSplit,
     layoutReady: true,
     onLayoutReady: (callback: () => void) => callback(),
-    on(name: string, callback: (...args: unknown[]) => void) {
-      if (!listeners.has(name)) listeners.set(name, new Set());
-      listeners.get(name)!.add(callback);
-      return { name, callback };
-    },
-    offref(ref: { name: string; callback: (...args: unknown[]) => void }) {
-      listeners.get(ref.name)?.delete(ref.callback);
-    },
-    trigger(name: string, ...args: unknown[]) {
-      for (const listener of [...(listeners.get(name) ?? [])]) listener(...args);
-    },
-    listenerCount: () => [...listeners.values()].reduce((total, set) => total + set.size, 0),
+    requestSaveLayout: () => undefined,
+    on: (name: string, callback: (...args: unknown[]) => void) => events.on(name, callback),
+    offref: (ref: Parameters<Events['offref']>[0]) => events.offref(ref),
+    trigger: (name: string, ...args: unknown[]) => events.trigger(name, ...args),
+    listenerCount: () => (events as unknown as { listenerCount: () => number }).listenerCount(),
     getLeavesOfType: () => leaves,
     iterateAllLeaves: (callback: (leaf: Leaf) => void) => [...leaves, ...otherLeaves].forEach(callback),
     getActiveViewOfType: vi.fn(),
@@ -198,7 +193,7 @@ async function createZenFixture(options: { enabled?: boolean; ready?: boolean } 
     registerZenModeSource: (source: Parameters<ZenModeController['register']>[0]) => zen.register(source),
   } as unknown as ChatFeatureHost;
 
-  installSessionRuntimePool(plugin);
+  Object.assign(plugin, { sessionRuntimes: createSessionRuntimePool(() => plugin) });
 
   const tabGroups: Record<'left' | 'right' | 'main', Tabs> = {
     left: { selected: null }, right: { selected: null }, main: { selected: null },
@@ -226,7 +221,7 @@ async function createZenFixture(options: { enabled?: boolean; ready?: boolean } 
     parent.selected ??= leaf;
     // Obsidian hides unselected tabs of a group.
     viewContainerEl.isShown = () => parent.selected === leaf;
-    const view = createClaudianView({
+    const view = await createClaudianView({
       host: plugin,
       app,
       leaf,
@@ -234,14 +229,14 @@ async function createZenFixture(options: { enabled?: boolean; ready?: boolean } 
       contentEl: viewContainerEl,
     });
     // The view-owned footer and tab container that onOpen builds.
-    view.viewContainerEl = viewContainerEl;
-    view.buildViewLayout(viewContainerEl);
+    view['viewContainerEl'] = viewContainerEl;
+    view['buildViewLayout'](viewContainerEl);
     const activeInputSlotEl = viewContainerEl.querySelector<HTMLElement>('.claudian-active-input-slot')!;
     const sideChatChipHostEl = viewContainerEl.querySelector<HTMLElement>('.claudian-side-chat-chip-slot')!;
     const tab: AssembledTabRuntime = await createTabRuntime({
       plugin,
       component: Object.assign(new Component(), { registerDomEvent: () => undefined, registerEvent: () => undefined }) as never,
-      containerEl: view.tabContentEl,
+      containerEl: view['tabContentEl']!,
       mentionDataProvider: new VaultMentionDataProvider(plugin.app),
       conversation, getProviderCatalogConfig: () => null, isRuntimeLive: () => true,
     openConversation: async () => {}, startNewConversation: async () => {},
@@ -259,18 +254,21 @@ async function createZenFixture(options: { enabled?: boolean; ready?: boolean } 
     };
     tab.dom.contentEl.removeClass('claudian-hidden');
     cleanups.push(() => destroyTab(tab));
-    view.tabManager = {
+    view['tabManager'] = {
       getActiveTab: () => tab,
       getTab: (id: string) => id === tab.id ? tab : null,
       getTabCount: () => 1,
-    };
+    } as never;
 
-    Object.assign(view.tabWorkspace, { lifecycleRevision: 1, initializedRevision: ready ? 1 : -1 });
+    Object.assign(view['tabWorkspace'], { lifecycleRevision: 1, initializedRevision: ready ? 1 : -1 });
     leaf.view = view;
     layout.leaves.push(leaf);
-    view.presentation.update();
-    view.startZenModeSource();
-    cleanups.push(() => view.stopZenModeSource());
+    view['presentation'].update();
+    view['startZenModeSource']();
+    cleanups.push(() => {
+      view['stopZenModeSource']();
+      view['sessions'].dispose();
+    });
     return { view, tab, leaf, activeInputSlotEl, sideChatChipHostEl };
   };
 
@@ -335,14 +333,15 @@ it('moves the existing composer and transcript into the central workspace while 
 it('follows the view brand provider after it changes while zen is open', async () => {
   const { view, tab, rightSplit, setCollapsed } = await createZenFixture();
   setCollapsed(rightSplit, true);
-  view.syncProviderBrandColor();
+  view['syncProviderBrandColor']();
   expect(zenPanel()!.dataset.provider).toBe('kiro');
 
   // The tab switches to another provider's model from the zen composer.
-  view.plugin.getConversationSummary(tab.conversationId).providerId = 'kiro';
-  view.syncProviderBrandColor();
+  const conversation = view['plugin'].getConversationSummary(tab.conversationId!);
+  (conversation as { providerId: string }).providerId = 'kiro';
+  view['syncProviderBrandColor']();
 
-  expect(view.viewContainerEl.dataset.provider).toBe('kiro');
+  expect(view['viewContainerEl']!.dataset.provider).toBe('kiro');
   expect(zenPanel()!.dataset.provider).toBe('kiro');
 });
 
@@ -371,8 +370,8 @@ it('waits for ordinary restoration before presenting an already collapsed sideba
   expect(zenPanel()).toBeNull();
   expect(fixture.sessions).toHaveLength(0);
 
-  fixture.view.tabWorkspace.initializedRevision = 1;
-  fixture.view.notifyZenPresentationChanged();
+  fixture.view['tabWorkspace']['initializedRevision'] = 1;
+  fixture.view['notifyZenPresentationChanged']();
 
   expect(zenPanel()!.contains(fixture.tab.dom.inputComposerEl)).toBe(true);
   expect(fixture.sessions).toHaveLength(0);
@@ -641,7 +640,7 @@ it('clears a pending waiting status when provider invalidation ends the turn', a
   const session = await sendFromZen(tab, sessions, 'Invalidate during text');
   session.emitText('Partial response');
   await waitFor(() => expect(preview()).toBe('Partial response'));
-  await view.plugin.providerHost.executionLifecycleRegistry.runTransition(['kiro'], async () => undefined);
+  await view['plugin'].providerHost.executionLifecycleRegistry.runTransition(['kiro'], async () => undefined);
   await tab.session.turns.drain();
   expect(session.cancelCalls).toBeGreaterThan(0);
 
@@ -882,7 +881,7 @@ it('leaves focus alone when there is no existing composer or its sidebar is coll
   expect(rightSplit.collapsed).toBe(true);
   setCollapsed(rightSplit, false);
   expect(focusCommand.checkCallback!(true)).toBe(true);
-  view.tabManager = null;
+  view['tabManager'] = null;
   expect(focusCommand.checkCallback!(true)).toBe(false);
   leaves.splice(0);
   expect(focusCommand.checkCallback!(false)).toBe(false);
@@ -894,10 +893,10 @@ it.each(['display', 'visibility', 'opacity', 'detached'])('skips a composer hidd
   const other = await addView('left');
   noteEditor.focus();
   expect(focusCommand.checkCallback!(true)).toBe(true);
-  if (reason === 'display') view.viewContainerEl.style.display = 'none';
-  else if (reason === 'visibility') view.viewContainerEl.style.visibility = 'hidden';
-  else if (reason === 'opacity') view.viewContainerEl.style.opacity = '0';
-  else view.viewContainerEl.remove();
+  if (reason === 'display') view['viewContainerEl']!.style.display = 'none';
+  else if (reason === 'visibility') view['viewContainerEl']!.style.visibility = 'hidden';
+  else if (reason === 'opacity') view['viewContainerEl']!.style.opacity = '0';
+  else view['viewContainerEl']!.remove();
 
   expect(focusCommand.checkCallback!(false)).toBe(true);
   expect(document.activeElement).toBe(within(other.tab.dom.inputComposerEl).getByRole('textbox', { name: 'Message' }));
@@ -978,8 +977,7 @@ it('ignores removed focus targets and retains the return target across normal an
 
 it('closes the resume picker with Escape through the Obsidian keymap', async () => {
   const { app, view, tab, rightSplit, setCollapsed, scopes } = await createZenFixture();
-  Object.assign(app, { metadataCache: { on: () => ({}), offref: () => undefined } });
-  view.wireEventHandlers();
+  view['wireEventHandlers']();
   // Obsidian answers Escape at the app scope when no nearer scope consumes it.
   const appEscape = vi.fn(() => false);
   app.scope.register([], 'Escape', appEscape);
@@ -1684,16 +1682,17 @@ it('releases every moved node and subscription on close and disposal', async () 
   setCollapsed(rightSplit, true);
   expect(zenPanel()).not.toBeNull();
 
-  view.stopZenModeSource();
+  view['stopZenModeSource']();
   expect(zenPanel()).toBeNull();
   expect(rootEl.classList.contains('claudian-zen-host')).toBe(false);
   expect(tab.dom.inputComposerEl.parentElement).toBe(fixture.activeInputSlotEl);
   expect(tab.dom.contentEl.firstElementChild).toBe(tab.dom.messagesWrapperEl);
 
-  view.startZenModeSource();
+  view['startZenModeSource']();
   expect(zenPanel()).not.toBeNull();
   zen.dispose();
   expect(zenPanel()).toBeNull();
+  view['sessions'].dispose();
   expect(workspace.listenerCount()).toBe(0);
   expect(screen.queryByRole('region', { name: 'Claudian chat' })).toBeNull();
 });

@@ -1,26 +1,33 @@
-import { createConversationPorts, createTestSession, holdResponse } from '@test/helpers/ConversationPorts';
+import '@/providers';
+
+import { createHarness as createExecutionHarness, createSubmission, type FakeRun, FakeSession, type UnscopedExecutionEvent } from '@test/helpers/ChatExecutionHarness';
+import { createConversationPorts, createTestSession } from '@test/helpers/ConversationPorts';
+import { createChatFeatureHost } from '@test/helpers/features/chat/ChatFeatureHostFixture';
+import { conversationRecord } from '@test/helpers/features/chat/ConversationFixture';
 import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
-import { createMockEl } from '@test/helpers/MockElement';
+import { App, Component } from 'obsidian';
 import type { Mock } from 'vitest';
 
 import type { ProviderExecutionEvent } from '@/core/execution';
+import { ImageContextManager } from '@/features/chat/composer/ImageContextManager';
 import { ConversationController } from '@/features/chat/conversation/ConversationController';
 import { BuiltInCommandController, type BuiltInCommandControllerDeps } from '@/features/chat/input/BuiltInCommandController';
 import { ComposerSelections } from '@/features/chat/input/ComposerSelections';
 import { InputController, type InputControllerDeps } from '@/features/chat/input/InputController';
 import { SessionInteractions } from '@/features/chat/interactions/SessionInteractions';
+import { LinkedContentController } from '@/features/chat/linked-content';
+import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 import type { ChatSessionRuntime } from '@/features/chat/sessions/ChatSessionRuntime';
 import { ChatState } from '@/features/chat/state/ChatState';
+import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
+import { StreamController } from '@/features/chat/turns/StreamController';
 import type { ComposerInputElement } from '@/shared/composer-dropdown/types';
 
 
 
 function createInput(): ComposerInputElement {
-  return {
-    dispatchEvent: vi.fn().mockReturnValue(true),
-    focus: vi.fn(),
-    value: '',
-  } as unknown as ComposerInputElement;
+  const input = document.createElement('textarea');
+  return input;
 }
 
 export function deferred<T>(): {
@@ -75,50 +82,55 @@ function createSelectionSources() {
   return { browser: source(), canvas: source(), editor: source() };
 }
 
-export function createFixture(overrides: Record<string, unknown> = {}) {
+type ChatInputFixtureOptions = Partial<Omit<InputControllerDeps, 'session' | 'renderer'>> & {
+  session?: ChatSessionRuntime;
+  renderer?: MessageRenderer;
+  getInputContainerEl?: () => HTMLElement;
+  getImageContextManager?: () => ImageContextManager | null;
+  onReviewableSettlement?: () => void;
+  nativeSession?: FakeSession;
+  workingDirectory?: string;
+} & Partial<Pick<BuiltInCommandControllerDeps, 'openConversation' | 'startNewConversation' | 'toggleFastMode'>>;
+
+export async function createFixture(overrides: ChatInputFixtureOptions = {}) {
   const {
     onReviewableSettlement,
+    nativeSession,
+    workingDirectory,
     getInputContainerEl: inputContainerOverride,
     ...dependencyOverrides
   } = overrides;
-  const defaultInputContainerEl = createMockEl() as unknown as HTMLElement;
-  const getInputContainerEl = (inputContainerOverride as (() => HTMLElement) | undefined)
+  const defaultInputContainerEl = document.createElement('div');
+  const getInputContainerEl = inputContainerOverride
     ?? (() => defaultInputContainerEl);
   const selectionSources = createSelectionSources();
   // The real turn owner, unless a test supplies the session it drains or closes.
-  const session: ChatSessionRuntime = (dependencyOverrides.session as ChatSessionRuntime | undefined) ?? createTestSession({
+  const session: ChatSessionRuntime = dependencyOverrides.session ?? createTestSession({
     getState: () => state,
     coordinator: { cancel: () => deps.getExecutionCoordinator()?.cancel() },
     dismissInteractions: () => controller.dismissPendingApproval(),
   });
-  const state: ChatState = (dependencyOverrides.state as ChatState | undefined) ?? new ChatState({}, undefined, session.turns);
+  const state: ChatState = dependencyOverrides.state ?? new ChatState({}, undefined, session.turns);
   state.currentConversationId = 'conversation-1';
   const input = createInput();
-  const queueIndicator = createMockEl();
-  state.queueIndicatorEl = queueIndicator as any;
+  const images = new ImageContextManager(new App().keymap, document.createElement('div'), input, {});
+  const queueIndicator = document.createElement('div');
+  state.queueIndicatorEl = queueIndicator;
   let id = 0;
-  const coordinator = {
-    acceptSteerFromProviderEvent: vi.fn().mockResolvedValue(true),
-    cancel: vi.fn().mockResolvedValue(undefined),
-    execute: vi.fn().mockResolvedValue({
-      accepted: true,
-      status: 'completed',
-    }),
-    releaseSteerCorrelation: vi.fn(),
-    state: 'idle',
-    steer: vi.fn().mockResolvedValue({ delivery: 'accepted' }),
-  };
-  const plugin = {
+  const providerId = dependencyOverrides.getTabProviderId?.() ?? 'kiro';
+  const native = nativeSession ?? new FakeSession(providerId, 'session-1');
+  native.respond.mockImplementation(run => {
+    run.emit({ type: 'turn_started', accepted: true });
+    run.complete();
+  });
+  const nativeSteer = native.steerResponse;
+  const plugin = vi.mocked(await createChatFeatureHost({
     createConversation: vi.fn(),
     getConversationById: vi.fn().mockResolvedValue(null),
     getConversationList: vi.fn().mockReturnValue([]),
-    getConversationSummary(id: string) { return this.getConversationSync(id); },
-    getConversationSync: vi.fn().mockReturnValue({
-      id: 'conversation-1',
-      providerId: 'kiro',
-    }),
+    getConversationSummary(id: string) { return this.getConversationSync!(id); },
+    getConversationSync: vi.fn().mockReturnValue(conversationRecord('conversation-1', { title: 'Conversation' })),
     projects: createProjectsFake([]),
-    providerHost: { workingDirectory: '/vault' },
     renameConversation: vi.fn().mockResolvedValue(undefined),
     settings: {
       enableAutoTitleGeneration: false,
@@ -126,90 +138,69 @@ export function createFixture(overrides: Record<string, unknown> = {}) {
       permissionMode: 'normal',
     },
     updateConversation: vi.fn().mockResolvedValue(undefined),
-  };
-  const linkedContentToken = Object.freeze({}) as { readonly path?: string };
-  const linkedContentController = {
-    beginSubmission: vi.fn().mockReturnValue(linkedContentToken),
-    commitSubmission: vi.fn().mockReturnValue({ queuedEvents: [] }),
-    getSnapshot: vi.fn().mockReturnValue({
-      content: null,
-      mode: 'locked',
-      path: null,
-    }),
-    resetAutoDraft: vi.fn(),
-    rollbackSubmission: vi.fn(),
-  };
-  const deps = {
+  }));
+  const execution = createExecutionHarness({
+    workingDirectory: typeof workingDirectory === 'string' ? workingDirectory : plugin.providerHost.workingDirectory ?? undefined,
+    resolveBackend: id => ({ providerId: id, createSession: () => native }),
+    onRequestedEvent: event => controller.handleExecutionEvent(event),
+  });
+  const coordinator = execution.coordinator;
+  const linkedContentController = new LinkedContentController({
+    app: plugin.app, getExcludedTags: () => [], getCachedVaultFiles: () => [], getCachedVaultFolders: () => [],
+  });
+  onTestFinished(() => { images.destroy(); linkedContentController.destroy(); });
+  const messagesEl = document.createElement('div');
+  const subagents = new SubagentManager(() => undefined);
+  const renderer = new MessageRenderer(plugin, new Component(), messagesEl);
+  const streamController = new StreamController({
+    plugin, state, renderer, subagentManager: subagents,
+    getMessagesEl: () => messagesEl, updateQueueIndicator: () => controller.queue.updateIndicator(),
+    onQuestionToolChanged: tool => controller.updateAsyncQuestion(tool),
+  });
+  const deps: Omit<InputControllerDeps, 'conversationController' | 'drafts' | 'session' | 'builtInCommands' | 'inlinePrompts'> & {
+    renderer: MessageRenderer; getImageContextManager: () => ImageContextManager | null;
+  } = {
     plugin,
     state,
-    renderer: {
-      addMessage: vi.fn().mockImplementation(() => {
-        const el = createMockEl();
-        el.createDiv({ cls: 'claudian-message-content' });
-        return el;
-      }),
-      appendInterruptIndicator: vi.fn(),
-      refreshActionButtons: vi.fn(),
-      finalizeResponse: vi.fn(),
-      removeMessage: vi.fn(),
-    },
-    streamController: {
-      beginResponse: vi.fn(),
-      appendText: vi.fn(),
-      appendError: vi.fn(),
-      finalizeCurrentTextBlock: vi.fn(),
-      finalizeCurrentThinkingBlock: vi.fn(),
-      handleStreamChunk: vi.fn(),
-      subagents: { releaseManaged: vi.fn() },
-      thinkingIndicator: { hide: vi.fn(), show: vi.fn() },
-    },
+    renderer,
+    streamController,
     selections: new ComposerSelections(selectionSources),
     getInputEl: () => input,
     getWelcomeEl: () => null,
-    getMessagesEl: () => createMockEl() as any,
-    getLinkedContentController: () => linkedContentController as any,
-    getImageContextManager: () => ({
-      clearImages: vi.fn(),
-      getAttachedImages: vi.fn().mockReturnValue([]),
-      hasImages: vi.fn().mockReturnValue(false),
-      setImages: vi.fn(),
-    }) as any,
+    getMessagesEl: () => messagesEl,
+    getLinkedContentController: () => linkedContentController,
+    getImageContextManager: () => images,
     getTitleGenerationService: () => null,
     generateId: () => `id-${++id}`,
-    getSettings: () => ({ model: 'kiro/model', reasoning: 'high', permissionMode: 'normal', serviceTier: 'standard' }),
+    getSettings: () => ({ model: 'kiro-model', reasoning: 'high', permissionMode: 'normal', serviceTier: 'standard' }),
     getExecutionCoordinator: () => coordinator,
     getTabProviderId: () => 'kiro',
-    ensureExecutionInitialized: vi.fn().mockResolvedValue(true),
+    ensureExecutionInitialized: vi.fn(async () => {
+      await coordinator.bindConversation(state.currentConversationId
+        ? { conversationId: state.currentConversationId, providerId } : null);
+      return true;
+    }),
     canStartTurn: () => true,
     isClosing: () => false,
     ...dependencyOverrides,
     ...(typeof onReviewableSettlement === 'function'
       ? {
           captureReviewableSettlement: vi.fn(
-            () => onReviewableSettlement as () => void,
+            () => onReviewableSettlement,
           ),
         }
       : {}),
-  } as unknown as InputControllerDeps & { renderer: NonNullable<InputControllerDeps['renderer']> };
-  if (!('inlinePrompts' in dependencyOverrides)) {
-    Object.assign(deps, {
-      inlinePrompts: new SessionInteractions({
-        getPromptParentEl: () => getInputContainerEl().parentElement,
-        getSuppressedEl: getInputContainerEl,
-      }),
-    });
-  }
-  const ports = createConversationPorts({ ...(deps as any), session });
+  };
+  const ports = createConversationPorts({ state, getInputEl: () => deps.getInputEl()!, getImageContextManager: deps.getImageContextManager, session });
   // Conversation creation stays real; persistence and reset are observed at their boundary.
   const conversationController = new ConversationController({
-    plugin: plugin as any, state, renderer: deps.renderer, drafts: ports.drafts, session,
-    subagentManager: { clear: vi.fn() } as any,
+    plugin, state, renderer: deps.renderer, drafts: ports.drafts, session,
+    subagentManager: new SubagentManager(() => undefined),
     getWelcomeEl: () => null, setWelcomeEl: () => undefined, getMessagesEl: deps.getMessagesEl,
     getLinkedContentController: () => deps.getLinkedContentController(),
     ensureExecutionInitialized: () => deps.ensureExecutionInitialized(),
     getExecutionCoordinator: () => deps.getExecutionCoordinator(),
   });
-  vi.spyOn(conversationController, 'save').mockResolvedValue(undefined);
   const commandOverrides = Object.fromEntries(
     (['openConversation', 'startNewConversation', 'toggleFastMode'] as const)
       .filter(key => key in dependencyOverrides)
@@ -226,17 +217,65 @@ export function createFixture(overrides: Record<string, unknown> = {}) {
     getSideChatController: () => deps.getSideChatController?.() ?? null,
     ...commandOverrides,
   });
-  Object.assign(deps, { drafts: ports.drafts, session, builtInCommands });
-  if (!('conversationController' in dependencyOverrides)) Object.assign(deps, { conversationController });
-  const controller = new InputController(deps);
+  const completeDeps: InputControllerDeps & typeof deps = Object.assign(deps, {
+    drafts: ports.drafts, session, builtInCommands, conversationController,
+    inlinePrompts: new SessionInteractions({
+      getPromptParentEl: () => getInputContainerEl().parentElement,
+      getSuppressedEl: getInputContainerEl,
+    }),
+  }, dependencyOverrides);
+  const controller = new InputController(completeDeps);
+  await coordinator.bindConversation({ conversationId: 'conversation-1', providerId });
+  onTestFinished(async () => {
+    controller.queue.cancelScheduled();
+    coordinator.cancel();
+    await coordinator.dispose();
+    await execution.registry.dispose();
+    streamController.dispose();
+    renderer.dispose();
+    subagents.clear();
+  });
   return {
     openConversation, startNewConversation,
     builtInCommands,
+    images,
     controller,
     coordinator,
-    deps,
+    deps: completeDeps,
+    execution, native, nativeSteer,
+    emit: async (run: FakeRun, event: UnscopedExecutionEvent) => {
+      const sent = run.emit(event);
+      await execution.waitForRequestedEvent(delivered =>
+        delivered.scope.executionId === sent.scope.executionId && delivered.scope.sequence === sent.scope.sequence);
+      return sent;
+    },
+    holdNextAuthority: () => {
+      const started = deferred<void>();
+      const result = deferred<void>();
+      execution.repository.assertConversationExecutionAuthority.mockImplementationOnce(() => {
+        started.resolve();
+        return result.promise;
+      });
+      return { started: started.promise, resolve: result.resolve, reject: result.reject };
+    },
+    holdNextResponse: () => {
+      const started = native.waitForRun(native.runs.length);
+      native.respond.mockImplementationOnce(run => run.emit({ type: 'turn_started', accepted: true }));
+      return { started };
+    },
     /** Holds a running provider turn open until the returned release settles it. */
-    holdResponse: () => holdResponse(session.turns),
+    holdResponse: async () => {
+      const index = native.runs.length;
+      native.respond.mockImplementationOnce(() => undefined);
+      const running = session.turns.run(async signal => {
+        session.turns.beginResponse();
+        await coordinator.execute(createSubmission(), signal);
+      });
+      const run = await native.waitForRun(index);
+      // The held setup run is not an input submitted by the case.
+      native.requests.length = 0;
+      return async () => { run.complete(); await running; };
+    },
     input,
     linkedContentController,
     plugin,

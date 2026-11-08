@@ -9,14 +9,17 @@ import { fireEvent, within } from '@testing-library/dom';
 import { App, Component, TFile } from 'obsidian';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
-import type { Conversation, UsageInfo } from '@/core/types';
+import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
+import type { ClaudianSettings, Conversation, UsageInfo } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { destroyTab } from '@/features/chat/tabs/TabLifecycle';
 import { createTabRuntime } from '@/features/chat/tabs/TabRuntimeFactory';
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
+import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
 afterEach(async () => {
+  ProviderWorkspaceRegistry.clear();
   vi.restoreAllMocks();
   await releaseSideChatHarnesses();
 });
@@ -29,6 +32,7 @@ let backend: SideChatDOMHarness['backend'];
 
 async function createTab(linkedContentPath?: string): Promise<AssembledTabRuntime> {
   const harness = await createHarness();
+  const harnessPlugin = harness.plugin as unknown as ChatFeatureHost;
   backend = harness.backend;
   const app = new App();
   Object.assign(app.vault.adapter, { basePath: '/vault' });
@@ -38,10 +42,22 @@ async function createTab(linkedContentPath?: string): Promise<AssembledTabRuntim
     getAbstractFileByPath: (path: string) => (path === note.path ? note : null),
   });
   const conversation = {
-    id: 'conversation-1', providerId: 'kiro', selectedModel: 'claude-sonnet-4-5',
+    id: 'conversation-1', providerId: 'kiro', selectedModel: 'kiro/claude-sonnet-4-5',
     sessionId: 'main-session', messages: harness.tab.state.messages,
     ...(linkedContentPath ? { linkedContentPath } : {}),
   } as Conversation;
+  const settings = {
+    model: 'kiro/claude-sonnet-4-5', effortLevel: 'high', permissionMode: 'normal', excludedTags: [],
+  } as unknown as ClaudianSettings;
+  updateCurrentKiroCatalog(settings as unknown as Record<string, unknown>, {
+    defaultModelId: null, fingerprint: 'test-fingerprint', refreshedAt: 0,
+    models: [{
+      rawId: 'claude-sonnet-4-5', displayName: 'Sonnet', description: 'SDK model', supportsReasoning: true,
+      reasoningMetadataResolved: true, reasoningEfforts: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }],
+    }],
+  });
+  updateKiroProviderSettings(settings as unknown as Record<string, unknown>, { enabled: true, visibleModels: ['claude-sonnet-4-5'] });
+  ProviderWorkspaceRegistry.setServices('kiro', {});
   const pool = createSessionRuntimePool(() => plugin);
   const plugin: ChatFeatureHost = await createChatFeatureHost({
     executionPersistence: {
@@ -49,15 +65,12 @@ async function createTab(linkedContentPath?: string): Promise<AssembledTabRuntim
       assertConversationExecutionAuthority: async () => undefined,
       persistExecutionSnapshot: async () => true, recordConversationActivity: async () => undefined,
     },
-    providerHost: harness.plugin.providerHost, bindSessionTools: harness.plugin.bindSessionTools, projects: harness.plugin.projects, sessionRuntimes: pool,
+    providerHost: harnessPlugin.providerHost, bindSessionTools: harnessPlugin.bindSessionTools, projects: harnessPlugin.projects, sessionRuntimes: pool,
     app,
     getCommittedSettings: () => plugin.settings,
-    settings: {
-      model: 'claude-sonnet-4-5', effortLevel: 'high', permissionMode: 'normal',
-      providerConfigs: { claude: { enabled: true, visibleModels: ['claude-sonnet-4-5'],
-        discoveredModels: [{ value: 'claude-sonnet-4-5', label: 'Sonnet', supportedEffortLevels: ['low', 'high'] }] } },
-    },
+    settings,
     getActiveEnvironmentVariables: () => '',
+    renameConversation: async () => undefined,
     getConversationSummary: () => conversation,
     getConversationSync: () => conversation,
     getConversationById: async () => conversation,

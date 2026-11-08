@@ -12,6 +12,7 @@ export function mountProviderSettings(
   const container = document.body.createDiv();
   const handle = renderer.render(container, {
     plugin: host,
+    renderAgentSkillSettings() {},
     notifyProviderModelOptionsChanged() {},
     renderCustomContextLimits() {},
     ...context,

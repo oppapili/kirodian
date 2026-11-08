@@ -2,7 +2,7 @@
 import '@/providers';
 
 import { deferred } from '@test/helpers/ChatInputHarness';
-import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
+import { createSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { testDate } from '@test/helpers/testClock';
 import { waitFor } from '@testing-library/dom';
@@ -80,7 +80,9 @@ function setup() {
     updateConversation: vi.fn((id: string, patch: ConversationMutablePatch) => repository.update(id, patch)),
     executionPersistence: repository,
   } as unknown as ChatFeatureHost;
-  const pool = installSessionRuntimePool(host);
+  // createSessionRuntimePool no longer assigns the pool onto the host, so wire it in here.
+  const pool = createSessionRuntimePool(() => host);
+  Object.assign(host, { sessionRuntimes: pool });
   const refreshModelControls = vi.fn();
   const service = new SessionMessagingService({ getHost: () => host, getActiveConversationId: () => null, refreshModelControls });
   Object.assign(host, { bindSessionTools: (id: string) => service.bindSessionTools(id) });

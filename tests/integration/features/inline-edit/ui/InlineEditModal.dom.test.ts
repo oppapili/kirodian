@@ -47,21 +47,21 @@ describe('provider and model resolution', () => {
     {
       name: 'uses the enabled settings provider when nothing is selected',
       selection: null,
-      settings: { settingsProvider: 'claude', providerConfigs: { claude: { enabled: false } } },
+      settings: { settingsProvider: 'kiro', providerConfigs: { kiro: { enabled: false } } },
       expectedModel: 'sonnet',
       expectedChip: 'Model: Sonnet, effort High',
     },
     {
       name: 'falls back to the settings provider without the model of a disabled selection',
-      selection: { providerId: 'claude', model: 'sonnet' },
-      settings: { settingsProvider: 'codex', providerConfigs: { claude: { enabled: false } } },
+      selection: { providerId: 'kiro', model: 'sonnet' },
+      settings: { settingsProvider: 'codex', providerConfigs: { kiro: { enabled: false } } },
       expectedModel: 'sonnet',
       expectedChip: 'Model: Sonnet, effort High',
     },
     {
       name: 'uses the selected provider and model',
       selection: { providerId: 'codex', model: 'opus' },
-      settings: { settingsProvider: 'claude' },
+      settings: { settingsProvider: 'kiro' },
       expectedModel: 'opus',
       expectedChip: 'Model: Opus, effort High',
     },
@@ -129,7 +129,7 @@ it('switches provider from the model picker until the first request, then keeps 
 
   fireEvent.click(screen.getByRole('button', { name: 'Model: Sonnet, effort High' }));
   const providers = within(screen.getByRole('dialog', { name: 'Model options' })).getAllByRole('tab');
-  expect(providers.map(tab => tab.getAttribute('aria-label'))).toEqual(['claude', 'codex']);
+  expect(providers.map(tab => tab.getAttribute('aria-label'))).toEqual(['kiro', 'codex']);
   fireEvent.click(within(screen.getByRole('tablist', { name: 'Provider' })).getByRole('tab', { name: 'codex' }));
   fireEvent.click(screen.getByRole('option', { name: 'GPT' }));
   // The chip shows the pick while its provider starts, and an effort chosen meanwhile is kept.
@@ -199,7 +199,7 @@ describe('a submit waiting for a picked provider to start', () => {
 
   it('sends at once on the current provider when a later pick returns to it', async () => {
     const { h, codex, result } = await openWithHeldCodexStart();
-    fireEvent.click(within(screen.getByRole('tablist', { name: 'Provider' })).getByRole('tab', { name: 'claude' }));
+    fireEvent.click(within(screen.getByRole('tablist', { name: 'Provider' })).getByRole('tab', { name: 'kiro' }));
     fireEvent.click(screen.getByRole('option', { name: 'Opus' }));
     await screen.findByRole('button', { name: 'Model: Opus, effort High' });
     submitInstruction();
@@ -216,7 +216,7 @@ it('shows a model or effort pick on the chip without waiting for it to save as t
   const h = await createHarness();
   const saves: Array<() => void> = [];
   const mutateSettings = h.plugin.mutateSettings;
-  h.plugin.mutateSettings = (mutation) => new Promise<void>((resolve) => {
+  h.plugin.mutateSettings = (mutation: (settings: Record<string, unknown>) => void | Promise<void>) => new Promise<void>((resolve) => {
     saves.push(() => { void mutateSettings(mutation).then(resolve); });
   });
   h.createSession().show();
@@ -225,9 +225,9 @@ it('shows a model or effort pick on the chip without waiting for it to save as t
   await screen.findByRole('button', { name: 'Model: Opus, effort High' });
   fireEvent.click(within(screen.getByRole('listbox', { name: 'Thinking' })).getByRole('option', { name: 'Low' }));
   await screen.findByRole('button', { name: 'Model: Opus, effort Low' });
-  expect(h.plugin.settings.inlineEditModel).toBeNull();
+  expect(h.plugin.settings.inlineEditModel).toBeUndefined();
   for (const save of saves) save();
-  await waitFor(() => expect(h.plugin.settings.inlineEditModel).toEqual({ providerId: 'claude', model: 'opus', reasoning: 'low' }));
+  await waitFor(() => expect(h.plugin.settings.inlineEditModel).toEqual({ providerId: 'kiro', model: 'opus', reasoning: 'low' }));
 });
 
 it('keeps the provider when a picked model is not uniquely owned by one enabled provider', async () => {
@@ -241,7 +241,7 @@ it('keeps the provider when a picked model is not uniquely owned by one enabled 
   // Like a new chat, a model both providers own resolves to neither.
   await waitFor(() => expect(Notice).toHaveBeenCalledWith('Select an available model in Claudian settings.'));
   expect(screen.getByRole('button', { name: 'Model: Sonnet, effort High' })).toBeDefined();
-  expect(h.plugin.settings.inlineEditModel).toBeNull();
+  expect(h.plugin.settings.inlineEditModel).toBeUndefined();
   submitInstruction();
   await waitFor(() => expect(h.backend.sessions[0]?.requests).toHaveLength(1));
   expect(codex.sessions).toHaveLength(0);
@@ -502,6 +502,9 @@ it.each([false, true].flatMap(alreadyOpen => [
   h.app.vault.getAbstractFileByPath = vi.fn((path: string) => path === sourcePath ? file : null);
   const leaf = Object.assign(new WorkspaceLeaf(), { getViewState: () => ({ type: 'markdown', state: { file: file.path } }), setEphemeralState: vi.fn() });
   const unrelated = Object.assign(new WorkspaceLeaf(), { getViewState: () => ({ type: 'markdown', state: { file: 'Elsewhere/target.md' } }), setEphemeralState: vi.fn() });
+  // The kiro inline-edit harness app exposes only `vault`; link resolution needs these.
+  h.app.metadataCache = {};
+  h.app.workspace = {};
   h.app.metadataCache.getFirstLinkpathDest = vi.fn((_path: string, source: string) => source === sourcePath ? file : Object.assign(new TFile(), { path: 'Elsewhere/target.md' }));
   Object.assign(h.app.workspace, {
     iterateAllLeaves: (visit: (entry: typeof leaf) => void) => [unrelated, ...(alreadyOpen ? [leaf] : [])].forEach(visit),
@@ -515,7 +518,7 @@ it.each([false, true].flatMap(alreadyOpen => [
     code.textContent = `[[${target}|${label}]]`;
   });
   const session = new InlineEditSession(h.app, h.plugin, h.component, h.editorView, h.editor,
-    { mode: 'selection', selectedText: 'hello' }, sourcePath, h.settled, { providerId: 'claude' });
+    { mode: 'selection', selectedText: 'hello' }, sourcePath, h.settled, { providerId: 'kiro' });
   try {
     session.show();
     submitInstruction();

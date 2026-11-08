@@ -68,7 +68,7 @@ async function stopTurn(events: readonly unknown[]) {
   const streamController = new StreamController({ plugin, state, renderer, subagentManager: subagents,
     getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
   cleanups.push(() => { streamController.dispose(); subagents.clear(); renderer.dispose(); });
-  const fixture = createFixture({ session, state, renderer, streamController, getMessagesEl: () => messagesEl,
+  const fixture = await createFixture({ session, state, renderer, streamController, getMessagesEl: () => messagesEl,
     getTabProviderId: () => 'kiro' });
 
   let sequence = 0;
@@ -79,7 +79,7 @@ async function stopTurn(events: readonly unknown[]) {
   };
   let notifications = 0;
   const host = { state, renderer, createMessageId: () => `notification-${++notifications}` };
-  fixture.coordinator.execute.mockImplementationOnce(async () => {
+  vi.spyOn(fixture.coordinator, 'execute').mockImplementationOnce(async () => {
     await emit({ type: 'turn_started', accepted: true });
     await emit(boundary);
     for (const event of events) {

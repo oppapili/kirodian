@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import '@/providers';
 
-import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
+import { createSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { createHarness, releaseSideChatHarnesses, startSideChat } from '@test/helpers/features/chat/SideChatDOMHarness';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
 import { App, Component } from 'obsidian';
@@ -64,7 +64,8 @@ it('refreshes destination settings when the side panel collapses, expands, and i
     getConversationSync: () => conversation,
     getConversationList: () => [conversation],
   } as unknown as ChatFeatureHost;
-  if (!plugin.sessionRuntimes) installSessionRuntimePool(plugin);
+  // createSessionRuntimePool no longer assigns the pool onto the host, so wire it in here.
+  if (!plugin.sessionRuntimes) Object.assign(plugin, { sessionRuntimes: createSessionRuntimePool(() => plugin) });
   const tab = await createTabRuntime({
     plugin,
     component: Object.assign(new Component(), { registerDomEvent: () => undefined, registerEvent: () => undefined }) as never,

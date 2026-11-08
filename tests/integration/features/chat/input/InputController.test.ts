@@ -8,7 +8,7 @@ import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { decodeSessionMessage } from '@/core/session-tools/sessionMessageEnvelope';
 import type { ToolCallInfo } from '@/core/types';
 
-const nativeCapabilities = ProviderRegistry.getCapabilities('claude');
+const nativeCapabilities = ProviderRegistry.getCapabilities('kiro');
 beforeEach(() => {
   vi.spyOn(ProviderRegistry, 'getCapabilities').mockReturnValue({ ...nativeCapabilities, supportsTurnSteer: true });
   vi.spyOn(ProviderRegistry, 'formatQuestionReply');
@@ -131,7 +131,7 @@ describe('InputController admission', () => {
     vi.clearAllMocks();
     vi.mocked(ProviderRegistry.getCapabilities).mockReturnValue({
       ...nativeCapabilities,
-      providerId: 'claude',
+      providerId: 'kiro',
       supportsFork: true,
       supportsNativeHistory: true,
       supportsTurnSteer: true,

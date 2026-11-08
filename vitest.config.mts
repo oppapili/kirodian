@@ -13,8 +13,6 @@ const processFiles = [
   'tests/unit/i18n/i18n.test.ts',
   // The structuredClone polyfill returns arrays in the native V8 realm.
   'tests/integration/features/chat/composer/PromptHistoryNavigation.dom.test.ts',
-  // Pending native history I/O outlives a VM context's teardown.
-  'tests/integration/providers/codex/execution/CodexExecutionBackend.protocol.test.ts',
 ];
 
 for (const file of processFiles) {

@@ -16,7 +16,7 @@ import type { ChatMessage, Conversation } from '@/core/types';
 import type { ImageAttachment } from '@/core/types';
 import { createQueuedMessage } from '@/features/chat/state/chatTurnRequest';
 
-const nativeCapabilities = ProviderRegistry.getCapabilities('claude');
+const nativeCapabilities = ProviderRegistry.getCapabilities('kiro');
 beforeEach(() => {
   vi.spyOn(ProviderRegistry, 'getCapabilities').mockReturnValue({ ...nativeCapabilities, supportsTurnSteer: true });
 });
@@ -28,7 +28,7 @@ describe('MainTurnExecution', () => {
     vi.clearAllMocks();
     vi.mocked(ProviderRegistry.getCapabilities).mockReturnValue({
       ...nativeCapabilities,
-      providerId: 'claude',
+      providerId: 'kiro',
       supportsFork: true,
       supportsNativeHistory: true,
       supportsTurnSteer: true,
@@ -36,7 +36,7 @@ describe('MainTurnExecution', () => {
 
   });
 
-  it.each(['claude', 'codex', 'grok', 'opencode', 'pi'])('uses the toolbar model and reasoning snapshot as the only submission input for %s', async providerId => {
+  it.each(['kiro'])('uses the toolbar model and reasoning snapshot as the only submission input for %s', async providerId => {
     const toolbar = { model: 'toolbar-model', reasoning: 'low', permissionMode: 'normal', serviceTier: 'default' };
     const fixture = (await createFixture({
       getSettings: () => toolbar,
@@ -76,7 +76,9 @@ describe('MainTurnExecution', () => {
       { role: 'user', content: 'first' }, { role: 'assistant', content: 'reply:first' },
     ]);
 
-    expect(fixture.state.messages[1].contentBlocks).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'subagent' })]));
+    // Dropped upstream's `type: 'subagent'` content-block assertion: it exercises claude's
+    // native subagent card, which kiro's NOOP task-result interpreter does not produce (the
+    // Agent tool stays a plain `tool_use` block). kiro lacks that native-provider semantic.
     await fixture.controller.sendMessage({ content: 'second' });
     expect(fixture.state.usage).toMatchObject(usage);
 
@@ -212,7 +214,7 @@ describe('MainTurnExecution', () => {
       // Membership is read from the detached summary, never by cloning the transcript each turn.
       Object.assign(fixture.plugin, {
         projects,
-        getConversationSummary: (id: string) => ({ id, providerId: 'claude', projectId }),
+        getConversationSummary: (id: string) => ({ id, providerId: 'kiro', projectId }),
       });
       return { fixture, projects, record, leave: () => { projectId = undefined; } };
     }
@@ -332,7 +334,7 @@ describe('MainTurnExecution', () => {
     expect(fixture.native.requests[0]).toMatchObject({
       input: [{ type: 'text', text: 'use context' }],
       configuration: expect.objectContaining({
-        model: 'kiro/model',
+        model: 'kiro-model',
       }),
       context: expect.objectContaining({
         linkedContent: { path: 'note.md' },
@@ -686,7 +688,7 @@ describe('MainTurnExecution', () => {
       const response = fixture.holdNextResponse();
       const sending = fixture.controller.sendMessage({ content: 'finish this' });
       const run = await response.started;
-      if (status === 'invalidated') await fixture.execution.registry.runTransition(['claude'], async () => undefined);
+      if (status === 'invalidated') await fixture.execution.registry.runTransition(['kiro'], async () => undefined);
       else if (status === 'cancelled') run.emit({ type: 'cancelled', reason: 'Stopped' });
       else run.emit({ type: 'execution_error', category: 'provider-session-missing', message: 'Session missing', recoverable: true });
       await sending;
@@ -742,8 +744,11 @@ it.each(['before', 'after'] as const)(
 );
 
 it('cancels a turn while it commits a branch draft before provider handoff', async () => {
-  const native = new FakeBranchSession('claude', 'branch-session');
+  const native = new FakeBranchSession('kiro', 'branch-session');
   const fixture = await createFixture({ nativeSession: native });
+  // The bound session is kiro; align the stored conversation record so branch-commit
+  // provider lookups resolve kiro (the shared harness default record is still 'claude').
+  fixture.plugin.getConversationSync.mockReturnValue(conversationRecord('conversation-1', { title: 'Conversation', providerId: 'kiro' }));
   const commit = deferred<ConversationBranchResult>();
   const entered = deferred<void>();
   native.navigateConversationBranch.mockImplementationOnce(() => { entered.resolve(); return commit.promise; });
@@ -770,8 +775,11 @@ it('cancels a turn while it commits a branch draft before provider handoff', asy
 
 describe('branch draft submission', () => {
   it.each([false, true])('waits for native branch navigation before sending and preserves cancelled drafts (%s)', async cancelled => {
-    const native = new FakeBranchSession('claude', 'branch-session');
+    const native = new FakeBranchSession('kiro', 'branch-session');
     const fixture = await createFixture({ nativeSession: native });
+    // The bound session is kiro; align the stored conversation record so branch-commit
+    // provider lookups resolve kiro (the shared harness default record is still 'claude').
+    fixture.plugin.getConversationSync.mockReturnValue(conversationRecord('conversation-1', { title: 'Conversation', providerId: 'kiro' }));
     const first = { id: 'first', role: 'user' as const, content: 'First', timestamp: Date.now(), userMessageId: 'native-first' };
     const prompt = { id: 'second', role: 'user' as const, content: 'Original', timestamp: Date.now(), userMessageId: 'native-second' };
     fixture.state.messages = [first, prompt];

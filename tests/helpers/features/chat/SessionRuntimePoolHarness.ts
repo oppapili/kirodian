@@ -29,3 +29,17 @@ export function createSessionRuntimePool(
 afterEach(async () => {
   await Promise.allSettled(pools.splice(0).map(pool => pool.dispose()));
 });
+
+/**
+ * Installs a real session-runtime pool onto a view fixture's host, as the
+ * stage-5 fixtures expect: builds the pool through createSessionRuntimePool
+ * and assigns it to `host.sessionRuntimes` so the host reads an installed pool.
+ */
+export function installSessionRuntimePool(
+  plugin: ChatFeatureHost,
+  options: RuntimePoolFixtureOptions = {},
+): SessionRuntimePool {
+  const pool = createSessionRuntimePool(() => plugin, options);
+  Object.assign(plugin, { sessionRuntimes: pool });
+  return pool;
+}

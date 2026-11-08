@@ -26,7 +26,7 @@ it('previews and applies a one-line change to a 10,000-line selected note', asyn
   h.editor.getSelection = () => before;
   h.editor.getCursor = (which = 'head') => which === 'from'
     ? { line: 0, ch: 0 } : { line: lastLine.number - 1, ch: lastLine.length };
-  h.editor.replaceRange = (text, from, to = from) => {
+  h.editor.replaceRange = (text: string, from: { line: number; ch: number }, to: { line: number; ch: number } = from) => {
     const doc = h.editorView.state.doc;
     h.editorView.dispatch({ changes: {
       from: doc.line(from.line + 1).from + from.ch,
@@ -40,7 +40,7 @@ it('previews and applies a one-line change to a 10,000-line selected note', asyn
     target.textContent = markdown;
   });
   const session = new InlineEditSession(h.app, h.plugin, h.component, h.editorView, h.editor,
-    { mode: 'selection', selectedText: before }, h.notePath, h.settled, { providerId: 'claude' });
+    { mode: 'selection', selectedText: before }, h.notePath, h.settled, { providerId: 'kiro' });
   session.show();
   const accept = await showReplacementPreview(h, after);
   await waitFor(() => expect(vi.mocked(MarkdownRenderer.render).mock.calls.map(call => call[1])).toEqual([before, after]));

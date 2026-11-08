@@ -91,7 +91,7 @@ export function createInlineEditHarness() {
   const lifecycle = new ProviderExecutionLifecycleRegistry();
   const owner = new InlineEditSessionOwner();
   ProviderWorkspaceRegistry.clear();
-  const backend = registerFakeInlineEditProvider('claude');
+  const backend = registerFakeInlineEditProvider('kiro');
   const app: any = {
     vault: { adapter: { basePath: '/vault' }, getFiles: () => [], getAllLoadedFiles: () => [] },
   };
@@ -126,7 +126,7 @@ export function createInlineEditHarness() {
   const settled = vi.fn();
   const notePath = 'note.md';
   const createSession = () => new InlineEditSession(
-    app, plugin, plugin, editorView, editor, context, notePath, settled, { providerId: 'claude' },
+    app, plugin, plugin, editorView, editor, context, notePath, settled, { providerId: 'kiro' },
   );
   /** Mirrors Obsidian's editorCallback: a callback editor plus the view that owns the current editor. */
   const createModal = (callbackEditor: any = editor, viewEditor: any = editor) =>
@@ -138,7 +138,9 @@ export function createInlineEditHarness() {
     await lifecycle.dispose();
   });
   return {
-    app, backend, createModal, createSession, editor, editorView, notePath, owner, plugin, settled,
+    app, backend, component: plugin, createModal, createSession, editor, editorView, notePath, owner, plugin, settled,
+    // Reads the live in-memory settings the fixture persists through mutateSettings.
+    settingsStorage: { load: async () => plugin.settings as Record<string, unknown> },
     changeSelection() { end = 11; fireEvent.mouseUp(editorView.dom); },
   };
 }

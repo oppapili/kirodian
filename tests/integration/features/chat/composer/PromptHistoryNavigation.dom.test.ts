@@ -61,9 +61,7 @@ async function createView(provisional = false, options: { managed?: boolean; dra
   vi.spyOn(ProviderRegistry, 'createExecutionBackend').mockReturnValue(backend);
   const app = new App();
   Object.assign(app.vault.adapter, { basePath: '/vault' });
-  Object.assign(app.vault, { on: () => ({}), offref() {} });
-  Object.assign(app.workspace, { getActiveViewOfType: () => null, getActiveFile: () => null, on: () => ({}), offref() {} });
-  Object.assign(app, { metadataCache: { on: () => ({}), offref() {} } });
+  Object.assign(app.workspace, { getActiveViewOfType: () => null, getActiveFile: () => null });
   const lifecycle = new ProviderExecutionLifecycleRegistry();
   const settings = {
     model: 'kiro/claude-sonnet-4-5', effortLevel: 'high', permissionMode: 'manual',
@@ -229,10 +227,11 @@ it.each([false, true])('restores history before the actual View Scope consumes E
     expect(view.tab.dom.inputEl.value).toBe(busy ? 'Running prompt' : 'Previous prompt');
     const native = view.backend.latest;
     const cancellations = native.cancelCalls;
-    const root = createClaudianView({ host: view.plugin, containerEl: view.tab.dom.contentEl,
+    const root = await createClaudianView({ host: view.plugin, containerEl: view.tab.dom.contentEl,
       contentEl: view.tab.dom.contentEl, tabManager: { getActiveTab: () => view.tab } });
-    root.wireEventHandlers();
-    const handler = root.scope.handlers.find((entry: { key: string }) => entry.key === 'Escape');
+    root['wireEventHandlers']();
+    const scope = root.scope as unknown as { handlers: { key: string; func: (event: KeyboardEvent) => boolean }[] };
+    const handler = scope.handlers.find((entry: { key: string }) => entry.key === 'Escape')!;
     const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     // Obsidian consumes a false-returning Scope handler before the same event reaches the DOM.
     expect(handler.func(event)).toBe(false);

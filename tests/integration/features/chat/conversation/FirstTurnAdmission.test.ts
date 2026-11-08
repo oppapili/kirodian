@@ -8,7 +8,7 @@ import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { Conversation } from '@/core/types';
 
-const nativeCapabilities = ProviderRegistry.getCapabilities('claude');
+const nativeCapabilities = ProviderRegistry.getCapabilities('kiro');
 beforeEach(() => {
   vi.spyOn(ProviderRegistry, 'resolveTitleGenerationSelection');
   vi.spyOn(ProviderRegistry, 'getCapabilities').mockReturnValue({ ...nativeCapabilities, supportsTurnSteer: true });
@@ -21,7 +21,7 @@ describe('FirstTurnAdmission', () => {
     vi.clearAllMocks();
     vi.mocked(ProviderRegistry.getCapabilities).mockReturnValue({
       ...nativeCapabilities,
-      providerId: 'claude',
+      providerId: 'kiro',
       supportsFork: true,
       supportsNativeHistory: true,
       supportsTurnSteer: true,
@@ -44,7 +44,7 @@ describe('FirstTurnAdmission', () => {
   });
 
   it('starts title generation independently of the execution session', async () => {
-    vi.mocked(ProviderRegistry.resolveTitleGenerationSelection).mockReturnValueOnce({ providerId: 'claude', model: 'sonnet' });
+    vi.mocked(ProviderRegistry.resolveTitleGenerationSelection).mockReturnValueOnce({ providerId: 'kiro', model: 'sonnet' });
     const generateTitle = vi.fn().mockResolvedValue(undefined);
     const fixture = (await createFixture({
       getTitleGenerationService: () => ({ generateTitle, cancel: vi.fn() }),
@@ -73,7 +73,7 @@ describe('FirstTurnAdmission', () => {
 
     expect(fixture.plugin.createConversation).toHaveBeenCalledWith({
       providerId: 'kiro',
-      selectedModel: 'kiro/model',
+      selectedModel: 'kiro-model',
       linkedContentPath: 'Projects/Plan.md',
     });
     expect(linkedContentController.getSnapshot()).toEqual({ mode: 'locked', path: 'Projects/Plan.md' });
@@ -113,7 +113,7 @@ describe('FirstTurnAdmission', () => {
     await expect(fixture.controller.sendMessage({ content: 'First attempt' })).rejects.toThrow('storage unavailable');
     await fixture.controller.sendMessage({ content: 'Retry' });
 
-    const expected = { providerId: 'kiro', selectedModel: 'kiro/model', projectId: 'project-1' };
+    const expected = { providerId: 'kiro', selectedModel: 'kiro-model', projectId: 'project-1' };
     expect(fixture.plugin.createConversation.mock.calls).toEqual([[expected], [expected]]);
     expect(fixture.state.currentConversationId).toBe('project-conversation');
   });
@@ -222,7 +222,7 @@ it('does not steer Linked content captured while the first turn resolves session
   await waitForCall(fixture.plugin.getConversationById);
   await fixture.controller.sendMessage({ content: 'steered follow-up' });
   source.resolve({
-    id: 'conv-1-source', title: 'Source', providerId: 'claude', sessionId: null, createdAt: 1, lastActivityAt: 2,
+    id: 'conv-1-source', title: 'Source', providerId: 'kiro', sessionId: null, createdAt: 1, lastActivityAt: 2,
     messages: [{ id: 'u', role: 'user', content: 'source prompt', timestamp: 1 }],
   });
   await turn.started;

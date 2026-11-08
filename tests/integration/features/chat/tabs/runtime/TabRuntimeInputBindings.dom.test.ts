@@ -23,6 +23,7 @@ let releaseResponse: () => Promise<void>;
 
 beforeEach(async () => {
   harness = await createHarness();
+  const harnessPlugin = harness.plugin as unknown as ChatFeatureHost;
   const app = new App();
   Object.assign(app.vault.adapter, { basePath: '/vault' });
   const conversation = {
@@ -31,7 +32,7 @@ beforeEach(async () => {
   } as unknown as Conversation;
   const pool = createSessionRuntimePool(() => plugin);
   plugin = await createChatFeatureHost({
-    providerHost: harness.plugin.providerHost, bindSessionTools: harness.plugin.bindSessionTools, projects: harness.plugin.projects, sessionRuntimes: pool, app,
+    providerHost: harnessPlugin.providerHost, bindSessionTools: harnessPlugin.bindSessionTools, projects: harnessPlugin.projects, sessionRuntimes: pool, app,
     getCommittedSettings: () => plugin.settings,
     settings: {
       model: 'claude-sonnet-4-5', permissionMode: 'normal',

@@ -19,6 +19,7 @@ describe('renderProviderModelEnablementWarning', () => {
       container,
       {
         plugin: (await createProviderHostFixture()).host,
+        renderAgentSkillSettings: vi.fn(),
         renderCustomContextLimits: vi.fn(),
         notifyProviderModelOptionsChanged,
       },
