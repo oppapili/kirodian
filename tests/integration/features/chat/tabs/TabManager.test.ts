@@ -1109,7 +1109,8 @@ it('reloads an open tab whose native history changed outside Claudian while anot
   const at = testDate().getTime();
   const native = { revision: 'before', messages: [{ id: 'cached', role: 'assistant' as const, content: 'Cached reply', timestamp: at }] };
   const plugin = await createPlugin({
-    getConversationById: async id => conversationRecord(id, id === 'one' ? { messages: structuredClone(native.messages) } : {}),
+    ...kiroConversationPorts(),
+    getConversationById: async id => conversationRecord(id, { providerId: 'kiro', ...(id === 'one' ? { messages: structuredClone(native.messages) } : {}) }),
   }, { readNativeHistoryRevision: async id => id === 'one' ? native.revision : null });
   const { manager } = await createManager(plugin);
   await manager.restoreState({ openTabs: ['one', 'two'].map(id => ({ tabId: id, conversationId: id })), activeTabId: 'one' });
@@ -1133,11 +1134,12 @@ describe('returning to a tab whose native history changed', () => {
     const at = testDate().getTime();
     const native = { revision: 'before', messages: [{ id: 'cached', role: 'assistant' as const, content: 'Cached reply', timestamp: at }] };
     const plugin = await createPlugin({
+      ...kiroConversationPorts(),
       getConversationById: async id => {
-        if (id !== 'one') return conversationRecord(id);
+        if (id !== 'one') return kiroRecord(id);
         const messages = structuredClone(native.messages);
         await gates.beforeLoad?.();
-        return conversationRecord(id, { messages });
+        return conversationRecord(id, { providerId: 'kiro', messages });
       },
     }, { readNativeHistoryRevision: async id => {
       if (id !== 'one') return null;
