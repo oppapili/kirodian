@@ -144,6 +144,7 @@ vi.mock('@/core/providers/ProviderRegistry', () => ({
     getEnabledProviderIds: vi.fn().mockReturnValue(['claude']),
     getRegisteredProviderIds: vi.fn().mockReturnValue(['claude', 'kiro-alt']),
     getProviderDisplayName: vi.fn().mockReturnValue('Claude'),
+    prepareAssistantMarkdown: vi.fn((_providerId: string, markdown: string) => markdown),
     getTaskResultInterpreter: vi.fn(),
     isEnabled: vi.fn().mockReturnValue(true),
     resolveProviderForModel: vi.fn().mockReturnValue('claude'),
