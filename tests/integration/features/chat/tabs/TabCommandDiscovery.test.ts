@@ -14,8 +14,23 @@ import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 let provider: ReturnType<typeof registerChatTestProvider>;
 beforeEach(() => {
   useNextTaskAnimationFrames();
-  provider = registerChatTestProvider('claude', { models: [{ value: 'claude-default', label: 'Claude' }] });
+  provider = registerChatTestProvider('kiro', { models: [{ value: 'kiro-default', label: 'Kiro' }] });
 });
+
+/**
+ * The shared `conversationRecord` fixture still defaults to the deleted `claude`
+ * provider; a kiro-only registry rejects it when a hydrated conversation binds to
+ * a tab. Route every conversation port through `kiro` records.
+ */
+const kiroRecord = (id: string) => conversationRecord(id, { providerId: 'kiro' });
+const kiroConversationPorts = () => ({
+  getCachedConversation: vi.fn((id: string) => kiroRecord(id)),
+  getConversationById: vi.fn(async (id: string) => kiroRecord(id)),
+  getConversationSync: vi.fn((id: string) => kiroRecord(id)),
+  getConversationSummary: vi.fn((id: string) => kiroRecord(id)),
+});
+const conversationPlugin = (overrides: Parameters<typeof createPlugin>[0] = {}) =>
+  createPlugin({ ...kiroConversationPorts(), ...overrides });
 
 function discoveryFor(tab: AssembledTabRuntime) { return tab.providerCatalogResolver()!.discovery; }
 function reloadDiscovery(tab: AssembledTabRuntime) {
@@ -26,19 +41,19 @@ function reloadDiscovery(tab: AssembledTabRuntime) {
 const command = (name: string): SlashCommand => ({ id: name, name, description: name, content: '', source: 'sdk' });
 
 it('validates cached workspace ownership during command lookup', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await conversationPlugin());
   const tab = (await manager.createTab())!;
   await ProviderWorkspaceRegistry.disposeInitialized();
   const vaultA = await DesktopVault.create();
   onTestFinished(() => vaultA.dispose());
   const hostA = await createFeatureHostFixture({ vault: vaultA });
-  await ProviderWorkspaceRegistry.ensureInitialized(hostA.providerHost, 'claude', 'host-a');
+  await ProviderWorkspaceRegistry.ensureInitialized(hostA.providerHost, 'kiro', 'host-a');
   await expect(reloadDiscovery(tab)).resolves.toMatchObject({ status: 'error' });
   expect(provider.loadCommands).not.toHaveBeenCalled();
 });
 
 it('uses each live provider session command snapshot instead of unrelated discovery state', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await conversationPlugin());
   const first = (await manager.createTab('first'))!;
   const second = (await manager.createTab('second', 'second', { activate: false }))!;
   expect(await first.session.runtime.model.ensureExecutionInitialized()).toBe(true);
@@ -53,7 +68,7 @@ it('uses each live provider session command snapshot instead of unrelated discov
 });
 
 it('runs on-demand command discovery without creating a provider session', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await conversationPlugin());
   const tab = (await manager.createTab())!;
   expect(provider.loadCommands).not.toHaveBeenCalled();
   await expect(reloadDiscovery(tab)).resolves.toMatchObject({ status: 'ready', items: [{ name: 'review' }] });
@@ -62,7 +77,7 @@ it('runs on-demand command discovery without creating a provider session', async
 });
 
 it('does not permit isolated command metadata for a background tab', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await conversationPlugin());
   await manager.createTab();
   const background = (await manager.createTab('background-conversation', 'background', { activate: false }))!;
   await reloadDiscovery(background);
@@ -72,7 +87,7 @@ it('does not permit isolated command metadata for a background tab', async () =>
 });
 
 it('does not admit command observation after its tab becomes inactive during initialization', async () => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await conversationPlugin());
   const first = (await manager.createTab())!;
   const second = (await manager.createTab(null, 'second', { activate: false }))!;
   const discovery = discoveryFor(first);
@@ -89,7 +104,7 @@ it('does not admit command observation after its tab becomes inactive during ini
   initialized.resolve();
   await switching;
   // Joining the same initializer and a discovery request also joins observer admission.
-  await ProviderWorkspaceRegistry.ensureInitialized(plugin.providerHost, 'claude', 'verify');
+  await ProviderWorkspaceRegistry.ensureInitialized(plugin.providerHost, 'kiro', 'verify');
   await reloadDiscovery(second);
   expect(watchCommands).not.toHaveBeenCalled();
   controller.abort();
@@ -97,11 +112,11 @@ it('does not admit command observation after its tab becomes inactive during ini
 
 it('lets provider-owned command discovery outlive the shared deadline', async () => {
   const catalog = new RuntimeCommandCatalog({
-    dropdownConfig: { providerId: 'claude', triggerChars: ['/'], builtInPrefix: '/', skillPrefix: '/', commandPrefix: '/', discoveryTimeoutMs: 'provider-owned' },
-    projectEntry: entry => ({ ...entry, providerId: 'claude', kind: 'command', scope: 'runtime', source: 'sdk', isEditable: false, isDeletable: false, displayPrefix: '/', insertPrefix: '/' }),
+    dropdownConfig: { providerId: 'kiro', triggerChars: ['/'], builtInPrefix: '/', skillPrefix: '/', commandPrefix: '/', discoveryTimeoutMs: 'provider-owned' },
+    projectEntry: entry => ({ ...entry, providerId: 'kiro', kind: 'command', scope: 'runtime', source: 'sdk', isEditable: false, isDeletable: false, displayPrefix: '/', insertPrefix: '/' }),
   });
   provider.workspace.commandCatalog = catalog;
-  const { manager } = await createManager();
+  const { manager } = await createManager(await conversationPlugin());
   const tab = (await manager.createTab())!;
   const started = deferred<void>();
   const reply = deferred<Awaited<ReturnType<ProviderCommandLoader['loadCommands']>>>();
@@ -119,17 +134,17 @@ it('lets provider-owned command discovery outlive the shared deadline', async ()
 });
 
 it('rejects command context loaded for a conversation rebound during lookup', async () => {
-  const plugin = await createPlugin();
+  const plugin = await conversationPlugin();
   const { manager } = await createManager(plugin);
   const tab = (await manager.createTab('conversation-a'))!;
   const lookup = deferred<void>();
   const firstLookup = deferred<Conversation | null>();
-  const conversationB = conversationRecord('conversation-b');
+  const conversationB = kiroRecord('conversation-b');
   vi.spyOn(plugin, 'getConversationById').mockImplementationOnce(() => { lookup.resolve(); return firstLookup.promise; }).mockResolvedValue(conversationB);
   const staleDiscovery = reloadDiscovery(tab);
   await lookup.promise;
   await manager.openConversation('conversation-b');
-  firstLookup.resolve(conversationRecord('conversation-a'));
+  firstLookup.resolve(kiroRecord('conversation-a'));
   await expect(staleDiscovery).resolves.toMatchObject({ status: 'error', retryable: true });
   expect(provider.loadCommands).not.toHaveBeenCalled();
   await expect(reloadDiscovery(manager.getActiveTab()!)).resolves.toMatchObject({ status: 'ready', items: [{ name: 'review' }] });
@@ -137,12 +152,12 @@ it('rejects command context loaded for a conversation rebound during lookup', as
 });
 
 it('reloads cached commands after the provider lifecycle generation advances', async () => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await conversationPlugin());
   const tab = (await manager.createTab())!;
   await expect(reloadDiscovery(tab)).resolves.toMatchObject({ status: 'ready' });
   await expect(reloadDiscovery(tab)).resolves.toMatchObject({ status: 'ready' });
   expect(provider.loadCommands).toHaveBeenCalledTimes(1);
-  await plugin.providerHost.executionLifecycleRegistry.runTransition(['claude'], async () => undefined);
+  await plugin.providerHost.executionLifecycleRegistry.runTransition(['kiro'], async () => undefined);
   await expect(reloadDiscovery(tab)).resolves.toMatchObject({ status: 'ready' });
   expect(provider.loadCommands).toHaveBeenCalledTimes(2);
 });
@@ -151,11 +166,11 @@ it('rejects an old command result from the cache across a provider lifecycle tra
   const started = deferred<void>();
   const reply = deferred<Awaited<ReturnType<ProviderCommandLoader['loadCommands']>>>();
   provider.loadCommands.mockImplementationOnce(() => { started.resolve(); return reply.promise; });
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await conversationPlugin());
   const tab = (await manager.createTab())!;
   const oldLoad = reloadDiscovery(tab);
   await started.promise;
-  await plugin.providerHost.executionLifecycleRegistry.runTransition(['claude'], async () => undefined);
+  await plugin.providerHost.executionLifecycleRegistry.runTransition(['kiro'], async () => undefined);
   reply.resolve({ status: 'ready', items: [command('old')] });
   await expect(oldLoad).resolves.toMatchObject({ status: 'ready', items: [{ name: 'old' }] });
   provider.loadCommands.mockResolvedValueOnce({ status: 'ready', items: [command('fresh')] });
@@ -164,7 +179,7 @@ it('rejects an old command result from the cache across a provider lifecycle tra
 });
 
 it('does not start command discovery after its tab begins closing', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await conversationPlugin());
   await manager.createTab();
   const closing = (await manager.createTab())!;
   const discovery = discoveryFor(closing);

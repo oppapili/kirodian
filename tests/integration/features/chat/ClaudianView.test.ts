@@ -23,7 +23,7 @@ import { createChatTabCommands } from '@/features/chat/workspace/ChatTabCommands
 
 beforeEach(() => {
   useNextTaskAnimationFrames();
-  registerChatTestProvider('claude');
+  registerChatTestProvider('kiro');
 });
 
 const { Scope: HostScope } = await vi.importActual<typeof import('@test/__mocks__/obsidian')>('obsidian');
@@ -34,7 +34,7 @@ async function createView(options: {
   width?: number;
   host?: Omit<NonNullable<NonNullable<Parameters<typeof createSessionBrowserHost>[0]>['host']>, 'fixture' | 'app'>;
 } = {}) {
-  const records = ['one', 'two'].map(id => conversationRecord(id));
+  const records = ['one', 'two'].map(id => conversationRecord(id, { providerId: 'kiro' }));
   const { settings, ...overrides } = options.host ?? {};
   const fixture = await createFeatureHostFixture({ settings: { restoreTabsOnStartup: true, enableAutoTitleGeneration: false, ...settings } });
   const { plugin, pool } = await createSessionBrowserHost({ conversations: records.map(record => ({ ...record, messageCount: 0, preview: '' })), host: {
@@ -247,23 +247,28 @@ describe('ClaudianView real tab lifecycle', () => {
 
 describe('ClaudianView provider and presentation wiring', () => {
   it('refreshes changed-provider controls and every blank tab, then refreshes all providers on a global change', async () => {
-    registerChatTestProvider('codex');
-    registerChatTestProvider('grok');
-    const { view, manager, records } = await openView({ host: { settings: { providerConfigs: { codex: { enabled: true }, grok: { enabled: true } } } } });
-    records[0].providerId = 'codex';
-    records[1].providerId = 'grok';
-    const codex = (await manager.createTab('one'))!;
-    const grok = (await manager.createTab('two'))!;
-    const blank = (await manager.createTab(null, undefined, { providerId: 'grok' }))!;
-    const refreshCodex = vi.spyOn(codex, 'refreshProviderControls');
-    const refreshGrok = vi.spyOn(grok, 'refreshProviderControls');
+    // Kirodian ships only the 'kiro' provider; upstream exercised selectivity across
+    // codex/grok. We prove the same skip/refresh branches with 'kiro' conversation tabs:
+    // a changed id of 'kiro' matches the conversation tab, an unregistered id does not,
+    // and a blank tab refreshes regardless of the changed provider.
+    const { view, manager, records } = await openView();
+    records[0].providerId = 'kiro';
+    records[1].providerId = 'kiro';
+    const matching = (await manager.createTab('one'))!;
+    const blank = (await manager.createTab(null, undefined, { providerId: 'kiro' }))!;
+    const refreshMatching = vi.spyOn(matching, 'refreshProviderControls');
     const refreshBlank = vi.spyOn(blank, 'refreshProviderControls');
-    view.refreshModelSelector('codex');
-    expect(refreshCodex).toHaveBeenCalledTimes(1);
-    expect(refreshGrok).not.toHaveBeenCalled();
+    // An unregistered changed provider must skip the kiro conversation tab but still refresh the blank tab.
+    view.refreshModelSelector('unavailable' as never);
+    expect(refreshMatching).not.toHaveBeenCalled();
     expect(refreshBlank).toHaveBeenCalledTimes(1);
+    // The matching provider refreshes its conversation tab too.
+    view.refreshModelSelector('kiro');
+    expect(refreshMatching).toHaveBeenCalledTimes(1);
+    // A global change refreshes every tab regardless of provider.
     view.refreshModelSelector();
-    expect(refreshGrok).toHaveBeenCalledTimes(1);
+    expect(refreshMatching).toHaveBeenCalledTimes(2);
+    expect(refreshBlank).toHaveBeenCalledTimes(3);
   });
 
   it('moves the composer and chip placement with the real compact/wide transition and keeps the sidebar after the chat panel', async () => {
@@ -532,7 +537,7 @@ describe('ClaudianView composer and scoped keys', () => {
       fireEvent.click(button);
       isOpen = () => button.getAttribute('aria-expanded') === 'true';
     } else if (surface === 'resume') {
-      await tab.controllers.builtInCommandController.execute(BUILT_IN_COMMANDS.find(command => command.action === 'resume')!, ProviderRegistry.getCapabilities('claude'));
+      await tab.controllers.builtInCommandController.execute(BUILT_IN_COMMANDS.find(command => command.action === 'resume')!, ProviderRegistry.getCapabilities('kiro'));
       isOpen = () => tab.controllers.builtInCommandController.isResumeDropdownVisible();
     } else if (surface === 'composer') {
       tab.dom.inputEl.value = '/';
@@ -593,10 +598,10 @@ describe('ClaudianView composer and scoped keys', () => {
 
 
   it('scoped Escape stops published provider background work without a foreground turn', async () => {
-    const native = registerChatTestProvider('claude');
+    const native = registerChatTestProvider('kiro');
     const { view, manager } = await openView();
     const tab = manager.getActiveTab()!;
-    await tab.executionCoordinator.bindConversation({ conversationId: 'one', providerId: 'claude' });
+    await tab.executionCoordinator.bindConversation({ conversationId: 'one', providerId: 'kiro' });
     await tab.executionCoordinator.prepare();
     const session = native.sessions[0];
     session.emit({ type: 'background_turn_started', scope: { kind: 'background', sessionInstanceId: session.sessionInstanceId, turnId: 'background', sequence: 1 } });

@@ -6,19 +6,53 @@ import { fireEvent, within } from '@testing-library/dom';
 
 import { BUILT_IN_COMMANDS } from '@/core/commands/builtInCommands';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
+import type { Conversation } from '@/core/types';
 
 beforeEach(() => {
   useNextTaskAnimationFrames();
-  registerChatTestProvider('claude', { models: [{ value: 'claude-default', label: 'Claude' }] });
+  registerChatTestProvider('kiro', { models: [{ value: 'kiro-default', label: 'Kiro' }] });
 });
+
+/**
+ * The shared `conversationRecord` fixture still defaults to the deleted `claude`
+ * provider; a kiro-only registry rejects it when a hydrated conversation binds to
+ * a tab. Route every conversation port through `kiro` records.
+ */
+const kiroRecord = (id: string) => conversationRecord(id, { providerId: 'kiro' });
+const kiroConversationPorts = () => ({
+  getCachedConversation: vi.fn((id: string) => kiroRecord(id)),
+  getConversationById: vi.fn(async (id: string) => kiroRecord(id)),
+  getConversationSync: vi.fn((id: string) => kiroRecord(id)),
+  getConversationSummary: vi.fn((id: string) => kiroRecord(id)),
+});
+const conversationPlugin = (overrides: Parameters<typeof createPlugin>[0] = {}) =>
+  createPlugin({ ...kiroConversationPorts(), ...overrides });
+
+/**
+ * Mirror the harness `holdHistory` but resolve a `kiro` record on release, so a
+ * tab binding the navigated conversation does not reject the identity swap.
+ */
+function holdKiroHistory(plugin: Parameters<typeof holdHistory>[0], conversationId: string) {
+  const started = deferred<void>();
+  const reply = deferred<Conversation | null>();
+  const current = plugin.getConversationById;
+  const original = (vi.isMockFunction(current) ? current.getMockImplementation()! : current).bind(plugin);
+  const read = vi.spyOn(plugin, 'getConversationById').mockImplementation(id => {
+    if (id !== conversationId) return original(id);
+    started.resolve();
+    return reply.promise;
+  });
+  read.mockClear();
+  return { started: started.promise, release: () => reply.resolve(kiroRecord(conversationId)), read };
+}
 
 it('lets the layout open a session picked through the real tab command before rebinding the source', async () => {
   const picked = deferred<void>();
   const openPicked = vi.fn(async () => { picked.resolve(); return true; });
-  const plugin = await createPlugin({ getConversationList: () => [{ ...conversationRecord('conversation-2'), messageCount: 0, preview: '' }] });
+  const plugin = await conversationPlugin({ getConversationList: () => [{ ...conversationRecord('conversation-2'), messageCount: 0, preview: '' }] });
   const { manager } = await createManager(plugin, {}, {}, { openPicked });
   const source = (await manager.createTab('conversation-1'))!;
-  await source.controllers.builtInCommandController.execute(BUILT_IN_COMMANDS.find(command => command.action === 'resume')!, ProviderRegistry.getCapabilities('claude'));
+  await source.controllers.builtInCommandController.execute(BUILT_IN_COMMANDS.find(command => command.action === 'resume')!, ProviderRegistry.getCapabilities('kiro'));
   fireEvent.click(within(source.dom.contentEl).getByText('conversation-2', { exact: true }));
   await picked.promise;
   await manager.waitForTabSwitchIdle();
@@ -28,7 +62,7 @@ it('lets the layout open a session picked through the real tab command before re
 });
 
 it('reuses an inactive conversation locally and closes another restored tab without assembling it', async () => {
-  const { manager, root } = await createManager();
+  const { manager, root } = await createManager(await conversationPlugin());
   await manager.restoreState({ openTabs: ['one', 'two', 'three'].map(id => ({ tabId: id, conversationId: id })), activeTabId: 'one' });
   await manager.closeTab('three');
   expect(manager.getAllTabs()).toHaveLength(1);
@@ -40,7 +74,7 @@ it('reuses an inactive conversation locally and closes another restored tab with
 });
 
 it.each([false, true])('reuses a cold cross-view owner using its layout (wide: %s)', async wide => {
-  const plugin = await createPlugin();
+  const plugin = await conversationPlugin();
   const other = await createManager(plugin, {}, {}, { showsPreviews: () => wide });
   await other.manager.restoreState({ openTabs: ['one', 'two'].map(id => ({ tabId: id, conversationId: id })), activeTabId: 'one' });
   const local = await createManager(plugin);
@@ -55,10 +89,10 @@ it.each([false, true])('reuses a cold cross-view owner using its layout (wide: %
 });
 
 it('keeps a queued open-conversation intent bound to its source runtime', async () => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await conversationPlugin());
   const retained = (await manager.createTab())!;
   const source = (await manager.createTab())!;
-  const hydration = holdHistory(plugin, 'blocking');
+  const hydration = holdKiroHistory(plugin, 'blocking');
   const blocking = manager.openConversation('blocking');
   await hydration.started;
   const queued = navigationOwner(manager).open('stale-conversation', {}, source);
@@ -71,7 +105,7 @@ it('keeps a queued open-conversation intent bound to its source runtime', async 
 });
 
 it('ignores a matching local tab after its close has begun', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await conversationPlugin());
   const closing = (await manager.createTab('conversation-1'))!;
   const source = (await manager.createTab())!;
   const close = manager.closeTab(closing.id);
@@ -82,7 +116,7 @@ it('ignores a matching local tab after its close has begun', async () => {
 });
 
 it('falls back locally when an attached owner closes during its awaited reveal', async () => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await conversationPlugin());
   const source = (await manager.createTab())!;
   const target = (await manager.createTab('conversation-1', undefined, { activate: false }))!;
   const revealing = deferred<void>();
@@ -97,10 +131,10 @@ it('falls back locally when an attached owner closes during its awaited reveal',
 });
 
 it('accepts the attached owner while a close the manager does not own is only beginning', async () => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await conversationPlugin());
   const source = (await manager.createTab())!;
   const target = (await manager.createTab('conversation-1', undefined, { activate: false }))!;
-  const hydration = holdHistory(plugin, 'conversation-1');
+  const hydration = holdKiroHistory(plugin, 'conversation-1');
   const navigation = manager.openConversation('conversation-1');
   await hydration.started;
   target.session.beginClose();
@@ -113,7 +147,7 @@ it('accepts the attached owner while a close the manager does not own is only be
 
 it('uses a live replacement when the active tab is already closing', async () => {
   const replacementCreated = deferred<string>();
-  const { manager } = await createManager(await createPlugin(), { onTabCreated: tab => { if (!tab.conversationId) replacementCreated.resolve(tab.id); } });
+  const { manager } = await createManager(await conversationPlugin(), { onTabCreated: tab => { if (!tab.conversationId) replacementCreated.resolve(tab.id); } });
   const closing = (await manager.createTab('conversation-1'))!;
   const close = manager.closeTab(closing.id);
   const replacementId = await replacementCreated.promise;
@@ -124,7 +158,7 @@ it('uses a live replacement when the active tab is already closing', async () =>
 });
 
 async function crossView() {
-  const plugin = await createPlugin();
+  const plugin = await conversationPlugin();
   const other = await createManager(plugin);
   await other.manager.restoreState({ openTabs: [{ tabId: 'other-active', conversationId: null }, { tabId: 'other-target', conversationId: 'cross-view' }], activeTabId: 'other-active' });
   const local = await createManager(plugin);
@@ -167,7 +201,7 @@ it('revalidates cross-view ownership after revealing the target', async () => {
 it('falls back locally when a cross-view target closes during its awaited focus', async () => {
   const { plugin, other, local } = await crossView();
   const source = (await local.manager.createTab())!;
-  const hydration = holdHistory(plugin, 'cross-view');
+  const hydration = holdKiroHistory(plugin, 'cross-view');
   const navigation = local.manager.openConversation('cross-view');
   await hydration.started;
   const close = other.manager.closeTab('other-target');
@@ -189,7 +223,7 @@ it('does not treat a close-claimed cold tab in another view as the owner', async
 });
 
 it.each([false, true])('honors the latest navigation after an attached owner finishes closing (cross-view: %s)', async crossViewOwner => {
-  const plugin = await createPlugin();
+  const plugin = await conversationPlugin();
   const local = await createManager(plugin);
   const owner = crossViewOwner ? await createManager(plugin) : local;
   const target = (await owner.manager.createTab('closing'))!;
@@ -220,10 +254,10 @@ it.each([false, true])('honors the latest navigation after an attached owner fin
 });
 
 it('joins a close whose successor activation is waiting for history, then reopens the released session', async () => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await conversationPlugin());
   const successor = (await manager.createTab('successor', undefined, { activate: false }))!;
   const closing = (await manager.createTab('closing'))!;
-  const hydration = holdHistory(plugin, 'successor');
+  const hydration = holdKiroHistory(plugin, 'successor');
   const close = manager.closeTab(closing.id);
   await hydration.started;
   const navigation = manager.openConversation('closing');
@@ -234,7 +268,7 @@ it('joins a close whose successor activation is waiting for history, then reopen
 });
 
 it('reopens locally after an already attached owner in another view completes its close', async () => {
-  const plugin = await createPlugin();
+  const plugin = await conversationPlugin();
   const other = await createManager(plugin);
   const closing = (await other.manager.createTab('cross-view'))!;
   await other.manager.createTab();
@@ -249,7 +283,7 @@ it('reopens locally after an already attached owner in another view completes it
 });
 
 it('does not join its own close while a duplicate cold successor tries to reveal that attachment', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await conversationPlugin());
   await manager.restoreState({ openTabs: [
     { tabId: 'one', conversationId: 'same-conversation' },
     { tabId: 'two', conversationId: 'same-conversation' },

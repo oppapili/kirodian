@@ -27,7 +27,7 @@ function conversation(id: string, overrides: Partial<ConversationMeta> = {}): Co
   const at = testDate({ hours: -1 }).getTime();
   return {
     id,
-    providerId: 'claude',
+    providerId: 'kiro',
     title: id,
     createdAt: at,
     lastActivityAt: at,
@@ -624,8 +624,8 @@ describe('SessionManagerSurface session column rendering', () => {
   });
 
   it('formats persisted model metadata for the session hover card', async () => {
-    registerChatTestProvider('codex', { models: [
-      { value: 'gpt-5.1-codex', label: 'GPT-5.1 Codex' },
+    registerChatTestProvider('kiro', { models: [
+      { value: 'kiro-model', label: 'Kiro Model' },
     ] });
     const render = vi.spyOn(SessionBrowser.prototype, 'renderHistoryDropdown');
     const h = await createHarness({ conversations: [conversation('first')] });
@@ -633,8 +633,8 @@ describe('SessionManagerSurface session column rendering', () => {
     h.surface.renderSidebar();
 
     const { getModelLabel } = render.mock.calls[0][1];
-    expect(getModelLabel!(conversation('first', { providerId: 'codex', selectedModel: 'gpt-5.1-codex' })))
-      .toBe('GPT-5.1 Codex');
+    expect(getModelLabel!(conversation('first', { providerId: 'kiro', selectedModel: 'kiro-model' })))
+      .toBe('Kiro Model');
   });
 
   it('ignores malformed persisted model metadata in the session hover card', async () => {

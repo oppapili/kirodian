@@ -640,7 +640,7 @@ it.each([false, true])('keeps side drafts separate while a branch submission set
   let conversation!: ConversationController;
   const routing = createRouting(harness, {}, undefined, deps => {
     conversation = new ConversationController({
-      ...deps, plugin: { settings: {}, updateConversation: vi.fn(), getConversationSummary: () => null, projects: createProjectsFake(), providerHost: { workingDirectory: '/vault' } },
+      ...deps, plugin: { settings: {}, updateConversation: vi.fn(), getConversationSummary: (id: string) => ({ id, providerId: 'kiro' }), projects: createProjectsFake(), providerHost: { workingDirectory: '/vault' } },
       renderer: { renderMessages: vi.fn(), refreshBranchButtonState: vi.fn(), captureReadingAnchor: () => null, restoreReadingAnchor: vi.fn() },
       setWelcomeEl: vi.fn(), getExecutionCoordinator: () => coordinator,
     } as any);

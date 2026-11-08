@@ -4,6 +4,8 @@ import { DesktopVault } from '@test/helpers/core/DesktopVault';
 import { clearWriteFaults, failWritesUnder } from '@test/helpers/core/fsWriteFaults';
 import { testDate } from '@test/helpers/testClock';
 
+import { DEFAULT_CLAUDIAN_SETTINGS } from '@test/helpers/defaultSettings';
+
 import { ConversationRepository } from '@/app/conversations/ConversationRepository';
 import { ProjectService } from '@/app/projects/ProjectService';
 import { ProjectStore } from '@/app/projects/ProjectStore';
@@ -12,6 +14,7 @@ import { getDeviceSessionsPath, SESSIONS_PATH } from '@/core/bootstrap/storagePa
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import type { SessionMetadata } from '@/core/types';
+import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 
 vi.mock('node:fs/promises', async () => {
   const { createFsPromisesWithWriteFaults } = await vi.importActual<typeof import('@test/helpers/core/fsWriteFaults')>('@test/helpers/core/fsWriteFaults');
@@ -24,11 +27,29 @@ let store: ConversationPersistenceStore;
 let projects: ProjectService;
 let repository: ConversationRepository;
 
+// Kiro is catalog-driven: seed a visible 'sonnet' model so stored selections
+// normalize to the real 'kiro/sonnet' id and survive reconcileSelectedModels.
+// The upstream 'claude' provider resolved a bare 'sonnet' without a catalog;
+// kiro requires the catalog entry.
+function kiroSettings(): Record<string, unknown> {
+  const settings = structuredClone(DEFAULT_CLAUDIAN_SETTINGS);
+  updateCurrentKiroCatalog(settings, {
+    defaultModelId: 'sonnet',
+    fingerprint: 'test-fingerprint',
+    refreshedAt: 0,
+    models: [
+      { rawId: 'sonnet', displayName: 'Sonnet', description: '', reasoningEfforts: [], supportsReasoning: false },
+    ],
+  });
+  updateKiroProviderSettings(settings, { enabled: true, visibleModels: ['sonnet'] });
+  return settings as unknown as Record<string, unknown>;
+}
+
 function createRepository(): ConversationRepository {
   return new ConversationRepository({
     providers: ProviderRegistry,
     providerSettings: ProviderSettingsCoordinator,
-    getSettings: () => ({}),
+    getSettings: kiroSettings,
     getVaultPath: () => vault.root,
     persistence: store,
     onConversationDeleted: async () => undefined,
@@ -63,7 +84,7 @@ afterEach(async () => {
 
 test('creates normalized Linked content that survives storage and repository reload', async () => {
   const conversation = await repository.create({
-    sessionId: 'linked-content-session', selectedModel: 'sonnet',
+    sessionId: 'linked-content-session', selectedModel: 'kiro/sonnet',
     linkedContentPath: 'Projects\\Research//Plan.md',
   });
   expect(await readMetadata(conversation.id)).toMatchObject({ id: conversation.id, linkedContentPath: 'Projects/Research/Plan.md' });
@@ -71,7 +92,7 @@ test('creates normalized Linked content that survives storage and repository rel
   const reloaded = createRepository();
   await adoptStored(reloaded);
   expect(reloaded.getSync(conversation.id)!.linkedContentPath).toBe('Projects/Research/Plan.md');
-  expect(reloaded.list()[0]).toMatchObject({ linkedContentPath: 'Projects/Research/Plan.md', selectedModel: 'sonnet' });
+  expect(reloaded.list()[0]).toMatchObject({ linkedContentPath: 'Projects/Research/Plan.md', selectedModel: 'kiro/sonnet' });
 });
 
 test('rejects invalid creation before writing and removes a failed creation before retry', async () => {
@@ -102,7 +123,7 @@ test('persists pin and archive changes without treating metadata or snapshots as
   await repository.rename(id, 'Renamed');
   repository.registerExecutionBinding(id, 'binding-1', 1);
   await repository.persistExecutionSnapshot(id, 'binding-1', 1, {
-    providerId: 'claude', revision: 1, providerSessionId: 'native-session', status: 'idle',
+    providerId: 'kiro', revision: 1, providerSessionId: 'native-session', status: 'idle',
   });
   expect(await readMetadata(id)).toMatchObject({ title: 'Renamed', lastActivityAt });
   expect(repository.getSync(id)!.lastActivityAt).toBe(lastActivityAt);
@@ -141,11 +162,11 @@ test('persists exact and descendant renames, including late metadata, without re
   const folder = await repository.create({ linkedContentPath: 'Projects/Old/Plan.md' });
   const unrelated = await repository.create({ linkedContentPath: 'Notes/Other.md' });
   await store.saveMetadata({
-    id: 'late', providerId: 'claude', title: 'Late', selectedModel: 'sonnet',
+    id: 'late', providerId: 'kiro', title: 'Late', selectedModel: 'kiro/sonnet',
     linkedContentPath: 'Notes/Old.md', createdAt: testDate().getTime(), lastActivityAt: testDate().getTime(),
   });
   await store.saveMetadata({
-    id: 'late-direct', providerId: 'claude', title: 'Direct adoption', selectedModel: 'sonnet',
+    id: 'late-direct', providerId: 'kiro', title: 'Direct adoption', selectedModel: 'kiro/sonnet',
     linkedContentPath: 'Notes/Old.md', createdAt: testDate().getTime(), lastActivityAt: testDate().getTime(),
   });
   await repository.rewriteLinkedContentPaths('Notes/Old.md', 'Notes/New.md');
@@ -153,7 +174,7 @@ test('persists exact and descendant renames, including late metadata, without re
   const published = (await store.metadataReader.load('late'))!;
   // SessionMetadataLoader publishes each scan batch before the final durable adoption.
   repository.mergeMetadataConversations([{
-    ...published.metadata, providerId: 'claude', sessionId: null, messages: [],
+    ...published.metadata, providerId: 'kiro', sessionId: null, messages: [],
   }]);
   expect(repository.getSync('late')!.linkedContentPath).toBe('Notes/New.md');
   expect((await readMetadata('late')).linkedContentPath).toBe('Notes/Old.md');
@@ -175,7 +196,7 @@ test('persists exact and descendant renames, including late metadata, without re
 
 test('retains unscoped write authority after a failed assignment and switches only after a durable move', async () => {
   const id = 'unscoped';
-  await store.saveMetadata({ id, providerId: 'claude', title: 'Original', selectedModel: 'sonnet',
+  await store.saveMetadata({ id, providerId: 'kiro', title: 'Original', selectedModel: 'kiro/sonnet',
     createdAt: testDate().getTime(), lastActivityAt: testDate().getTime() }, 'unscoped');
   await adoptStored();
   const rename = vi.spyOn(vault.app.vault.adapter, 'rename').mockRejectedValueOnce(new Error('rename failed'));
@@ -206,7 +227,7 @@ test('migrates timestamps and Linked content without losing unhydrated provider 
   } };
   const lastActivityAt = testDate({ minutes: -1 }).getTime();
   await vault.write(`${devicePath}/legacy.meta.json`, JSON.stringify({
-    id: 'legacy', providerId: 'claude', title: 'Legacy', selectedModel: 'sonnet',
+    id: 'legacy', providerId: 'kiro', title: 'Legacy', selectedModel: 'kiro/sonnet',
     createdAt: testDate({ minutes: -2 }).getTime(), lastResponseAt: lastActivityAt,
     currentNote: 'Notes\\Architecture.md', providerState,
   }));

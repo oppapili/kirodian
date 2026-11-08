@@ -22,13 +22,24 @@ vi.mock('@/shared/settings/EnvironmentSettingsSection', () => ({ renderEnvironme
 vi.mock('obsidian', async () => {
   const dom = (await vi.importActual<typeof import('@test/helpers/ObsidianSettingsDOM')>('@test/helpers/ObsidianSettingsDOM'));
   class Setting extends dom.Setting {
+    // AccessibleSetting (the merged src subclass) reads nameEl.id / .hasAttribute
+    // / .setAttribute in nameControl() and setHeading(); the final
+    // ObsidianSettingsDOM.Setting omits nameEl, so provide a real element.
+    readonly nameEl = this.settingEl.appendChild(document.createElement('div'));
     setHeading() { return this; }
     addToggle(callback: (control: unknown) => void) {
-      const toggleEl = this.settingEl.createEl('input', { attr: { type: 'checkbox' } });
+      // exposeToggleState (merged AccessibleSetting) reads toggleEl.querySelector('input')
+      // and control.getValue()/setDisabled(), so model the obsidian label>input shape.
+      const toggleEl = this.settingEl.createEl('label');
+      const input = toggleEl.createEl('input', { attr: { type: 'checkbox' } });
+      let disabled = false;
       const toggle = {
         toggleEl,
-        setValue(value: boolean) { toggleEl.checked = value; return this; },
-        onChange(change: (value: boolean) => void) { toggleEl.addEventListener('change', () => change(toggleEl.checked)); return this; },
+        get disabled() { return disabled; },
+        getValue() { return input.checked; },
+        setValue(value: boolean) { input.checked = value; return this; },
+        setDisabled(value: boolean) { disabled = value; input.disabled = value; return this; },
+        onChange(change: (value: boolean) => void) { input.addEventListener('change', () => change(input.checked)); return this; },
       };
       callback(toggle); return this;
     }

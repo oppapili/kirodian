@@ -15,7 +15,7 @@ import { TabManager } from '@/features/chat/tabs/TabManager';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
 async function createNavigation() {
-  const records = ['active', 'local', 'cross', 'shared'].map(id => conversationRecord(id));
+  const records = ['active', 'local', 'cross', 'shared'].map(id => conversationRecord(id, { providerId: 'kiro' }));
   const views: ChatViewHost[] = [];
   const { plugin, pool } = await createSessionBrowserHost({ host: {
     executionPersistence: createExecutionHarness().repository,
@@ -56,7 +56,7 @@ it.each(['same-view', 'other-view'] as const)('disables archive for a running se
   try {
     const status = fixture.navigation.getConversationStatus('shared');
     const actions = resolveRowActions('menu', {
-      conversation: { ...conversationRecord('shared'), messageCount: 0, preview: '' }, status, attention: null,
+      conversation: { ...conversationRecord('shared', { providerId: 'kiro' }), messageCount: 0, preview: '' }, status, attention: null,
     }, { sessionActionMode: 'active', onSelectConversation: vi.fn(), onRerender: vi.fn() });
     expect(status.openState).toBe(location === 'same-view' ? 'current' : 'open');
     expect(status.location).toBe(location === 'same-view' ? 'current-view' : 'other-view');

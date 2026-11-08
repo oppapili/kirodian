@@ -13,12 +13,46 @@ import type { TabManager } from '@/features/chat/tabs/TabManager';
 let provider: ReturnType<typeof registerChatTestProvider>;
 beforeEach(() => {
   useNextTaskAnimationFrames();
-  provider = registerChatTestProvider('claude', { models: [{ value: 'claude-default', label: 'Claude' }, { value: 'claude-alternate', label: 'Alternate' }] });
+  provider = registerChatTestProvider('kiro', { models: [{ value: 'kiro-default', label: 'Kiro' }, { value: 'kiro-alternate', label: 'Alternate' }] });
 });
+
+/**
+ * The shared `conversationRecord` fixture still defaults to the deleted `claude`
+ * provider; a kiro-only registry rejects it when a hydrated conversation binds to
+ * a tab. Build a plugin whose conversation ports hand back `kiro` records so the
+ * provider resolves during rebind/hydration.
+ */
+const kiroRecord = (id: string) => conversationRecord(id, { providerId: 'kiro' });
+const kiroConversationPorts = () => ({
+  getCachedConversation: vi.fn((id: string) => kiroRecord(id)),
+  getConversationById: vi.fn(async (id: string) => kiroRecord(id)),
+  getConversationSync: vi.fn((id: string) => kiroRecord(id)),
+  getConversationSummary: vi.fn((id: string) => kiroRecord(id)),
+});
+const kiroPlugin = (overrides: Parameters<typeof createPlugin>[0] = {}) =>
+  createPlugin({ ...kiroConversationPorts(), ...overrides });
+
+/**
+ * Mirror the harness `holdHistory` but resolve a `kiro` record on release. The
+ * shared helper releases a `claude` record, which a kiro-only session rejects as
+ * an identity replacement when the blank tab binds the navigated conversation.
+ */
+function holdKiroHistory(plugin: Parameters<typeof holdHistory>[0], conversationId: string) {
+  const started = deferred<void>();
+  const reply = deferred<Conversation | null>();
+  const current = plugin.getConversationById;
+  const original = (vi.isMockFunction(current) ? current.getMockImplementation()! : current).bind(plugin);
+  vi.spyOn(plugin, 'getConversationById').mockImplementation(id => {
+    if (id !== conversationId) return original(id);
+    started.resolve();
+    return reply.promise;
+  });
+  return { started: started.promise, release: () => reply.resolve(kiroRecord(conversationId)) };
+}
 
 
   it('leaves the first tab inactive when activation is explicitly disabled', async () => {
-    const { manager } = await createManager();
+    const { manager } = await createManager(await kiroPlugin());
 
     const tab = await manager.createTab(null, 'inactive-tab', { activate: false });
 
@@ -28,15 +62,15 @@ beforeEach(() => {
       activeTabId: null,
       openTabs: [{
         conversationId: null,
-        draftModel: 'claude-default',
-        providerId: 'claude',
+        draftModel: 'kiro-default',
+        providerId: 'kiro',
         tabId: 'inactive-tab',
       }],
     });
   });
 
   it('keeps branch navigation admitted without showing a session work spinner', async () => {
-    const { manager } = await createManager();
+    const { manager } = await createManager(await kiroPlugin());
     const tab = (await manager.createTab())!;
     const navigation = deferred<void>();
     const pending = tab.session.runtime.runConversationNavigation(() => navigation.promise);
@@ -53,7 +87,7 @@ beforeEach(() => {
   });
 
   it('allows unlimited runtime tabs', async () => {
-    const { manager } = await createManager();
+    const { manager } = await createManager(await kiroPlugin());
 
     const tabs = await Promise.all(
       Array.from({ length: 12 }, () => manager.createTab()),
@@ -70,7 +104,7 @@ beforeEach(() => {
     const onTabCreated = vi.fn(() => {
       throw callbackError;
     });
-    const { manager } = await createManager(await createPlugin(), {
+    const { manager } = await createManager(await kiroPlugin(), {
       onTabClosed,
       onTabCreated,
     });
@@ -98,7 +132,7 @@ beforeEach(() => {
         throw callbackError;
       }
     });
-    const { manager } = await createManager(await createPlugin(), {
+    const { manager } = await createManager(await kiroPlugin(), {
       onActiveTabChanged,
       onTabCreated,
     });
@@ -114,8 +148,8 @@ beforeEach(() => {
       activeTabId: retained!.id,
       openTabs: [{
         conversationId: null,
-        draftModel: 'claude-default',
-        providerId: 'claude',
+        draftModel: 'kiro-default',
+        providerId: 'kiro',
         tabId: retained!.id,
       }],
     });
@@ -129,7 +163,7 @@ beforeEach(() => {
     const onTabSwitched = vi.fn((_previousId: string | null, nextId: string) => {
       if (nextId === 'target-tab') throw switchError;
     });
-    const { manager } = await createManager(await createPlugin(), {
+    const { manager } = await createManager(await kiroPlugin(), {
       onActiveTabChanged,
       onTabSwitched,
     });
@@ -153,7 +187,7 @@ beforeEach(() => {
       if (rejectSuccessorActivation && nextId === 'successor-tab') throw activationError;
     });
     const onTabClosed = vi.fn();
-    const { manager } = await createManager(await createPlugin(), {
+    const { manager } = await createManager(await kiroPlugin(), {
       onActiveTabChanged,
       onTabClosed,
     });
@@ -178,7 +212,7 @@ beforeEach(() => {
 
   it('discards a compensating last blank tab and installs a fresh draft', async () => {
     const onTabClosed = vi.fn();
-    const { manager } = await createManager(await createPlugin(), { onTabClosed });
+    const { manager } = await createManager(await kiroPlugin(), { onTabClosed });
     const staleDraft = await manager.createTab();
 
     await expect(manager.closeTab(staleDraft!.id)).resolves.toBe(false);
@@ -194,7 +228,7 @@ beforeEach(() => {
   });
 
   it('keeps session turns and stream generations alive when view shutdown begins', async () => {
-    const { manager } = await createManager();
+    const { manager } = await createManager(await kiroPlugin());
     const tab = await manager.createTab();
     const release = deferred<void>();
     let turnSignal: AbortSignal | null = null;
@@ -215,7 +249,7 @@ beforeEach(() => {
   });
 
   it('does not invent a snapshot owner for intentionally inactive restored tabs', async () => {
-    const { manager } = await createManager();
+    const { manager } = await createManager(await kiroPlugin());
     const first = await manager.createTab(null, 'restored-1', { activate: false });
     const second = await manager.createTab(null, 'restored-2', { activate: false });
 
@@ -226,8 +260,8 @@ beforeEach(() => {
     expect(manager.getPersistedState()).toEqual({
       activeTabId: null,
       openTabs: [
-        { conversationId: null, draftModel: 'claude-default', providerId: 'claude', tabId: first!.id },
-        { conversationId: null, draftModel: 'claude-default', providerId: 'claude', tabId: second!.id },
+        { conversationId: null, draftModel: 'kiro-default', providerId: 'kiro', tabId: first!.id },
+        { conversationId: null, draftModel: 'kiro-default', providerId: 'kiro', tabId: second!.id },
       ],
     });
     manager.sealShutdownSnapshot();
@@ -235,12 +269,11 @@ beforeEach(() => {
   });
 
   it('persists retained tabs and the shown session preview as the active entry', async () => {
-    const getCachedConversation = vi.fn((id: string) => (conversationRecord(id, { providerId: 'claude' })));
-    const { manager } = await createManager(await createPlugin({ getCachedConversation }));
+    const getCachedConversation = vi.fn((id: string) => (conversationRecord(id, { providerId: 'kiro' })));
+    const { manager } = await createManager(await kiroPlugin({ getCachedConversation }));
     const retained = await manager.createTab('conversation-1');
     const blank = await manager.createTab(null, undefined, { activate: false });
-    blank!.session.selectDraft(blank!.providerId, 'codex:gpt-5');
-    blank!.session.selectDraft('codex', blank!.draftModel);
+    blank!.session.selectDraft('kiro', 'kiro-alternate');
     await manager.viewerSlot.show('conversation-2');
     const preview = manager.getActiveTab();
     expect(preview?.lifecycleState).toBe('provisional');
@@ -249,13 +282,13 @@ beforeEach(() => {
     expect(persisted).toEqual({
       openTabs: [
         { tabId: retained!.id, conversationId: 'conversation-1' },
-        { tabId: blank!.id, conversationId: null, draftModel: 'codex:gpt-5', providerId: 'codex' },
+        { tabId: blank!.id, conversationId: null, draftModel: 'kiro-alternate', providerId: 'kiro' },
         { tabId: preview!.id, conversationId: 'conversation-2', preview: true },
       ],
       activeTabId: preview!.id,
     });
 
-    const wide = (await createManager(await createPlugin({ getCachedConversation }), {}, {}, { showsPreviews: () => true })).manager;
+    const wide = (await createManager(await kiroPlugin({ getCachedConversation }), {}, {}, { showsPreviews: () => true })).manager;
     await wide.restoreState(persisted);
     expect(wide.getActiveTab()).toEqual(expect.objectContaining({
       id: preview!.id, conversationId: 'conversation-2', lifecycleState: 'provisional',
@@ -263,7 +296,7 @@ beforeEach(() => {
   });
 
   it('starts a wide workspace with nothing to restore on a draft preview, not a retained tab', async () => {
-    const { manager } = await createManager(await createPlugin(), {}, {}, { showsPreviews: () => true });
+    const { manager } = await createManager(await kiroPlugin(), {}, {}, { showsPreviews: () => true });
 
     await manager.restoreState({ openTabs: [], activeTabId: null });
 
@@ -271,7 +304,7 @@ beforeEach(() => {
   });
 
   it('binds an unloaded blank tab to the conversation its new session creates', async () => {
-    const { manager } = await createManager();
+    const { manager } = await createManager(await kiroPlugin());
     const blank = await manager.createTab(null);
     await manager.viewerSlot.enter();
 
@@ -282,7 +315,7 @@ beforeEach(() => {
   });
 
   it('persists the active blank draft as a preview that survives reload', async () => {
-    const { manager } = await createManager();
+    const { manager } = await createManager(await kiroPlugin());
     const retained = await manager.createTab(null);
     await manager.viewerSlot.startDraft();
     const draft = manager.getActiveTab()!;
@@ -292,18 +325,18 @@ beforeEach(() => {
     expect(persisted).toEqual({
       activeTabId: draft.id,
       openTabs: [
-        { tabId: retained!.id, conversationId: null, draftModel: 'claude-default', providerId: 'claude' },
-        { tabId: draft.id, conversationId: null, draftModel: 'claude-default', providerId: 'claude', preview: true },
+        { tabId: retained!.id, conversationId: null, draftModel: 'kiro-default', providerId: 'kiro' },
+        { tabId: draft.id, conversationId: null, draftModel: 'kiro-default', providerId: 'kiro', preview: true },
       ],
     });
 
-    const wide = (await createManager(await createPlugin(), {}, {}, { showsPreviews: () => true })).manager;
+    const wide = (await createManager(await kiroPlugin(), {}, {}, { showsPreviews: () => true })).manager;
     await wide.restoreState(persisted);
     expect(wide.getActiveTabId()).toBe(draft.id);
     expect(wide.getActiveTab()?.lifecycleState).toBe('provisional');
     expect(wide.getPersistedState()).toEqual(persisted);
 
-    const compact = (await createManager()).manager;
+    const compact = (await createManager(await kiroPlugin())).manager;
     await compact.restoreState(persisted);
     expect(compact.getActiveTabId()).toBe(draft.id);
     expect(compact.getActiveTab()?.lifecycleState).toBe('open');
@@ -315,21 +348,21 @@ beforeEach(() => {
   });
 
   it('drops an inactive draft preview from persistence', async () => {
-    const { manager } = await createManager();
+    const { manager } = await createManager(await kiroPlugin());
     const retained = await manager.createTab(null);
     await manager.viewerSlot.startDraft();
     await manager.switchToTab(retained!.id);
 
     expect(manager.getPersistedState()).toEqual({
       activeTabId: retained!.id,
-      openTabs: [{ tabId: retained!.id, conversationId: null, draftModel: 'claude-default', providerId: 'claude' }],
+      openTabs: [{ tabId: retained!.id, conversationId: null, draftModel: 'kiro-default', providerId: 'kiro' }],
     });
   });
 
   it('retains a preview the user names, so its label persists', async () => {
     const onTabLabelChanged = vi.fn();
-    const { manager } = await createManager(await createPlugin({
-      getCachedConversation: (id: string) => (conversationRecord(id, { providerId: 'claude' })),
+    const { manager } = await createManager(await kiroPlugin({
+      getCachedConversation: (id: string) => (conversationRecord(id, { providerId: 'kiro' })),
     }), { onTabLabelChanged });
     await manager.viewerSlot.show('conversation-1');
     const preview = manager.getActiveTab()!;
@@ -353,8 +386,8 @@ beforeEach(() => {
   });
 
   it('restores a tab label onto its identity and keeps it when the tab assembles', async () => {
-    const { manager } = await createManager(await createPlugin({
-      getCachedConversation: (id: string) => (conversationRecord(id, { providerId: 'claude' })),
+    const { manager } = await createManager(await kiroPlugin({
+      getCachedConversation: (id: string) => (conversationRecord(id, { providerId: 'kiro' })),
     }));
 
     await manager.restoreState({
@@ -376,7 +409,7 @@ beforeEach(() => {
   });
 
   it('does not treat teardown lifecycle as a committed membership removal', async () => {
-    const { manager } = await createManager();
+    const { manager } = await createManager(await kiroPlugin());
     const tab = await manager.createTab(null, 'tearing-down-tab');
 
     tab!.session.beginClose();
@@ -385,8 +418,8 @@ beforeEach(() => {
       activeTabId: tab!.id,
       openTabs: [{
         conversationId: null,
-        draftModel: 'claude-default',
-        providerId: 'claude',
+        draftModel: 'kiro-default',
+        providerId: 'kiro',
         tabId: tab!.id,
       }],
     });
@@ -394,7 +427,7 @@ beforeEach(() => {
 
   it('publishes every successful inactive admission after the transaction', async () => {
     const onTabCreated = vi.fn();
-    const { manager } = await createManager(await createPlugin(), { onTabCreated });
+    const { manager } = await createManager(await kiroPlugin(), { onTabCreated });
     await manager.createTab();
     onTabCreated.mockClear();
 
@@ -409,7 +442,7 @@ beforeEach(() => {
   it('publishes active selection only after switching an admitted tab', async () => {
     const onActiveTabCommitted = vi.fn();
     const { manager } = await createManager(
-      await createPlugin(),
+      await kiroPlugin(),
       { onActiveTabCommitted },
     );
     const initial = await manager.createTab(null, 'initial-tab');
@@ -426,11 +459,11 @@ beforeEach(() => {
 
 
 it('validates cached workspace ownership during admission', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await kiroPlugin());
   const vault = await DesktopVault.create();
   onTestFinished(() => vault.dispose());
   const foreign = await createFeatureHostFixture({ vault });
-  await ProviderWorkspaceRegistry.ensureInitialized(foreign.providerHost, 'claude', 'other-vault');
+  await ProviderWorkspaceRegistry.ensureInitialized(foreign.providerHost, 'kiro', 'other-vault');
   const tab = await manager.createTab();
   expect(tab?.hydrationState).toBe('failed');
   expect(provider.sessions).toEqual([]);
@@ -438,16 +471,16 @@ it('validates cached workspace ownership during admission', async () => {
 });
 
 it('does not inherit the active tab provider when creating another blank tab', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await kiroPlugin());
   const active = (await manager.createTab())!;
-  active.session.selectDraft('codex', 'codex:gpt-5');
+  active.session.selectDraft('kiro', 'kiro-alternate');
   const next = (await manager.createTab())!;
-  expect([next.providerId, next.draftModel]).toEqual(['claude', 'claude-default']);
-  expect([active.providerId, active.draftModel]).toEqual(['codex', 'codex:gpt-5']);
+  expect([next.providerId, next.draftModel]).toEqual(['kiro', 'kiro-default']);
+  expect([active.providerId, active.draftModel]).toEqual(['kiro', 'kiro-alternate']);
 });
 
 it('keeps the committed persistence owner while another tab is hydrating', async () => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await kiroPlugin());
   const initial = (await manager.createTab(null, 'initial-tab'))!;
   const target = (await manager.createTab('conversation-1', 'target-tab', { activate: false }))!;
   const hydration = holdHistory(plugin, 'conversation-1');
@@ -463,7 +496,7 @@ it('keeps the committed persistence owner while another tab is hydrating', async
     expect(manager.getPersistedState()).toEqual({
       activeTabId: initial.id,
       openTabs: [
-        { conversationId: null, draftModel: 'claude-default', providerId: 'claude', tabId: initial.id },
+        { conversationId: null, draftModel: 'kiro-default', providerId: 'kiro', tabId: initial.id },
         { conversationId: 'conversation-1', tabId: target.id },
       ],
     });
@@ -476,7 +509,7 @@ it('keeps the committed persistence owner while another tab is hydrating', async
 });
 
 it.each(['shutdown', 'destroy'] as const)('joins active and queued tab switches during %s', async action => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await kiroPlugin());
   const initial = (await manager.createTab())!;
   const target = (await manager.createTab('hydrating', 'hydrating', { activate: false }))!;
   const hydration = holdHistory(plugin, 'hydrating');
@@ -498,7 +531,7 @@ it.each(['shutdown', 'destroy'] as const)('joins active and queued tab switches 
 });
 
 it('projects provider background work only after the coordinator publishes its transition', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await kiroPlugin());
   const tab = (await manager.createTab('conversation-1'))!;
   expect(await tab.session.runtime.model.ensureExecutionInitialized()).toBe(true);
   const native = provider.sessions[0];
@@ -519,7 +552,7 @@ it('projects provider background work only after the coordinator publishes its t
 });
 
 it('marks only inactive tabs when a reviewable turn settles', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await kiroPlugin());
   const active = (await manager.createTab())!;
   const background = (await manager.createTab(null, undefined, { activate: false }))!;
   vi.spyOn(active.dom.messagesEl, 'getClientRects').mockReturnValue(Object.assign([new DOMRect(0, 0, 100, 100)], { item: () => null }));
@@ -530,7 +563,7 @@ it('marks only inactive tabs when a reviewable turn settles', async () => {
 });
 
 it('uses activity at completion and invalidates review after activation', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await kiroPlugin());
   const active = (await manager.createTab())!;
   const background = (await manager.createTab(null, undefined, { activate: false }))!;
   for (const tab of [active, background]) {
@@ -549,7 +582,7 @@ it('uses activity at completion and invalidates review after activation', async 
 
 it('rolls back a tab assembly whose admission continuation runs after manager destruction', async () => {
   const onTabCreated = vi.fn();
-  const { manager, root, pool } = await createManager(await createPlugin(), { onTabCreated });
+  const { manager, root, pool } = await createManager(await kiroPlugin(), { onTabCreated });
   const creation = manager.createTab(null, 'late-tab');
   const destruction = manager.destroy();
   await expect(creation).resolves.toBeNull();
@@ -563,7 +596,7 @@ it('rolls back a tab assembly whose admission continuation runs after manager de
 });
 
 it('rejects a duplicate explicit tab ID without disturbing its reserved runtime', async () => {
-  const { manager, root } = await createManager();
+  const { manager, root } = await createManager(await kiroPlugin());
   const firstCreation = manager.createTab(null, 'restored-tab');
   await expect(manager.createTab(null, 'restored-tab')).rejects.toThrow('restored-tab');
   const first = await firstCreation;
@@ -574,7 +607,7 @@ it('rejects a duplicate explicit tab ID without disturbing its reserved runtime'
 
 it('reactivates the previous tab when deactivation fails during admission', async () => {
   const error = new Error('Failed to deactivate previous tab');
-  const { manager, root } = await createManager();
+  const { manager, root } = await createManager(await kiroPlugin());
   const initial = (await manager.createTab(null, 'initial-tab'))!;
   vi.spyOn(initial.dom.contentEl, 'addClass').mockImplementationOnce(() => { throw error; });
   await expect(manager.createTab(null, 'failed-tab')).rejects.toBe(error);
@@ -586,7 +619,7 @@ it('reactivates the previous tab when deactivation fails during admission', asyn
 
 it.each(['before', 'after'] as const)('attributes admission failure to its request with another switch queued %s it', async placement => {
   const error = new Error('Failed queued tab activation');
-  const { manager, plugin, root } = await createManager(await createPlugin(), {
+  const { manager, plugin, root } = await createManager(await kiroPlugin(), {
     onActiveTabChanged: (_previous, id) => { if (id === 'failed-tab') throw error; },
   });
   await manager.createTab(null, 'initial-tab');
@@ -609,7 +642,7 @@ it.each(['before', 'after'] as const)('attributes admission failure to its reque
 
 it('fences overlapping closes before repeating teardown or callbacks', async () => {
   const onTabClosed = vi.fn();
-  const { manager } = await createManager(await createPlugin(), { onTabClosed });
+  const { manager } = await createManager(await kiroPlugin(), { onTabClosed });
   const retained = (await manager.createTab())!;
   const closing = (await manager.createTab())!;
   const remove = vi.spyOn(closing.dom.contentEl, 'remove');
@@ -622,7 +655,7 @@ it('fences overlapping closes before repeating teardown or callbacks', async () 
 });
 
 it('claims the final tab before its replacement admission continuation', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await kiroPlugin());
   const closing = (await manager.createTab())!;
   const first = manager.discardTab(closing.id);
   const overlapping = manager.discardTab(closing.id);
@@ -633,7 +666,7 @@ it('claims the final tab before its replacement admission continuation', async (
 });
 
 it('installs one live replacement when different tabs close concurrently', async () => {
-  const { manager, root } = await createManager();
+  const { manager, root } = await createManager(await kiroPlugin());
   const first = (await manager.createTab())!;
   const second = (await manager.createTab())!;
   await expect(Promise.all([manager.closeTab(first.id), manager.closeTab(second.id)])).resolves.toEqual([true, true]);
@@ -646,7 +679,7 @@ it('installs one live replacement when different tabs close concurrently', async
 
 it('retains one original when concurrent-close replacement assembly fails', async () => {
   const error = new Error('Replacement assembly failed');
-  const { manager, root } = await createManager();
+  const { manager, root } = await createManager(await kiroPlugin());
   const first = (await manager.createTab())!;
   const second = (await manager.createTab())!;
   vi.spyOn(root, 'createDiv').mockImplementationOnce(() => { throw error; });
@@ -663,7 +696,7 @@ it('retains one original when concurrent-close replacement assembly fails', asyn
 it('keeps the final tab live when replacement assembly fails', async () => {
   const error = new Error('Replacement assembly failed');
   const onTabClosed = vi.fn();
-  const { manager, root } = await createManager(await createPlugin(), { onTabClosed });
+  const { manager, root } = await createManager(await kiroPlugin(), { onTabClosed });
   const retained = (await manager.createTab())!;
   vi.spyOn(root, 'createDiv').mockImplementationOnce(() => { throw error; });
   await expect(manager.discardTab(retained.id)).rejects.toBe(error);
@@ -677,7 +710,7 @@ it('keeps the final tab live when replacement assembly fails', async () => {
 it('keeps identity publication live during reversible final-tab replacement', async () => {
   const error = new Error('Replacement assembly failed');
   const onTabConversationChanged = vi.fn();
-  const { manager, root } = await createManager(await createPlugin(), { onTabConversationChanged });
+  const { manager, root } = await createManager(await kiroPlugin(), { onTabConversationChanged });
   const retained = (await manager.createTab())!;
   vi.spyOn(root, 'createDiv').mockImplementationOnce(() => {
     retained.state.currentConversationId = 'created-during-close';
@@ -692,7 +725,7 @@ it('keeps identity publication live during reversible final-tab replacement', as
 
 it('does not emit close callbacks after manager destruction begins', async () => {
   const onTabClosed = vi.fn();
-  const { manager } = await createManager(await createPlugin(), { onTabClosed });
+  const { manager } = await createManager(await kiroPlugin(), { onTabClosed });
   await manager.createTab();
   const closing = (await manager.createTab())!;
   const close = manager.closeTab(closing.id);
@@ -704,7 +737,7 @@ it('does not emit close callbacks after manager destruction begins', async () =>
 
 it('releases membership and discovery when external DOM cleanup fails during close', async () => {
   const onTabClosed = vi.fn();
-  const { manager, pool } = await createManager(await createPlugin(), { onTabClosed });
+  const { manager, pool } = await createManager(await kiroPlugin(), { onTabClosed });
   const retained = (await manager.createTab())!;
   const closing = (await manager.createTab())!;
   const discovery = closing.providerCatalogResolver()!.discovery;
@@ -722,7 +755,7 @@ it('releases membership and discovery when external DOM cleanup fails during clo
 
 it('fences discovery and external observers while accepting a terminal identity during close', async () => {
   const callbacks = { onTabAttentionChanged: vi.fn(), onTabConversationChanged: vi.fn(), onTabRewindingChanged: vi.fn(), onTabStreamingChanged: vi.fn() };
-  const { manager, plugin } = await createManager(await createPlugin(), callbacks);
+  const { manager, plugin } = await createManager(await kiroPlugin(), callbacks);
   const retained = (await manager.createTab())!;
   const closing = (await manager.createTab(null, undefined, { activate: false }))!;
   const discovery = closing.providerCatalogResolver()!.discovery;
@@ -736,7 +769,7 @@ it('fences discovery and external observers while accepting a terminal identity 
   expect(closing.providerCatalogResolver()).toBeNull();
   expect(discovery.getSnapshot()).toEqual({ status: 'idle' });
   for (const observer of Object.values(callbacks)) expect(observer).not.toHaveBeenCalled();
-  await forkRequestFrom(manager, closing)({ messages: [], providerId: 'claude', resumeAt: 'checkpoint', sourceConversationId: 'late-conversation', sourceSessionId: 'native' });
+  await forkRequestFrom(manager, closing)({ messages: [], providerId: 'kiro', resumeAt: 'checkpoint', sourceConversationId: 'late-conversation', sourceSessionId: 'native' });
   await navigationOwner(manager).open('stale-conversation', {}, closing);
   expect(plugin.createConversation).not.toHaveBeenCalled();
   expect(plugin.getConversationById).not.toHaveBeenCalled();
@@ -747,7 +780,7 @@ it('fences discovery and external observers while accepting a terminal identity 
 
 it('accepts a terminal conversation binding until the shutdown snapshot is sealed', async () => {
   const onTabConversationChanged = vi.fn();
-  const { manager } = await createManager(await createPlugin(), { onTabConversationChanged });
+  const { manager } = await createManager(await kiroPlugin(), { onTabConversationChanged });
   const tab = (await manager.createTab())!;
   const unbound = (await manager.createTab())!;
   manager.beginShutdown();
@@ -765,12 +798,12 @@ it('accepts a terminal conversation binding until the shutdown snapshot is seale
 });
 
 it('drains every admitted conversation creation before sealing the shutdown snapshot', async () => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await kiroPlugin());
   const tabs = [(await manager.createTab())!, (await manager.createTab())!];
   const shells = tabs.map(() => deferred<Conversation>());
   vi.spyOn(plugin, 'createConversation').mockImplementationOnce(() => shells[0].promise).mockImplementationOnce(() => shells[1].promise);
   const creations = tabs.map(tab => tab.controllers.conversationController.createConversation(
-    tab.session.runtime.model.linkedContentController.beginSubmission(), { providerId: 'claude' },
+    tab.session.runtime.model.linkedContentController.beginSubmission(), { providerId: 'kiro' },
   ));
   manager.beginShutdown();
   let drained = false;
@@ -788,10 +821,10 @@ it('drains every admitted conversation creation before sealing the shutdown snap
 it('leaves sealed tab identities untouched when provider availability changes after shutdown', async () => {
   const onTabDraftChanged = vi.fn();
   const onTabProviderChanged = vi.fn();
-  registerChatTestProvider('claude', { models: [] });
-  const { manager } = await createManager(await createPlugin(), { onTabDraftChanged, onTabProviderChanged });
+  registerChatTestProvider('kiro', { models: [] });
+  const { manager } = await createManager(await kiroPlugin(), { onTabDraftChanged, onTabProviderChanged });
   await manager.restoreState({ openTabs: [{ tabId: 'active', conversationId: null }, { tabId: 'inactive', conversationId: null }], activeTabId: 'active' });
-  registerChatTestProvider('claude', { models: [{ value: 'claude-default', label: 'Claude' }] });
+  registerChatTestProvider('kiro', { models: [{ value: 'kiro-default', label: 'Kiro' }] });
   const sealed = manager.getPersistedState();
   expect(manager.getTab('inactive')).toBeNull();
   manager.beginShutdown();
@@ -803,9 +836,9 @@ it('leaves sealed tab identities untouched when provider availability changes af
 });
 
 it('drains in-flight conversation navigation before sealing shutdown state', async () => {
-  const { manager, plugin, root } = await createManager();
+  const { manager, plugin, root } = await createManager(await kiroPlugin());
   const tab = (await manager.createTab())!;
-  const hydration = holdHistory(plugin, 'during-shutdown');
+  const hydration = holdKiroHistory(plugin, 'during-shutdown');
   const navigation = manager.openConversation('during-shutdown');
   await hydration.started;
   manager.beginShutdown();
@@ -821,7 +854,7 @@ it('drains in-flight conversation navigation before sealing shutdown state', asy
 });
 
 it('joins an admitted close before choosing the shutdown snapshot owner', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await kiroPlugin());
   const retained = (await manager.createTab())!;
   const closing = (await manager.createTab())!;
   const close = manager.closeTab(closing.id);
@@ -835,7 +868,7 @@ it('joins an admitted close before choosing the shutdown snapshot owner', async 
 });
 
 it('does not recreate discovery from a released tab after destroy', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await kiroPlugin());
   const tab = (await manager.createTab())!;
   const discovery = tab.providerCatalogResolver()!.discovery;
   await discovery.load();
@@ -846,7 +879,7 @@ it('does not recreate discovery from a released tab after destroy', async () => 
 });
 
 it('disposes every tab and releases manager state when one DOM teardown fails', async () => {
-  const { manager, pool } = await createManager();
+  const { manager, pool } = await createManager(await kiroPlugin());
   const first = (await manager.createTab())!;
   const second = (await manager.createTab())!;
   const firstRemove = vi.spyOn(first.dom.contentEl, 'remove').mockImplementationOnce(() => { throw new Error('Detach failed'); });
@@ -868,7 +901,7 @@ it('disposes every tab and releases manager state when one DOM teardown fails', 
 });
 
 it('finishes mandatory teardown when concurrent preview cleanup fails', async () => {
-  const { manager, pool } = await createManager();
+  const { manager, pool } = await createManager(await kiroPlugin());
   const retained = (await manager.createTab('retained'))!;
   await manager.viewerSlot.show('preview');
   const preview = manager.getActiveTab()!;
@@ -889,12 +922,12 @@ it('finishes mandatory teardown when concurrent preview cleanup fails', async ()
 });
 
 it('joins an unloaded draft session creating its conversation before the shutdown snapshot', async () => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await kiroPlugin());
   const blank = (await manager.createTab())!;
   const model = blank.session.runtime.model;
   const reply = deferred<Conversation>();
   vi.spyOn(plugin, 'createConversation').mockReturnValueOnce(reply.promise);
-  const creating = model.conversationController.createConversation(model.linkedContentController.beginSubmission(), { providerId: 'claude' });
+  const creating = model.conversationController.createConversation(model.linkedContentController.beginSubmission(), { providerId: 'kiro' });
   await manager.viewerSlot.enter();
   await manager.viewerSlot.show('conversation-1');
   expect(manager.getTab(blank.id)).toBeNull();
@@ -907,7 +940,7 @@ it('joins an unloaded draft session creating its conversation before the shutdow
 });
 
 it('reports an unloaded narrow tab from its running session and review attention', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await kiroPlugin());
   const narrow = (await manager.createTab('conversation-1'))!;
   narrow.controllers.inputController.queue.enqueue(createQueuedMessage('queued', { text: 'queued' }));
   await manager.viewerSlot.enter();
@@ -921,7 +954,7 @@ it('reports an unloaded narrow tab from its running session and review attention
 });
 
 it('reports an unloaded blank tab from its held draft before it creates a conversation', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await kiroPlugin());
   const blank = (await manager.createTab())!;
   blank.controllers.inputController.queue.enqueue(createQueuedMessage('queued', { text: 'queued' }));
   await manager.viewerSlot.enter();
@@ -934,30 +967,29 @@ it('reports an unloaded blank tab from its held draft before it creates a conver
 
 it('publishes persisted blank-tab model changes', async () => {
   const onTabDraftChanged = vi.fn();
-  const { manager } = await createManager(await createPlugin(), { onTabDraftChanged });
+  const { manager } = await createManager(await kiroPlugin(), { onTabDraftChanged });
   const tab = (await manager.createTab())!;
-  tab.session.selectDraft('claude', 'claude-alternate');
-  expect(onTabDraftChanged).toHaveBeenCalledWith(tab.id, 'claude-alternate');
-  expect(manager.getPersistedState().openTabs[0]).toMatchObject({ draftModel: 'claude-alternate' });
+  tab.session.selectDraft('kiro', 'kiro-alternate');
+  expect(onTabDraftChanged).toHaveBeenCalledWith(tab.id, 'kiro-alternate');
+  expect(manager.getPersistedState().openTabs[0]).toMatchObject({ draftModel: 'kiro-alternate' });
 });
 
 it('restores identities cold in order and activates once, preserving inactive model and label', async () => {
-  registerChatTestProvider('codex', { models: [{ value: 'codex:gpt-5', label: 'GPT 5' }] });
   const onActiveTabChanged = vi.fn();
-  const getConversationSummary = vi.fn((id: string) => conversationRecord(id));
-  const { manager, plugin, root } = await createManager(await createPlugin({ getConversationSummary }), { onActiveTabChanged });
+  const getConversationSummary = vi.fn((id: string) => kiroRecord(id));
+  const { manager, plugin, root } = await createManager(await kiroPlugin({ getConversationSummary }), { onActiveTabChanged });
   // The supplied summary port owns cold metadata; loading history remains deferred.
   plugin.getConversationSummary = getConversationSummary;
   await manager.restoreState({ openTabs: [
     { tabId: 'restored-1', conversationId: 'conversation-1', label: 'Keep label' },
-    { tabId: 'restored-2', conversationId: null, providerId: 'codex', draftModel: 'codex:gpt-5' },
+    { tabId: 'restored-2', conversationId: null, providerId: 'kiro', draftModel: 'kiro-alternate' },
   ], activeTabId: 'restored-2' });
   expect(manager.getTabIdentities().map(tab => [tab.id, tab.lifecycleState])).toEqual([['restored-1', 'open'], ['restored-2', 'open']]);
   expect(getConversationSummary).toHaveBeenCalledWith('conversation-1');
   expect(manager.getTab('restored-1')).toBeNull();
   expect(manager.getAllTabs()).toHaveLength(1);
   expect(root.querySelectorAll('.claudian-tab-content')).toHaveLength(1);
-  expect(manager.getActiveTab()).toMatchObject({ id: 'restored-2', draftModel: 'codex:gpt-5' });
+  expect(manager.getActiveTab()).toMatchObject({ id: 'restored-2', draftModel: 'kiro-alternate' });
   expect(onActiveTabChanged).toHaveBeenCalledTimes(1);
   await Promise.all([manager.switchToTab('restored-1'), manager.switchToTab('restored-1')]);
   expect(manager.getAllTabs()).toHaveLength(2);
@@ -967,7 +999,7 @@ it('restores identities cold in order and activates once, preserving inactive mo
 });
 
 it('restores a usable tab when the selected saved runtime cannot be assembled', async () => {
-  const { manager, root } = await createManager();
+  const { manager, root } = await createManager(await kiroPlugin());
   vi.spyOn(root, 'createDiv').mockImplementationOnce(() => { throw new Error('Unavailable selected tab'); });
   await expect(manager.restoreState({ openTabs: ['one', 'two'].map(id => ({ tabId: id, conversationId: id })), activeTabId: 'one' })).resolves.toBeUndefined();
   expect(manager.getActiveTabId()).toBe('two');
@@ -979,7 +1011,7 @@ it('restores a usable tab when the selected saved runtime cannot be assembled', 
 
 it.each([false, true])('drops a duplicate cross-view restore before assembly (owner inactive: %s)', async inactive => {
   const { ClaudianViews } = await import('@/composition/ClaudianViews');
-  const plugin = await createPlugin();
+  const plugin = await kiroPlugin();
   const first = await createManager(plugin);
   const second = await createManager(plugin);
   vi.spyOn(plugin.app.workspace, 'getLeavesOfType').mockReturnValue([first, second].map(({ view }) => Object.assign(view.leaf, { view })));
@@ -1001,7 +1033,7 @@ it.each([false, true])('drops a duplicate cross-view restore before assembly (ow
 });
 
 it('keeps the active source reversible when an inactive successor fails assembly', async () => {
-  const { manager, root } = await createManager();
+  const { manager, root } = await createManager(await kiroPlugin());
   await manager.restoreState({ openTabs: [{ tabId: 'active', conversationId: 'one' }, { tabId: 'open', conversationId: 'two' }], activeTabId: 'active' });
   const source = manager.getActiveTab()!;
   const before = manager.getPersistedState();
@@ -1016,7 +1048,7 @@ it('keeps the active source reversible when an inactive successor fails assembly
 });
 
 it('resets a deleted conversation during reversible close even if successor assembly fails', async () => {
-  const { manager, root } = await createManager();
+  const { manager, root } = await createManager(await kiroPlugin());
   await manager.restoreState({ openTabs: ['one', 'two'].map(id => ({ tabId: id, conversationId: id })), activeTabId: 'one' });
   const source = manager.getActiveTab()!;
   vi.spyOn(root, 'createDiv').mockImplementationOnce(() => { throw new Error('Successor unavailable'); });
@@ -1031,7 +1063,7 @@ it('resets a deleted conversation during reversible close even if successor asse
 });
 
 it('joins a restored assembly continuation during shutdown without losing its identity snapshot', async () => {
-  const { manager, root } = await createManager();
+  const { manager, root } = await createManager(await kiroPlugin());
   await manager.restoreState({ openTabs: ['one', 'two'].map(id => ({ tabId: id, conversationId: id })), activeTabId: 'one' });
   const switching = manager.switchToTab('two');
   const shutdown = manager.drainForShutdownSnapshot();
@@ -1043,7 +1075,7 @@ it('joins a restored assembly continuation during shutdown without losing its id
 });
 
 it('resets deleted restored identities and retries a failed assembled reset', async () => {
-  const { manager, root } = await createManager();
+  const { manager, root } = await createManager(await kiroPlugin());
   await manager.restoreState({ openTabs: ['one', 'two'].map(id => ({ tabId: id, conversationId: 'deleted' })), activeTabId: 'one' });
   expect(manager.getTab('two')).toBeNull();
   vi.spyOn(root, 'createDiv').mockImplementationOnce(() => { throw new Error('Reset failed'); });
@@ -1057,7 +1089,7 @@ it('resets deleted restored identities and retries a failed assembled reset', as
 });
 
 it.each(['close', 'delete'] as const)('discards a restored assembly continuation when %s invalidates its identity', async operation => {
-  const { manager, root } = await createManager();
+  const { manager, root } = await createManager(await kiroPlugin());
   await manager.restoreState({ openTabs: ['one', 'two'].map(id => ({ tabId: id, conversationId: id })), activeTabId: 'one' });
   const switching = manager.switchToTab('two');
   if (operation === 'close') await manager.closeTab('two');

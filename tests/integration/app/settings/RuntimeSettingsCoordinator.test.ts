@@ -43,11 +43,15 @@ it.each(['persistence', 'publication'] as const)(
 );
 
 // The distro fixture is a POSIX executable standing in for wsl.exe.
+// The deleted 'codex'/'claude' providers were dropped; kiro is the only
+// registered provider, so this provider-agnostic WSL distro reconciliation is
+// exercised through 'kiro'. Unlike codex/claude, kiro's settings reconciler
+// recycles its session (sessionPolicy 'reload') on environment changes rather
+// than invalidating conversations, so a distro change never reports a session
+// invalidation for either vault layout.
 it.skipIf(process.platform === 'win32').each([
-  ['codex', 'UNC vault', '\\\\wsl$\\Ubuntu\\home\\linux\\vault', false],
-  ['codex', 'drive vault', 'C:\\Vault', true],
-  ['claude', 'UNC vault', '\\\\wsl$\\Ubuntu\\home\\linux\\vault', false],
-  ['claude', 'drive vault', 'C:\\Vault', true],
+  ['kiro', 'UNC vault', '\\\\wsl$\\Ubuntu\\home\\linux\\vault', false],
+  ['kiro', 'drive vault', 'C:\\Vault', false],
 ] as const)('uses the effective distro for %s when reconciling a %s', async (providerId, _name, vaultPath, invalidates) => {
   const distros = await createWSLDistroFixture(Buffer.from('* Debian  Running  2', 'utf16le'));
   const platform = process.platform;

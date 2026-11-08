@@ -7,29 +7,63 @@ import { App, TFile } from 'obsidian';
 
 import { BUILT_IN_COMMANDS } from '@/core/commands/builtInCommands';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
+import type { Conversation } from '@/core/types';
 import type { TabManager } from '@/features/chat/tabs/TabManager';
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 
 let provider: ReturnType<typeof registerChatTestProvider>;
 beforeEach(() => {
   useNextTaskAnimationFrames();
-  provider = registerChatTestProvider('claude', { models: [{ value: 'claude-default', label: 'Claude' }] });
+  provider = registerChatTestProvider('kiro', { models: [{ value: 'kiro-default', label: 'Kiro' }] });
 });
-const conversationPlugin = createPlugin;
+
+/**
+ * The shared `conversationRecord` fixture still defaults to the deleted `claude`
+ * provider; a kiro-only registry rejects it when a hydrated conversation binds to
+ * a tab. Route every conversation port through `kiro` records.
+ */
+const kiroRecord = (id: string) => conversationRecord(id, { providerId: 'kiro' });
+const kiroConversationPorts = () => ({
+  getCachedConversation: vi.fn((id: string) => kiroRecord(id)),
+  getConversationById: vi.fn(async (id: string) => kiroRecord(id)),
+  getConversationSync: vi.fn((id: string) => kiroRecord(id)),
+  getConversationSummary: vi.fn((id: string) => kiroRecord(id)),
+});
+const conversationPlugin = (overrides: Parameters<typeof createPlugin>[0] = {}) =>
+  createPlugin({ ...kiroConversationPorts(), ...overrides });
 const shownDraft = (manager: TabManager) => manager.getActiveTab()!.controllers.drafts.capture('main').content;
 async function linkedContentPlugin(paths: string[], overrides: ChatFeatureHostOverrides = {}) {
   const files = new Set(paths);
   const app = new App();
   app.vault.getAbstractFileByPath = path => files.has(path) ? Object.assign(new TFile(), { path }) : null;
-  return { files, plugin: await createPlugin({ app, ...overrides }) };
+  return { files, plugin: await conversationPlugin({ app, ...overrides }) };
+}
+
+/**
+ * Mirror the harness `holdHistory` but resolve a `kiro` record on release, so a
+ * blank/preview tab binding the navigated conversation does not reject the
+ * identity swap (the shared helper releases a `claude` record).
+ */
+function holdKiroHistory(plugin: Parameters<typeof holdHistory>[0], conversationId: string) {
+  const started = deferred<void>();
+  const reply = deferred<Conversation | null>();
+  const current = plugin.getConversationById;
+  const original = (vi.isMockFunction(current) ? current.getMockImplementation()! : current).bind(plugin);
+  const read = vi.spyOn(plugin, 'getConversationById').mockImplementation(id => {
+    if (id !== conversationId) return original(id);
+    started.resolve();
+    return reply.promise;
+  });
+  read.mockClear();
+  return { started: started.promise, release: () => reply.resolve(kiroRecord(conversationId)), read };
 }
 async function runNew(tab: AssembledTabRuntime) {
   await tab.controllers.builtInCommandController.execute(BUILT_IN_COMMANDS.find(command => command.action === 'clear')!, ProviderRegistry.getCapabilities(tab.providerId!));
 }
 
 it('discards inactive previews without removing open runtime tabs', async () => {
-    const getCachedConversation = vi.fn((id: string) => (conversationRecord(id, { providerId: 'claude' })));
-    const { manager } = await createManager(await createPlugin({ getCachedConversation }));
+    const getCachedConversation = vi.fn((id: string) => (conversationRecord(id, { providerId: 'kiro' })));
+    const { manager } = await createManager(await conversationPlugin({ getCachedConversation }));
     const first = await manager.createTab('conversation-1');
     const second = await manager.createTab('conversation-2', undefined, { activate: false });
     await manager.viewerSlot.show('conversation-3');
@@ -42,8 +76,8 @@ it('discards inactive previews without removing open runtime tabs', async () => 
   });
 
 it('retains the active preview when it is the only tab', async () => {
-    const { manager } = await createManager(await createPlugin({
-      getCachedConversation: (id: string) => (conversationRecord(id, { providerId: 'claude' })),
+    const { manager } = await createManager(await conversationPlugin({
+      getCachedConversation: (id: string) => (conversationRecord(id, { providerId: 'kiro' })),
     }));
     await manager.viewerSlot.show('conversation-1');
     const preview = manager.getActiveTab()!;
@@ -131,12 +165,12 @@ it("seeds a cold wide restore's new session from the saved blank tab selection",
       const { manager } = await createManager(await conversationPlugin(), {}, {}, { showsPreviews: () => true });
 
       await manager.restoreState({
-        openTabs: [{ tabId: 'draft', conversationId: null, draftModel: 'codex:gpt-5', providerId: 'codex' }],
+        openTabs: [{ tabId: 'draft', conversationId: null, draftModel: 'kiro-default', providerId: 'kiro' }],
         activeTabId: 'draft',
       });
 
       const preview = manager.getActiveTab()!;
-      expect([preview.lifecycleState, preview.draftModel, preview.providerId]).toEqual(['provisional', 'codex:gpt-5', 'codex']);
+      expect([preview.lifecycleState, preview.draftModel, preview.providerId]).toEqual(['provisional', 'kiro-default', 'kiro']);
     });
 
 it('keeps unsent text with a draft session that creates its conversation while unloaded', async () => {
@@ -383,9 +417,9 @@ it('does not create a draft for Linked content that no longer exists', async () 
     });
 
 it('keeps the latest provisional selection during overlapping preview hydration', async () => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await conversationPlugin());
   await manager.viewerSlot.show('conversation-1');
-  const hydration = holdHistory(plugin, 'conversation-2');
+  const hydration = holdKiroHistory(plugin, 'conversation-2');
   const first = manager.viewerSlot.show('conversation-2');
   await hydration.started;
   const superseded = manager.viewerSlot.show('conversation-3');
@@ -397,10 +431,10 @@ it('keeps the latest provisional selection during overlapping preview hydration'
 });
 
 it('does not demote a preview retained while its conversation switch is pending', async () => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await conversationPlugin());
   await manager.viewerSlot.show('conversation-1');
   const preview = manager.getActiveTab()!;
-  const hydration = holdHistory(plugin, 'conversation-2');
+  const hydration = holdKiroHistory(plugin, 'conversation-2');
   const navigation = manager.viewerSlot.show('conversation-2');
   await hydration.started;
   preview.session.claimUserOwnership();
@@ -411,9 +445,9 @@ it('does not demote a preview retained while its conversation switch is pending'
 });
 
 it('keeps a stale provisional target retained by the user during initial hydration', async () => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await conversationPlugin());
   await manager.createTab();
-  const hydration = holdHistory(plugin, 'conversation-1');
+  const hydration = holdKiroHistory(plugin, 'conversation-1');
   const stale = manager.viewerSlot.show('conversation-1');
   await hydration.started;
   const retained = manager.getActiveTab()!;
@@ -430,10 +464,10 @@ it('keeps a stale provisional target retained by the user during initial hydrati
 });
 
 it('lets an immediate retained-tab selection supersede an in-flight preview', async () => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await conversationPlugin());
   const retained = (await manager.createTab('retained'))!;
   await manager.viewerSlot.show('conversation-1');
-  const hydration = holdHistory(plugin, 'conversation-2');
+  const hydration = holdKiroHistory(plugin, 'conversation-2');
   const previewSelection = manager.viewerSlot.show('conversation-2');
   await hydration.started;
   const retainedSelection = manager.openConversation('retained');
@@ -443,9 +477,9 @@ it('lets an immediate retained-tab selection supersede an in-flight preview', as
 });
 
 it('drains and invalidates preview navigation before provisional cleanup', async () => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await conversationPlugin());
   await manager.viewerSlot.show('conversation-1');
-  const hydration = holdHistory(plugin, 'conversation-2');
+  const hydration = holdKiroHistory(plugin, 'conversation-2');
   const previewSelection = manager.viewerSlot.show('conversation-2');
   await hydration.started;
   const cleanup = manager.viewerSlot.release();
@@ -457,9 +491,9 @@ it('drains and invalidates preview navigation before provisional cleanup', async
 });
 
 it('prevents queued preview navigation from creating tabs after destroy', async () => {
-  const { manager, plugin, root } = await createManager();
+  const { manager, plugin, root } = await createManager(await conversationPlugin());
   await manager.viewerSlot.show('conversation-1');
-  const hydration = holdHistory(plugin, 'conversation-2');
+  const hydration = holdKiroHistory(plugin, 'conversation-2');
   const first = manager.viewerSlot.show('conversation-2');
   await hydration.started;
   const queued = manager.viewerSlot.show('conversation-3');
@@ -472,7 +506,7 @@ it('prevents queued preview navigation from creating tabs after destroy', async 
 });
 
 it('keeps a wide selection out of retained tabs when its owner closes during reveal', async () => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await conversationPlugin());
   const retained = (await manager.createTab('retained'))!;
   const target = (await manager.createTab('conversation-1', undefined, { activate: false }))!;
   const revealing = deferred<void>();
@@ -489,11 +523,11 @@ it('keeps a wide selection out of retained tabs when its owner closes during rev
 });
 
 it('creates a fresh provisional target when a reused preview closes during switching', async () => {
-  const { manager, plugin } = await createManager();
+  const { manager, plugin } = await createManager(await conversationPlugin());
   const source = (await manager.createTab())!;
   await manager.viewerSlot.show('conversation-1');
   const preview = manager.getActiveTab()!;
-  const hydration = holdHistory(plugin, 'conversation-2');
+  const hydration = holdKiroHistory(plugin, 'conversation-2');
   const navigation = manager.viewerSlot.show('conversation-2');
   await hydration.started;
   await manager.closeTab(preview.id);
@@ -504,7 +538,7 @@ it('creates a fresh provisional target when a reused preview closes during switc
 });
 
 it('seeds the draft its request created even when another tab becomes active before rebind commits', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await conversationPlugin());
   const bound = (await manager.createTab('conversation-1'))!;
   const other = (await manager.createTab(null, undefined, { activate: false }))!;
   const starting = manager.createNewConversation({ projectId: 'project-1' });
@@ -516,7 +550,7 @@ it('seeds the draft its request created even when another tab becomes active bef
 });
 
 it('reattaches a remembered project draft without reseeding its frozen first-turn choice', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await conversationPlugin());
   await manager.createTab();
   await manager.viewerSlot.enter();
   await manager.viewerSlot.startDraft({ projectId: 'project-1' });
@@ -530,7 +564,7 @@ it('reattaches a remembered project draft without reseeding its frozen first-tur
 });
 
 it('leaves a usable presentation when narrowing supersedes an unloading wide entry', async () => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await conversationPlugin());
   const narrow = (await manager.createTab('conversation-1'))!;
   const unloading = deferred<void>();
   const remove = narrow.dom.contentEl.remove.bind(narrow.dom.contentEl);
@@ -641,7 +675,7 @@ async function makeBusy(tab: AssembledTabRuntime, kind: 'turn' | 'background' | 
 }
 
 it.each(['turn', 'background', 'interaction'] as const)('rebinds a preview holding %s without retaining its old presentation', async kind => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await conversationPlugin());
   await manager.viewerSlot.show('conversation-1');
   const preview = manager.getActiveTab()!;
   const release = await makeBusy(preview, kind);
@@ -657,7 +691,7 @@ it.each(['turn', 'background', 'interaction'] as const)('rebinds a preview holdi
 });
 
 it.each(['turn', 'background', 'interaction'] as const)('detaches a preview holding %s when leaving wide', async kind => {
-  const { manager } = await createManager();
+  const { manager } = await createManager(await conversationPlugin());
   const retained = (await manager.createTab('conversation-1'))!;
   await manager.viewerSlot.show('conversation-2');
   const preview = manager.getActiveTab()!;

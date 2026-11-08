@@ -40,11 +40,11 @@ it('replaces history and its welcome greeting when the conversation becomes empt
   await Promise.resolve();
   expect(within(host).getByText('Earlier prompt')).toBeDefined();
   expect(within(host).getByText('Earlier answer')).toBeDefined();
-  expect(within(host).getByText('Claudian')).toBeDefined();
+  expect(within(host).getByText('Kirodian')).toBeDefined();
   expect(within(host).getByText('Hello')).toBeDefined();
 
   renderer.renderMessages([], () => 'Welcome back');
-  expect(within(host).getByText('Claudian')).toBeDefined();
+  expect(within(host).getByText('Kirodian')).toBeDefined();
   expect(within(host).getByText('Welcome back')).toBeDefined();
   for (const stale of ['Earlier prompt', 'Earlier answer', 'Hello']) {
     expect(within(host).queryByText(stale)).toBeNull();

@@ -6,7 +6,7 @@ import { createPlugin } from '@test/helpers/features/chat/TabManagerIntegrationH
 import type { SessionRuntimePool } from '@/features/chat/sessions/SessionRuntimePool';
 
 it('retains the configured session budget and reports a guarded history-release failure', async () => {
-  registerChatTestProvider('claude', { models: [{ value: 'claude-default', label: 'Claude' }] });
+  registerChatTestProvider('kiro', { models: [{ value: 'kiro-default', label: 'Kiro' }] });
   const failure = new Error('History release failed');
   const releases: Array<{ id: string; allowed: boolean }> = [];
   const errors: unknown[] = [];
@@ -20,7 +20,7 @@ it('retains the configured session budget and reports a guarded history-release 
   } satisfies Partial<ConstructorParameters<typeof SessionRuntimePool>[0]>;
   const pool = createSessionRuntimePool(() => host, options);
   const host = await createPlugin({ sessionRuntimes: pool });
-  const first = pool.acquire({ conversationId: 'first', providerId: 'claude', draftModel: null }, { reveal() {} }).attachment;
+  const first = pool.acquire({ conversationId: 'first', providerId: 'kiro', draftModel: null }, { reveal() {} }).attachment;
   const firstModel = first.runtime.model;
   pool.release(first);
   // Detach has scheduled any eviction; observe whether it incorrectly releases a retained model.
@@ -28,7 +28,7 @@ it('retains the configured session budget and reports a guarded history-release 
   expect(first.runtime.peekModel === firstModel).toBe(true);
   expect(releases).toEqual([]);
 
-  const second = pool.acquire({ conversationId: 'second', providerId: 'claude', draftModel: null }, { reveal() {} }).attachment;
+  const second = pool.acquire({ conversationId: 'second', providerId: 'kiro', draftModel: null }, { reveal() {} }).attachment;
   const secondModel = second.runtime.model;
   pool.release(second);
   await new Promise<void>(resolve => setImmediate(resolve));

@@ -17,7 +17,17 @@ import { renderEnvironmentSettingsSection } from '@/shared/settings/EnvironmentS
 
 
 
-vi.mock('obsidian', async () => (await vi.importActual<typeof import('@test/helpers/ObsidianSettingsDOM')>('@test/helpers/ObsidianSettingsDOM')));
+vi.mock('obsidian', async () => {
+  const dom = await vi.importActual<typeof import('@test/helpers/ObsidianSettingsDOM')>('@test/helpers/ObsidianSettingsDOM');
+  // AccessibleSetting (the merged src subclass) reads nameEl in nameControl() and
+  // setHeading(); the final ObsidianSettingsDOM.Setting omits nameEl, so provide
+  // a real element. renderCLIInstallationSetting's text input has no aria-label,
+  // so nameControl dereferences nameEl.id.
+  class Setting extends dom.Setting {
+    readonly nameEl = this.settingEl.appendChild(document.createElement('div'));
+  }
+  return { ...dom, Setting };
+});
 
 afterEach(() => {
   (Notice as unknown as Mock).mockClear();

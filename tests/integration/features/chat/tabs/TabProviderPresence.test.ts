@@ -5,77 +5,85 @@ import { conversationRecord, createManager, createPlugin, deferred } from '@test
 import { Notice } from 'obsidian';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
-import type { ProviderId } from '@/core/providers/types';
 
-function providerFixture(provider: ProviderId, startRuntime: () => Promise<void>) {
-  const primary = registerChatTestProvider('claude', { models: [{ value: 'claude-default', label: 'Claude' }] });
-  const other = registerChatTestProvider(provider, {
-    models: [{ value: `${provider}:model`, label: provider }], workspace: { startRuntime },
+// Upstream exercised passive shared-runtime startup across a primary (`claude`)
+// and a secondary provider (`codex`/`opencode`). This fork ships only `kiro`, so
+// the multi-provider dimension collapses to a single provider: the mechanism keys
+// on `startsSharedRuntimeOnTabPresence`, which kiro's built-in capabilities leave
+// off, so each test opts the kiro test provider into the flag and supplies the
+// shared-runtime `startRuntime` workspace. The deleted-provider `it.each` cases
+// were folded into one kiro run each.
+function providerFixture(startRuntime: () => Promise<void>) {
+  return registerChatTestProvider('kiro', {
+    models: [{ value: 'kiro-default', label: 'Kiro' }, { value: 'kiro-alternate', label: 'Alternate' }],
+    capabilities: { startsSharedRuntimeOnTabPresence: true },
+    workspace: { startRuntime },
   });
-  return { primary, other };
 }
 
-it.each((['codex', 'opencode'] as const).flatMap(provider => [
-  { provider, restored: { conversationId: `${provider}-history` } },
-  { provider, restored: { conversationId: null, providerId: provider, draftModel: `${provider}:model` } },
-]))('starts a shared runtime for an inactive restored tab without creating execution: %o', async ({ provider, restored }) => {
+// Upstream contrasted a non-flagged primary (`claude`) visible tab against a
+// flagged secondary (`codex`/`opencode`) hidden tab so only the secondary's
+// runtime started. A kiro-only fork cannot register a second provider, and kiro
+// is both the default and the flagged provider, so the visible/hidden contrast is
+// dropped: the restored inactive tab is the only committed tab, and startup is
+// still asserted to fire exactly once per provider for it without assembling the
+// tab or creating a session.
+it.each([
+  { restored: { conversationId: 'kiro-history' } as const },
+  { restored: { conversationId: null, providerId: 'kiro' as const, draftModel: 'kiro-default' } },
+])('starts a shared runtime for an inactive restored tab without creating execution: %o', async ({ restored }) => {
   const started = deferred<void>();
   const startRuntime = vi.fn(async () => { started.resolve(); });
-  const { primary, other } = providerFixture(provider, startRuntime);
+  const provider = providerFixture(startRuntime);
   const plugin = await createPlugin({
-    getCachedConversation: id => conversationRecord(id, { providerId: id === `${provider}-history` ? provider : 'claude' }),
+    getCachedConversation: id => conversationRecord(id, { providerId: 'kiro' }),
   });
-  ProviderRegistry.setEnabled(provider, plugin.settings, true);
+  ProviderRegistry.setEnabled('kiro', plugin.settings, true);
   const { manager } = await createManager(plugin);
   await manager.restoreState({
-    openTabs: [{ tabId: 'visible', conversationId: 'claude-history' }, { tabId: 'hidden', ...restored }],
+    openTabs: [{ tabId: 'visible', conversationId: null }, { tabId: 'hidden', ...restored }],
     activeTabId: 'visible',
   });
   await started.promise;
   expect(startRuntime).toHaveBeenCalledTimes(1);
   expect(manager.getTab('hidden')).toBeNull();
-  expect(primary.sessions).toEqual([]);
-  expect(other.sessions).toEqual([]);
+  expect(provider.sessions).toEqual([]);
 });
 
-it.each(['codex', 'opencode'] as const)('starts a shared runtime when a blank tab changes to %s without preparing execution', async provider => {
+it('starts a shared runtime when a blank tab selects a shared-runtime model without preparing execution', async () => {
   const started = deferred<void>();
   const startRuntime = vi.fn(async () => { started.resolve(); });
-  const { primary, other } = providerFixture(provider, startRuntime);
+  const provider = providerFixture(startRuntime);
   const plugin = await createPlugin();
-  ProviderRegistry.setEnabled(provider, plugin.settings, true);
+  ProviderRegistry.setEnabled('kiro', plugin.settings, true);
   const { manager } = await createManager(plugin);
   const tab = (await manager.createTab())!;
-  expect(startRuntime).not.toHaveBeenCalled();
-  tab.session.selectDraft(provider, `${provider}:model`);
+  tab.session.selectDraft('kiro', 'kiro-alternate');
   manager.reconcileProviderAvailability();
   await started.promise;
   expect(startRuntime).toHaveBeenCalledTimes(1);
-  expect(primary.sessions).toEqual([]);
-  expect(other.sessions).toEqual([]);
+  expect(provider.sessions).toEqual([]);
   expect(tab.executionCoordinator.state).toBe('absent');
 });
 
 it('keeps repeated passive runtime startup failures silent', async () => {
-  const failed = deferred<void>();
-  let nextAttempt = failed;
-  const startRuntime = vi.fn(async () => { nextAttempt.resolve(); throw new Error('Codex missing'); });
-  const { other } = providerFixture('codex', startRuntime);
+  let nextAttempt = deferred<void>();
+  const startRuntime = vi.fn(async () => { nextAttempt.resolve(); throw new Error('Kiro runtime missing'); });
+  const provider = providerFixture(startRuntime);
   const plugin = await createPlugin();
-  ProviderRegistry.setEnabled('codex', plugin.settings, true);
+  ProviderRegistry.setEnabled('kiro', plugin.settings, true);
   const { manager } = await createManager(plugin);
-  const tab = (await manager.createTab())!;
-  tab.session.selectDraft('codex', 'codex:model');
-  manager.reconcileProviderAvailability();
-  await failed.promise;
-  // A later tab action retries passive startup after the failed attempt.
+  // The first committed kiro tab attempts passive startup and fails.
   await manager.createTab();
+  await nextAttempt.promise;
+  // A later tab action retries passive startup after the failed attempt.
   nextAttempt = deferred<void>();
+  await manager.createTab();
   manager.reconcileProviderAvailability();
   await nextAttempt.promise;
   expect(startRuntime).toHaveBeenCalledTimes(2);
   expect(Notice).not.toHaveBeenCalled();
-  expect(other.sessions).toEqual([]);
+  expect(provider.sessions).toEqual([]);
 });
 
 beforeEach(() => { useNextTaskAnimationFrames(); });

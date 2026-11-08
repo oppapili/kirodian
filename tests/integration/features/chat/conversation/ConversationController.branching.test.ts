@@ -11,7 +11,9 @@ import { ConversationController } from '@/features/chat/conversation/Conversatio
 
 async function createConversationControllerDeps(...args: Parameters<typeof createBaseDeps>) {
   const deps = await createBaseDeps(...args);
-  vi.mocked(deps.plugin.getConversationSummary).mockImplementation(id => conversationRecord(id));
+  // The shared conversationRecord fixture still defaults to the removed 'claude' provider;
+  // Kirodian ships only 'kiro', so resolve the summary to the registered provider.
+  vi.mocked(deps.plugin.getConversationSummary).mockImplementation(id => conversationRecord(id, { providerId: 'kiro' }));
   return deps;
 }
 
@@ -142,7 +144,7 @@ it('carries the live project paragraph on branch navigation and recovery, and dr
   const deps = (await createConversationControllerDeps({ getExecutionCoordinator: () => coordinator, getSelectedModel: () => 'model-a' }));
   Object.assign(deps.plugin, {
     projects,
-    getConversationSummary: (id: string) => ({ id, providerId: 'claude', projectId: record.id }),
+    getConversationSummary: (id: string) => ({ id, providerId: 'kiro', projectId: record.id }),
   });
   // The prompt names the coordinator's captured directory, never the host's current vault.
   expect(deps.plugin.providerHost.workingDirectory).not.toBe(coordinator.workingDirectory);

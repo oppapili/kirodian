@@ -104,6 +104,7 @@ vi.mock('@/core/providers/ProviderWorkspaceRegistry', () => ({
 vi.mock('@/core/providers/ProviderRegistry', () => ({
   ProviderRegistry: {
     createExecutionBackend: vi.fn(),
+    resolveExecutionWorkingDirectory: vi.fn(async (_host: unknown, _providerId: string, workingDirectory: string) => workingDirectory),
     createSubagentHistoryService: vi.fn().mockReturnValue(null),
     createTitleGenerationService: vi.fn().mockImplementation(() => {
       const service = {

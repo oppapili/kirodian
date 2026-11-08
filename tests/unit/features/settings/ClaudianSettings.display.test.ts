@@ -18,6 +18,13 @@ type MockChainableComponent = Record<string, Mock> & {
   selectEl?: HTMLSelectElement;
 };
 
+type MockToggleComponent = MockChainableComponent & {
+  toggleEl: HTMLLabelElement;
+  disabled: boolean;
+  getValue: Mock;
+  setDisabled: Mock;
+};
+
 vi.mock('obsidian', async () => {
   const obsidian = (await vi.importActual<typeof import('../../../__mocks__/obsidian')>('../../../__mocks__/obsidian'));
 
@@ -27,9 +34,9 @@ vi.mock('obsidian', async () => {
     readonly controlEl = {
       createSpan: vi.fn(() => createGitStatusElement('control')),
     };
-    readonly nameEl = {
+    readonly nameEl = Object.assign(document.createElement('div'), {
       createSpan: vi.fn(() => createGitStatusElement('name')),
-    };
+    });
 
     constructor(_containerEl: HTMLElement) {}
 
@@ -76,8 +83,8 @@ vi.mock('obsidian', async () => {
       return this;
     }
 
-    addToggle(callback: (toggle: MockChainableComponent) => void): this {
-      const toggle = createChainableComponent();
+    addToggle(callback: (toggle: MockToggleComponent) => void): this {
+      const toggle = createToggleComponent();
       toggle.onChange.mockImplementation((handler: (value: boolean) => Promise<void>) => {
         mockToggleChanges.set(this.name, handler);
         return toggle;
@@ -135,6 +142,30 @@ vi.mock('obsidian', async () => {
     ]) {
       component[method] = vi.fn(() => component);
     }
+    return component;
+  }
+
+  // AccessibleSetting.addToggle wraps the control via exposeToggleState, which
+  // reads control.toggleEl (a real element containing an <input>) plus the
+  // value/disabled API. Model those so the merged accessibility wrapper runs.
+  function createToggleComponent(): MockToggleComponent {
+    const toggleEl = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    toggleEl.append(input);
+    const component = createChainableComponent() as MockToggleComponent;
+    component.toggleEl = toggleEl;
+    component.disabled = false;
+    let value = false;
+    component.getValue = vi.fn(() => value);
+    (component.setValue as Mock).mockImplementation((next: boolean) => {
+      value = next;
+      return component;
+    });
+    component.setDisabled = vi.fn((next: boolean) => {
+      component.disabled = next;
+      return component;
+    });
     return component;
   }
 

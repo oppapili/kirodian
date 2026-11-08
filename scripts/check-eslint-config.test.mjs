@@ -199,7 +199,7 @@ test('test imports require declared packages, including Vitest factory imports',
     assert.ok(result.messages.some(message => message.ruleId === rule), code);
   }
   for (const code of [
-    "import { parse } from 'yaml'; void parse;",
+    "import { parse } from 'jsonc-parser'; void parse;",
     "void import('@modelcontextprotocol/sdk/types.js');",
     "void vi.importActual('obsidian');",
     "void import('node:fs/promises'); void require('fs');",
