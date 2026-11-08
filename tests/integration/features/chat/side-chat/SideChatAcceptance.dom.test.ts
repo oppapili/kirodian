@@ -13,8 +13,8 @@ import { fireEvent, screen, waitFor } from '@testing-library/dom';
 
 import { renderProjectMemberInstructions } from '@/core/prompt/projectPrompt';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
-import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 import { buildTabRuntimePorts } from '@/features/chat/tabs/runtime/TabRuntimePorts';
+import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 
 afterEach(releaseSideChatHarnesses);
 

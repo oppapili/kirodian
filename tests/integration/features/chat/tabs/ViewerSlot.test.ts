@@ -2,7 +2,8 @@
 import { useNextTaskAnimationFrames } from '@test/helpers/dom/animationFrames';
 import type { ChatFeatureHostOverrides } from '@test/helpers/features/chat/ChatFeatureHostFixture';
 import { registerChatTestProvider } from '@test/helpers/features/chat/ChatProviderFixture';
-import { conversationRecord, createManager, createPlugin, deferred, holdHistory } from '@test/helpers/features/chat/TabManagerIntegrationHarness';
+import type { holdHistory } from '@test/helpers/features/chat/TabManagerIntegrationHarness';
+import { conversationRecord, createManager, createPlugin, deferred } from '@test/helpers/features/chat/TabManagerIntegrationHarness';
 import { App, TFile } from 'obsidian';
 
 import { BUILT_IN_COMMANDS } from '@/core/commands/builtInCommands';

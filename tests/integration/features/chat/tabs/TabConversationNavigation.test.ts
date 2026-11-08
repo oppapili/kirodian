@@ -1,7 +1,8 @@
 /** @vitest-environment jsdom */
 import { useNextTaskAnimationFrames } from '@test/helpers/dom/animationFrames';
 import { registerChatTestProvider } from '@test/helpers/features/chat/ChatProviderFixture';
-import { conversationRecord, createManager, createPlugin, deferred, holdHistory, navigationOwner } from '@test/helpers/features/chat/TabManagerIntegrationHarness';
+import type { holdHistory} from '@test/helpers/features/chat/TabManagerIntegrationHarness';
+import { conversationRecord, createManager, createPlugin, deferred, navigationOwner } from '@test/helpers/features/chat/TabManagerIntegrationHarness';
 import { fireEvent, within } from '@testing-library/dom';
 
 import { BUILT_IN_COMMANDS } from '@/core/commands/builtInCommands';
