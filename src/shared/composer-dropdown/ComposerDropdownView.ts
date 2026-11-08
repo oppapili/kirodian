@@ -26,6 +26,7 @@ interface ItemRow {
 export class ComposerDropdownView {
   private dropdownEl: HTMLElement | null = null;
   private rows: ItemRow[] = [];
+  private positioningWindow: Window | null = null;
   private readonly listboxId = `claudian-composer-listbox-${++nextListboxId}`;
   /** Textbox relationships this menu wrote; another popup may have replaced them since. */
   private readonly writtenAttributes = new Map<string, string>();
@@ -41,6 +42,7 @@ export class ComposerDropdownView {
 
   destroy(): void {
     const wasVisible = this.isVisible();
+    this.#stopPositioning();
     for (const attribute of [...this.writtenAttributes.keys()]) this.#releaseInputAttribute(attribute);
     this.dropdownEl?.remove();
     this.dropdownEl = null;
@@ -49,6 +51,7 @@ export class ComposerDropdownView {
   }
 
   hide(): void {
+    this.#stopPositioning();
     this.#releaseInputAttribute('aria-activedescendant');
     this.#releaseInputAttribute('aria-controls');
     if (!this.isVisible()) return;
@@ -82,6 +85,11 @@ export class ComposerDropdownView {
     dropdown.addClass('is-visible');
     this.#setInputAttribute('aria-controls', this.listboxId);
     this.updateSelection(selectedIndex);
+    if (!wasVisible && this.options.fixed) {
+      this.positioningWindow = this.options.inputEl.ownerDocument.defaultView;
+      this.positioningWindow?.addEventListener('scroll', this.#positionFixed, true);
+      this.positioningWindow?.addEventListener('resize', this.#positionFixed);
+    }
     this.#positionFixed();
     if (!wasVisible) this.options.onVisibilityChange?.();
   }
@@ -132,7 +140,7 @@ export class ComposerDropdownView {
     if (row.detailEl) row.detailEl.textContent = item.detail ?? '';
   }
 
-  updateSelection(selectedIndex: number): void {
+  updateSelection(selectedIndex: number, reveal = true): void {
     this.#releaseInputAttribute('aria-activedescendant');
     for (let index = 0; index < this.rows.length; index++) {
       const itemEl = this.rows[index].el;
@@ -141,9 +149,19 @@ export class ComposerDropdownView {
       itemEl.setAttribute('aria-selected', String(selected));
       if (selected) {
         this.#setInputAttribute('aria-activedescendant', itemEl.id);
-        itemEl.scrollIntoView({ block: 'nearest' });
+        if (reveal) this.#revealInList(itemEl);
       }
     }
+  }
+
+  /** As in the resume picker, reveal only inside the popup, not its workspace ancestors. */
+  #revealInList(item: HTMLElement): void {
+    const list = this.dropdownEl;
+    if (!list) return;
+    const listRect = list.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+    if (itemRect.top < listRect.top) list.scrollTop -= listRect.top - itemRect.top;
+    else if (itemRect.bottom > listRect.bottom) list.scrollTop += itemRect.bottom - listRect.bottom;
   }
 
   #ensureDropdown(): HTMLElement {
@@ -176,8 +194,16 @@ export class ComposerDropdownView {
     if (this.#textbox.getAttribute(attribute) === written) this.#textbox.removeAttribute(attribute);
   }
 
-  #positionFixed(): void {
-    if (!this.dropdownEl || !this.options.fixed) return;
+  #stopPositioning(): void {
+    this.positioningWindow?.removeEventListener('scroll', this.#positionFixed, true);
+    this.positioningWindow?.removeEventListener('resize', this.#positionFixed);
+    this.positioningWindow = null;
+  }
+
+  readonly #positionFixed = (event?: Event): void => {
+    if (!this.dropdownEl || !this.options.fixed || !this.isVisible()) return;
+    if (event?.type === 'scroll' && event.target && 'nodeType' in event.target
+      && this.dropdownEl.contains(event.target as Node)) return;
     const inputRect = this.options.inputEl.getBoundingClientRect();
     const viewportHeight = this.options.inputEl.ownerDocument.defaultView?.innerHeight
       ?? window.innerHeight;
@@ -186,5 +212,5 @@ export class ComposerDropdownView {
       '--claudian-fixed-dropdown-left': `${inputRect.left}px`,
       '--claudian-fixed-dropdown-width': `${Math.max(inputRect.width, 280)}px`,
     });
-  }
+  };
 }

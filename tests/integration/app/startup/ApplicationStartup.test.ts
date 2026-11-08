@@ -1,5 +1,6 @@
 import { DesktopVault } from '@test/helpers/core/DesktopVault';
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@test/helpers/defaultSettings';
+import type { Mock } from 'vitest';
 
 import { SettingsCoordinator } from '@/app/settings/SettingsCoordinator';
 import { type ApplicationDomains, startApplication } from '@/app/startup/ApplicationStartup';
@@ -8,15 +9,15 @@ import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 
 // Provider history readers touch the filesystem through Node's fs.
-jest.mock('fs');
+vi.mock('fs');
 
 // Kiro is the sole provider, so conversations hydrate through the kiro
 // native-history resolver, which reads the real fs sync API directly. Under
 // `jest.mock('fs')` those reads return undefined and crash path containment.
 // Resolve no native session directory, so hydration is a no-op and returns the
 // conversation unchanged (the production path when no native history file exists).
-jest.mock('@/providers/kiro/history/KiroHistoryPathResolver', () => ({
-  ...jest.requireActual('@/providers/kiro/history/KiroHistoryPathResolver'),
+vi.mock('@/providers/kiro/history/KiroHistoryPathResolver', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/providers/kiro/history/KiroHistoryPathResolver')>()),
   resolveKiroSessionDirectory: () => null,
 }));
 
@@ -48,7 +49,7 @@ function expectedDefaultStartupSettings(): Record<string, unknown> {
 
 describe('startApplication', () => {
   let mockApp: any;
-  let plugin: { app: any; loadData: jest.Mock; saveData: jest.Mock };
+  let plugin: { app: any; loadData: Mock; saveData: Mock };
   const disposals: Array<() => Promise<void>> = [];
 
   async function loadApplication(
@@ -81,31 +82,31 @@ describe('startApplication', () => {
   }
 
   beforeEach(() => {
-    jest.restoreAllMocks();
-    jest.clearAllMocks();
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
     mockApp = {
       vault: {
         adapter: {
           basePath: '/test/vault',
-          exists: jest.fn().mockResolvedValue(false),
-          read: jest.fn().mockResolvedValue(''),
-          write: jest.fn().mockResolvedValue(undefined),
-          remove: jest.fn().mockResolvedValue(undefined),
-          mkdir: jest.fn().mockResolvedValue(undefined),
-          list: jest.fn().mockResolvedValue({ files: [], folders: [] }),
-          stat: jest.fn().mockResolvedValue(null),
-          rename: jest.fn().mockResolvedValue(undefined),
+          exists: vi.fn().mockResolvedValue(false),
+          read: vi.fn().mockResolvedValue(''),
+          write: vi.fn().mockResolvedValue(undefined),
+          remove: vi.fn().mockResolvedValue(undefined),
+          mkdir: vi.fn().mockResolvedValue(undefined),
+          list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+          stat: vi.fn().mockResolvedValue(null),
+          rename: vi.fn().mockResolvedValue(undefined),
         },
       },
       workspace: {
         layoutReady: true,
-        onLayoutReady: jest.fn(),
+        onLayoutReady: vi.fn((callback: () => void) => callback()),
       },
     };
     plugin = {
       app: mockApp,
-      loadData: jest.fn().mockResolvedValue({}),
-      saveData: jest.fn().mockResolvedValue(undefined),
+      loadData: vi.fn().mockResolvedValue({}),
+      saveData: vi.fn().mockResolvedValue(undefined),
     };
   });
 
@@ -173,7 +174,7 @@ describe('startApplication', () => {
         return '';
       });
 
-      const saveSpy = jest.spyOn(SettingsCoordinator.prototype, 'persistCurrent');
+      const saveSpy = vi.spyOn(SettingsCoordinator.prototype, 'persistCurrent');
       const domains = await loadApplication();
 
       expect(domains.settings.getCommittedSettings().model).toBe(DEFAULT_CLAUDIAN_SETTINGS.model);

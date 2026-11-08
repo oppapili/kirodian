@@ -1,4 +1,4 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 import '@/providers';
 
 import { createTestSession } from '@test/helpers/ConversationPorts';
@@ -50,7 +50,7 @@ function createSurface() {
       getSuppressedEl: () => composer,
     }),
   } as unknown as InputControllerDeps);
-  const delivery = jest.spyOn(input, 'answerQuestion').mockResolvedValue(undefined);
+  const delivery = vi.spyOn(input, 'answerQuestion').mockResolvedValue(undefined);
   const response: ChatMessage = { id: 'response', role: 'assistant', timestamp: testDate().getTime(), content: '', contentBlocks: [] };
   state.addMessage(response);
   state.currentContentEl = renderer.addMessage(response).querySelector('.claudian-message-content');

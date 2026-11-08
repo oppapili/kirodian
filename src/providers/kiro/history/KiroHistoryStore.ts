@@ -424,9 +424,11 @@ function reconcileToolUpdate(turn: PendingTurn, update: Record<string, unknown>)
     title: readString(update.title),
   });
   const rawName = rawNameResolution.rawName;
-  const rawInput = update.rawInput !== undefined ? update.rawInput : current?.rawInput;
+  // ACP v1 treats null raw fields like omitted updates; an initial null remains native payload.
+  const rawInput = update.rawInput !== undefined && (update.rawInput !== null || !current)
+    ? update.rawInput : current?.rawInput;
   const renderedContent = renderToolContent(update.content);
-  const rawOutput = update.rawOutput !== undefined
+  const rawOutput = update.rawOutput !== undefined && (update.rawOutput !== null || !current)
     ? update.rawOutput
     : current?.rawOutput;
   const normalized = normalizeKiroToolCall({

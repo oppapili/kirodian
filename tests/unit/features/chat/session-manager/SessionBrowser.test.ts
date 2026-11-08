@@ -5,6 +5,7 @@ import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
 import { createMockEl } from '@test/helpers/MockElement';
 import { testDate } from '@test/helpers/testClock';
 import { Menu, setIcon } from 'obsidian';
+import type { Mock } from 'vitest';
 
 import type { TitleGenerationService } from '@/core/providers/types';
 import type { ClaudianSettings } from '@/core/types';
@@ -15,26 +16,28 @@ import type { ChatSessionRuntime } from '@/features/chat/sessions/ChatSessionRun
 import { ChatState } from '@/features/chat/state/ChatState';
 import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
 
-jest.mock('@/shared/modals/ConfirmModal', () => ({
-  confirm: jest.fn().mockResolvedValue(true),
+
+
+vi.mock('@/shared/modals/ConfirmModal', () => ({
+  confirm: vi.fn().mockResolvedValue(true),
 }));
 
 function createMockDeps(overrides: Record<string, unknown> = {}): ConversationControllerDeps & { session: ChatSessionRuntime; plugin: ConversationControllerDeps['plugin'] & { settings: ClaudianSettings }; getHistoryDropdown: () => HTMLElement; getTitleGenerationService: () => TitleGenerationService | null } {
   const session = createTestSession({ getState: () => state });
   const state: ChatState = new ChatState({}, undefined, session.turns);
-  const inputEl = { value: '', focus: jest.fn() } as unknown as HTMLTextAreaElement;
+  const inputEl = { value: '', focus: vi.fn() } as unknown as HTMLTextAreaElement;
   const historyDropdown = createMockEl();
   let welcomeEl: any = createMockEl();
   const messagesEl = createMockEl();
 
   const linkedContentController = {
-    resetAutoDraft: jest.fn(),
-    lock: jest.fn(),
+    resetAutoDraft: vi.fn(),
+    lock: vi.fn(),
   };
 
   const deps = {
     plugin: {
-      createConversation: jest.fn().mockResolvedValue({
+      createConversation: vi.fn().mockResolvedValue({
         id: 'new-conv',
         title: 'New Conversation',
         messages: [],
@@ -42,7 +45,7 @@ function createMockDeps(overrides: Record<string, unknown> = {}): ConversationCo
         createdAt: Date.now(),
         lastActivityAt: Date.now(),
       }),
-      switchConversation: jest.fn().mockResolvedValue({
+      switchConversation: vi.fn().mockResolvedValue({
         id: 'switched-conv',
         title: 'Switched Conversation',
         messages: [],
@@ -50,16 +53,16 @@ function createMockDeps(overrides: Record<string, unknown> = {}): ConversationCo
         createdAt: Date.now(),
         lastActivityAt: Date.now(),
       }),
-      getConversationById: jest.fn().mockResolvedValue(null),
+      getConversationById: vi.fn().mockResolvedValue(null),
       getConversationSummary(id: string) { return this.getConversationSync(id); },
-      getConversationSync: jest.fn().mockReturnValue(null),
-      getConversationList: jest.fn().mockReturnValue([]),
-      updateConversation: jest.fn().mockResolvedValue(undefined),
-      renameConversation: jest.fn().mockResolvedValue(undefined),
-      conversationLifecycle: { delete: jest.fn().mockResolvedValue(undefined) },
+      getConversationSync: vi.fn().mockReturnValue(null),
+      getConversationList: vi.fn().mockReturnValue([]),
+      updateConversation: vi.fn().mockResolvedValue(undefined),
+      renameConversation: vi.fn().mockResolvedValue(undefined),
+      conversationLifecycle: { delete: vi.fn().mockResolvedValue(undefined) },
       agentService: {
-        getSessionId: jest.fn().mockResolvedValue(null),
-        setSessionId: jest.fn(),
+        getSessionId: vi.fn().mockResolvedValue(null),
+        setSessionId: vi.fn(),
       },
       settings: {
         userName: '',
@@ -71,10 +74,10 @@ function createMockDeps(overrides: Record<string, unknown> = {}): ConversationCo
     } as any,
     state,
     renderer: {
-      renderMessages: jest.fn().mockReturnValue(createMockEl()),
+      renderMessages: vi.fn().mockReturnValue(createMockEl()),
     } as any,
     subagentManager: {
-      clear: jest.fn(),
+      clear: vi.fn(),
     } as any,
     getHistoryDropdown: () => historyDropdown as any,
     getWelcomeEl: () => welcomeEl,
@@ -83,9 +86,9 @@ function createMockDeps(overrides: Record<string, unknown> = {}): ConversationCo
     getInputEl: () => inputEl,
     getLinkedContentController: () => linkedContentController as any,
     getImageContextManager: () => ({
-      clearImages: jest.fn(),
+      clearImages: vi.fn(),
     }) as any,
-    clearQueuedMessage: jest.fn(),
+    clearQueuedMessage: vi.fn(),
     getTitleGenerationService: () => null,
     getExecutionCoordinator: () => null,
     ...overrides,
@@ -127,9 +130,9 @@ describe('SessionBrowser', () => {
   let controller: SessionBrowser;
   let deps: ReturnType<typeof createMockDeps>;
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     (Menu as typeof Menu & { instances: unknown[] }).instances.length = 0;
-    mockTitleService = { generateTitle: jest.fn().mockResolvedValue(undefined), cancel: jest.fn() };
+    mockTitleService = { generateTitle: vi.fn().mockResolvedValue(undefined), cancel: vi.fn() };
     deps = createMockDeps({ getTitleGenerationService: () => mockTitleService });
     controller = createBrowser(deps);
   });
@@ -143,7 +146,7 @@ describe('SessionBrowser', () => {
 
     describe('updateHistoryDropdown with conversations', () => {
       it('should show "No conversations" when list is empty', () => {
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([]);
+        (deps.plugin.getConversationList as Mock).mockReturnValue([]);
 
         renderDropdown(controller, deps);
 
@@ -154,7 +157,7 @@ describe('SessionBrowser', () => {
       });
 
       it('should sort conversations by lastActivityAt descending', () => {
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'conv-old', title: 'Old', createdAt: 1000, lastActivityAt: 1000 },
           { id: 'conv-new', title: 'New', createdAt: 2000, lastActivityAt: 5000 },
           { id: 'conv-mid', title: 'Mid', createdAt: 3000, lastActivityAt: 3000 },
@@ -172,7 +175,7 @@ describe('SessionBrowser', () => {
       });
 
       it('should show loading indicator for pending title generation', () => {
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'conv-1', title: 'Generating...', createdAt: 1000, lastActivityAt: 1000, titleGenerationStatus: 'pending' },
         ]);
 
@@ -188,7 +191,7 @@ describe('SessionBrowser', () => {
         holdResponse(deps.session.turns);
         deps.state.currentConversationId = 'conv-active';
 
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'conv-1', title: 'Test', createdAt: 1000, lastActivityAt: 1000 },
         ]);
 
@@ -201,7 +204,7 @@ describe('SessionBrowser', () => {
 
         const clickHandlers = deleteBtn!._eventListeners?.get('click');
         expect(clickHandlers).toBeDefined();
-        await clickHandlers![0]({ stopPropagation: jest.fn() });
+        await clickHandlers![0]({ stopPropagation: vi.fn() });
 
         expect(deps.plugin.conversationLifecycle.delete).toHaveBeenCalledWith(['conv-1']);
       });
@@ -210,14 +213,14 @@ describe('SessionBrowser', () => {
     describe('renderHistoryDropdown', () => {
       it('partitions pinned sessions into a dedicated dual-mode section', () => {
         const container = createMockEl();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'normal', title: 'Normal', createdAt: 2, lastActivityAt: 2 },
           { id: 'pinned-old', title: 'Pinned old', createdAt: 1, lastActivityAt: 1, isPinned: true },
           { id: 'pinned-new', title: 'Pinned new', createdAt: 3, lastActivityAt: 3, isPinned: true },
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           showPinnedSection: true,
           sort: 'last-updated',
         });
@@ -238,7 +241,7 @@ describe('SessionBrowser', () => {
 
       it('moves pinned content groups above standalone pinned sessions without duplication', () => {
         const container = createMockEl();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           {
             id: 'note-regular',
             title: 'Note regular',
@@ -271,7 +274,7 @@ describe('SessionBrowser', () => {
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           showPinnedSection: true,
           organization: 'linked-content',
           sort: 'last-updated',
@@ -308,8 +311,8 @@ describe('SessionBrowser', () => {
 
       it.each(['Enter', ' '])('opens a focusable dual-mode session with %s', async (key) => {
         const container = createMockEl();
-        const onSelectConversation = jest.fn().mockResolvedValue(undefined);
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([{
+        const onSelectConversation = vi.fn().mockResolvedValue(undefined);
+        (deps.plugin.getConversationList as Mock).mockReturnValue([{
           id: 'session-1',
           providerId: 'kiro',
           title: 'Keyboard session',
@@ -324,8 +327,8 @@ describe('SessionBrowser', () => {
 
         const item = container.querySelector('.claudian-history-item')!;
         const content = item.querySelector('.claudian-history-item-content')!;
-        const preventDefault = jest.fn();
-        const stopPropagation = jest.fn();
+        const preventDefault = vi.fn();
+        const stopPropagation = vi.fn();
         expect(item.getAttribute('role')).toBeNull();
         expect(content.getAttribute('role')).toBe('button');
 
@@ -346,12 +349,12 @@ describe('SessionBrowser', () => {
 
       it('hides the pinned section when no sessions are pinned', () => {
         const container = createMockEl();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'normal', title: 'Normal', createdAt: 1 },
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           showPinnedSection: true,
         });
 
@@ -361,7 +364,7 @@ describe('SessionBrowser', () => {
 
       it('pulses completed reviews and hides inline actions while a session waits or errored', () => {
         const container = createMockEl();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           {
             id: 'review-pinned',
             title: 'Pinned review',
@@ -386,7 +389,7 @@ describe('SessionBrowser', () => {
             isRunning: false,
             openState: 'open',
           }),
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           sessionActionMode: 'active',
           showAttentionState: true,
           showPinnedSection: true,
@@ -415,7 +418,7 @@ describe('SessionBrowser', () => {
 
       it('does not mark archived rows for attention presentation', () => {
         const container = createMockEl();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'archived', title: 'Archived', createdAt: 1, isArchived: true },
         ]);
 
@@ -425,7 +428,7 @@ describe('SessionBrowser', () => {
             isRunning: false,
             openState: 'open',
           }),
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           sessionScope: 'archived',
           showArchivedSection: true,
           showAttentionState: true,
@@ -437,7 +440,7 @@ describe('SessionBrowser', () => {
 
       it('filters the current session scope by title and linked-content path', () => {
         const container = createMockEl();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           {
             id: 'active-title',
             title: 'Roadmap review',
@@ -467,7 +470,7 @@ describe('SessionBrowser', () => {
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           showPinnedSection: true,
           sessionScope: 'active',
           searchQuery: 'ROADMAP',
@@ -480,12 +483,12 @@ describe('SessionBrowser', () => {
 
       it('shows a search-specific empty state within the archived scope', () => {
         const container = createMockEl();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'archived', title: 'Archived', createdAt: 1, isArchived: true },
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           showArchivedSection: true,
           sessionScope: 'archived',
           searchQuery: 'missing',
@@ -497,7 +500,7 @@ describe('SessionBrowser', () => {
 
       it('uses the same linked-content grouping and sorting for archived sessions', () => {
         const container = createMockEl();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           {
             id: 'archived-b',
             title: 'Second',
@@ -516,7 +519,7 @@ describe('SessionBrowser', () => {
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           showArchivedSection: true,
           sessionScope: 'archived',
           sessionActionMode: 'archived',
@@ -534,10 +537,10 @@ describe('SessionBrowser', () => {
 
       it('renders full-path content groups only for the linked-content organization', () => {
         const container = createMockEl();
-        const onGroupCollapseChange = jest.fn();
-        const onGroupKeysChange = jest.fn();
-        const onStartLinkedContentConversation = jest.fn().mockResolvedValue(undefined);
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        const onGroupCollapseChange = vi.fn();
+        const onGroupKeysChange = vi.fn();
+        const onStartLinkedContentConversation = vi.fn().mockResolvedValue(undefined);
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           {
             id: 'plan-a',
             title: 'Plan A',
@@ -559,7 +562,7 @@ describe('SessionBrowser', () => {
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           organization: 'linked-content',
           sort: 'created',
           language: 'en',
@@ -592,7 +595,7 @@ describe('SessionBrowser', () => {
         expect(setIcon).toHaveBeenCalledWith(linkedContentActions[0], 'square-pen');
         expect(linkedContentActions[0].getAttribute('aria-label'))
           .toBe('New chat for Plan');
-        const stopPropagation = jest.fn();
+        const stopPropagation = vi.fn();
         linkedContentActions[0].dispatchEvent({ type: 'click', stopPropagation });
         expect(stopPropagation).toHaveBeenCalledTimes(1);
         expect(onStartLinkedContentConversation).toHaveBeenCalledWith(
@@ -622,7 +625,7 @@ describe('SessionBrowser', () => {
 
       it('keeps missing groups visible without offering a new linked chat', () => {
         const container = createMockEl();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([{
+        (deps.plugin.getConversationList as Mock).mockReturnValue([{
           id: 'missing-plan',
           title: 'Missing plan',
           createdAt: 1,
@@ -630,12 +633,12 @@ describe('SessionBrowser', () => {
         }]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           organization: 'linked-content',
           sort: 'created',
           language: 'en',
           contentExists: () => false,
-          onStartLinkedContentConversation: jest.fn(),
+          onStartLinkedContentConversation: vi.fn(),
         });
 
         expect(container.querySelector('.claudian-session-group-status')?.textContent)
@@ -645,7 +648,7 @@ describe('SessionBrowser', () => {
 
       it('paginates large history lists and loads the next bounded page on demand', () => {
         const container = createMockEl();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue(
+        (deps.plugin.getConversationList as Mock).mockReturnValue(
           Array.from({ length: 125 }, (_, index) => ({
             id: `conv-${index}`,
             title: `Conversation ${index}`,
@@ -654,7 +657,7 @@ describe('SessionBrowser', () => {
         );
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           pageSize: 25,
         });
 
@@ -671,8 +674,8 @@ describe('SessionBrowser', () => {
 
       it('keeps pagination bounded across pinned and regular dual-mode sessions', () => {
         const container = createMockEl();
-        const onRerender = jest.fn();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        const onRerender = vi.fn();
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           ...Array.from({ length: 20 }, (_, index) => ({
             id: `pinned-${index}`,
             title: `Pinned ${index}`,
@@ -687,7 +690,7 @@ describe('SessionBrowser', () => {
         ]);
 
         const options = {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           showPinnedSection: true,
           pageSize: 25,
           preserveListState: true,
@@ -713,8 +716,8 @@ describe('SessionBrowser', () => {
       it('does not let collapsed groups consume pagination or hide later headers', () => {
         const container = createMockEl();
         const collapsedGroupKeys = new Set(['content:Projects/A.md']);
-        const onRerender = jest.fn();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        const onRerender = vi.fn();
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           ...Array.from({ length: 75 }, (_, index) => ({
             id: `a-${index}`,
             title: `A ${index}`,
@@ -730,7 +733,7 @@ describe('SessionBrowser', () => {
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           onRerender,
           organization: 'linked-content',
           sort: 'created',
@@ -762,7 +765,7 @@ describe('SessionBrowser', () => {
         abortController.abort();
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           signal: abortController.signal,
         });
 
@@ -773,13 +776,13 @@ describe('SessionBrowser', () => {
         const container = createMockEl();
 
         deps.state.currentConversationId = 'conv-1';
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'conv-1', title: 'Current', createdAt: 1000, lastActivityAt: 2000 },
           { id: 'conv-2', title: 'Open elsewhere', createdAt: 2000, lastActivityAt: 1000 },
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           getConversationOpenState: (id) => id === 'conv-2' ? 'open' : 'current',
         });
 
@@ -797,12 +800,12 @@ describe('SessionBrowser', () => {
         const container = createMockEl();
 
         deps.state.currentConversationId = 'conv-1';
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'conv-1', title: 'Current', createdAt: 1000, lastActivityAt: 2000 },
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           getConversationStatus: () => ({
             openState: 'current',
             isRunning: false,
@@ -824,13 +827,13 @@ describe('SessionBrowser', () => {
         const container = createMockEl();
 
         deps.state.currentConversationId = 'conv-1';
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'conv-1', title: 'Current', createdAt: 1000, lastActivityAt: 2000 },
           { id: 'conv-2', title: 'Open elsewhere', createdAt: 2000, lastActivityAt: 1000 },
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           getConversationStatus: (id) => id === 'conv-2'
             ? { openState: 'open', isRunning: false, location: 'current-view', tabIndex: 2 }
             : { openState: 'current', isRunning: false, location: 'current-view', tabIndex: 1 },
@@ -851,13 +854,13 @@ describe('SessionBrowser', () => {
         const openActivity = testDate({ days: -40 }).getTime();
 
         deps.state.currentConversationId = 'conv-1';
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'conv-1', title: 'Current', createdAt: openActivity, lastActivityAt: currentActivity },
           { id: 'conv-2', title: 'Open', createdAt: currentActivity, lastActivityAt: openActivity },
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           getConversationStatus: (id) => id === 'conv-1'
             ? { openState: 'current', isRunning: false, location: 'current-view', tabIndex: 1 }
             : { openState: 'open', isRunning: true, location: 'current-view', tabIndex: 2 },
@@ -878,7 +881,7 @@ describe('SessionBrowser', () => {
 
       it('replaces the dual-pane spinner with matched action and error badges', () => {
         const container = createMockEl();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'waiting', title: 'Waiting', createdAt: 5000 },
           { id: 'working', title: 'Working', createdAt: 4000 },
           { id: 'error', title: 'Error', createdAt: 3000 },
@@ -887,7 +890,7 @@ describe('SessionBrowser', () => {
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           showAttentionState: true,
           showOpenStateLabels: false,
           getConversationStatus: (id) => ({
@@ -954,7 +957,7 @@ describe('SessionBrowser', () => {
         const container = createMockEl();
         const createdAt = testDate({ days: -40 }).getTime();
         const lastActivityAt = testDate({ days: -10 }).getTime();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           {
             id: 'conv-1',
             title: 'Timestamped',
@@ -964,7 +967,7 @@ describe('SessionBrowser', () => {
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           sort: 'last-updated',
           showOpenStateLabels: false,
         });
@@ -973,7 +976,7 @@ describe('SessionBrowser', () => {
           .toBe(formatSessionDate(lastActivityAt));
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           sort: 'created',
           showOpenStateLabels: false,
         });
@@ -984,7 +987,7 @@ describe('SessionBrowser', () => {
 
       it('shows a running indicator on a collapsed linked-content header', () => {
         const container = createMockEl();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           {
             id: 'running',
             title: 'Running session',
@@ -1000,7 +1003,7 @@ describe('SessionBrowser', () => {
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           organization: 'linked-content',
           sort: 'last-updated',
           language: 'en',
@@ -1030,7 +1033,7 @@ describe('SessionBrowser', () => {
 
       it('prioritizes a waiting badge on a collapsed linked-content group', () => {
         const container = createMockEl();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           {
             id: 'waiting',
             title: 'Waiting session',
@@ -1046,7 +1049,7 @@ describe('SessionBrowser', () => {
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           organization: 'linked-content',
           sort: 'last-updated',
           language: 'en',
@@ -1079,7 +1082,7 @@ describe('SessionBrowser', () => {
 
       it('shows an error badge on a collapsed linked-content group without active work', () => {
         const container = createMockEl();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           {
             id: 'error',
             title: 'Failed session',
@@ -1089,7 +1092,7 @@ describe('SessionBrowser', () => {
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           organization: 'linked-content',
           sort: 'last-updated',
           language: 'en',
@@ -1116,7 +1119,7 @@ describe('SessionBrowser', () => {
 
       it('marks a collapsed linked-content header when it contains attention', () => {
         const container = createMockEl();
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           {
             id: 'attention',
             title: 'Needs review',
@@ -1132,7 +1135,7 @@ describe('SessionBrowser', () => {
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           organization: 'linked-content',
           sort: 'last-updated',
           language: 'en',
@@ -1165,12 +1168,12 @@ describe('SessionBrowser', () => {
         const container = createMockEl();
 
         deps.state.currentConversationId = 'conv-1';
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'conv-1', title: 'Current', createdAt: 1000, lastActivityAt: 2000 },
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           getConversationStatus: () => ({
             openState: 'current',
             isRunning: true,
@@ -1191,13 +1194,13 @@ describe('SessionBrowser', () => {
         const container = createMockEl();
 
         deps.state.currentConversationId = 'conv-1';
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'conv-1', title: 'Current', createdAt: 1000, lastActivityAt: 2000 },
           { id: 'conv-2', title: 'Running elsewhere', createdAt: 2000, lastActivityAt: 1000 },
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           getConversationStatus: (id) => id === 'conv-2'
             ? { openState: 'open', isRunning: true, location: 'current-view', tabIndex: 2 }
             : { openState: 'current', isRunning: false },
@@ -1218,14 +1221,14 @@ describe('SessionBrowser', () => {
         const container = createMockEl();
 
         deps.state.currentConversationId = 'conv-1';
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'conv-1', title: 'Current', createdAt: 1000, lastActivityAt: 2000 },
           { id: 'conv-2', title: 'Open elsewhere', createdAt: 2000, lastActivityAt: 1000 },
           { id: 'conv-3', title: 'Running elsewhere', createdAt: 3000, lastActivityAt: 500 },
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           getConversationStatus: (id) => {
             if (id === 'conv-2') {
               return { openState: 'open', isRunning: false, location: 'other-view' };
@@ -1251,11 +1254,11 @@ describe('SessionBrowser', () => {
 
       it('should open a conversation in a new tab on modifier click when supported', async () => {
         const container = createMockEl();
-        const onSelectConversation = jest.fn();
-        const onOpenConversationInNewTab = jest.fn().mockResolvedValue(undefined);
+        const onSelectConversation = vi.fn();
+        const onOpenConversationInNewTab = vi.fn().mockResolvedValue(undefined);
 
         deps.state.currentConversationId = 'conv-1';
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'conv-1', title: 'Current', createdAt: 1000, lastActivityAt: 2000 },
           { id: 'conv-2', title: 'Other', createdAt: 2000, lastActivityAt: 1000 },
         ]);
@@ -1273,8 +1276,8 @@ describe('SessionBrowser', () => {
         expect(clickHandlers).toBeDefined();
 
         await clickHandlers![0]({
-          stopPropagation: jest.fn(),
-          preventDefault: jest.fn(),
+          stopPropagation: vi.fn(),
+          preventDefault: vi.fn(),
           metaKey: true,
           ctrlKey: false,
           shiftKey: false,
@@ -1287,11 +1290,11 @@ describe('SessionBrowser', () => {
 
       it('should open a conversation in a new tab on middle click when supported', async () => {
         const container = createMockEl();
-        const onSelectConversation = jest.fn();
-        const onOpenConversationInNewTab = jest.fn().mockResolvedValue(undefined);
+        const onSelectConversation = vi.fn();
+        const onOpenConversationInNewTab = vi.fn().mockResolvedValue(undefined);
 
         deps.state.currentConversationId = 'conv-1';
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'conv-1', title: 'Current', createdAt: 1000, lastActivityAt: 2000 },
           { id: 'conv-2', title: 'Other', createdAt: 2000, lastActivityAt: 1000 },
         ]);
@@ -1310,8 +1313,8 @@ describe('SessionBrowser', () => {
 
         await auxClickHandlers![0]({
           button: 1,
-          stopPropagation: jest.fn(),
-          preventDefault: jest.fn(),
+          stopPropagation: vi.fn(),
+          preventDefault: vi.fn(),
         });
 
         expect(onOpenConversationInNewTab).toHaveBeenCalledWith('conv-2', true);
@@ -1320,16 +1323,16 @@ describe('SessionBrowser', () => {
 
       it('defers inline rename until the transient history surface is restored', async () => {
         const container = createMockEl();
-        const onRerender = jest.fn();
-        const onRequestInlineRename = jest.fn();
+        const onRerender = vi.fn();
+        const onRequestInlineRename = vi.fn();
         // The active row menu offers project membership actions.
         Object.assign(deps.plugin, { projects: createProjectsFake() });
-        (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+        (deps.plugin.getConversationList as Mock).mockReturnValue([
           { id: 'active', title: 'Original title', createdAt: 2 },
         ]);
 
         controller.renderHistoryDropdown(container, {
-          onSelectConversation: jest.fn(),
+          onSelectConversation: vi.fn(),
           onRerender,
           onRequestInlineRename,
           sessionActionMode: 'active',
@@ -1338,11 +1341,11 @@ describe('SessionBrowser', () => {
 
         const item = container.querySelector('.claudian-history-item')!;
         const title = item.querySelector('.claudian-history-item-title')!;
-        title.replaceWith = jest.fn();
+        title.replaceWith = vi.fn();
         item.dispatchEvent({
           type: 'contextmenu',
-          stopPropagation: jest.fn(),
-          preventDefault: jest.fn(),
+          stopPropagation: vi.fn(),
+          preventDefault: vi.fn(),
         });
 
         const menu = (Menu as typeof Menu & {
@@ -1387,7 +1390,7 @@ describe('SessionBrowser', () => {
     it('should switch conversation when clicking a non-current item content', async () => {
       deps.state.currentConversationId = 'conv-1';
 
-      (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+      (deps.plugin.getConversationList as Mock).mockReturnValue([
         { id: 'conv-1', title: 'Current', createdAt: 1000, lastActivityAt: 2000 },
         { id: 'conv-2', title: 'Other', createdAt: 2000, lastActivityAt: 1000 },
       ]);
@@ -1406,9 +1409,9 @@ describe('SessionBrowser', () => {
       expect(clickHandlers).toBeDefined();
       expect(clickHandlers).toHaveLength(1);
 
-      await clickHandlers![0]({ stopPropagation: jest.fn() });
+      await clickHandlers![0]({ stopPropagation: vi.fn() });
       for (let attempt = 0;
-        attempt < 10 && (deps.plugin.switchConversation as jest.Mock).mock.calls.length === 0;
+        attempt < 10 && (deps.plugin.switchConversation as Mock).mock.calls.length === 0;
         attempt += 1) {
         await Promise.resolve();
       }
@@ -1418,12 +1421,12 @@ describe('SessionBrowser', () => {
 
     it('should call regenerateTitle when clicking regenerate button on failed item', async () => {
       const mockTitleService = {
-        generateTitle: jest.fn().mockResolvedValue(undefined),
-        cancel: jest.fn(),
+        generateTitle: vi.fn().mockResolvedValue(undefined),
+        cancel: vi.fn(),
       };
       deps.getTitleGenerationService = () => mockTitleService as any;
 
-      (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+      (deps.plugin.getConversationList as Mock).mockReturnValue([
         { id: 'conv-1', title: 'Failed', createdAt: 1000, lastActivityAt: 1000, titleGenerationStatus: 'failed' },
       ]);
 
@@ -1440,13 +1443,13 @@ describe('SessionBrowser', () => {
       const clickHandlers = regenerateBtn._eventListeners?.get('click');
       expect(clickHandlers).toBeDefined();
 
-      (deps.plugin.getConversationById as jest.Mock).mockResolvedValue({
+      (deps.plugin.getConversationById as Mock).mockResolvedValue({
         id: 'conv-1',
         title: 'Failed',
         messages: [{ role: 'user', content: 'Hello' }],
       });
 
-      await clickHandlers![0]({ stopPropagation: jest.fn() });
+      await clickHandlers![0]({ stopPropagation: vi.fn() });
 
       expect(deps.plugin.updateConversation).toHaveBeenCalledWith('conv-1', {
         titleGenerationStatus: 'pending',
@@ -1455,13 +1458,13 @@ describe('SessionBrowser', () => {
 
     it('rerenders the owning session surface after inline rename', async () => {
       const container = createMockEl();
-      const onRerender = jest.fn();
-      (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+      const onRerender = vi.fn();
+      (deps.plugin.getConversationList as Mock).mockReturnValue([
         { id: 'conv-1', title: 'Old title', createdAt: 1000 },
       ]);
 
       controller.renderHistoryDropdown(container, {
-        onSelectConversation: jest.fn(),
+        onSelectConversation: vi.fn(),
         onRerender,
         organization: 'linked-content',
         sort: 'created',
@@ -1469,7 +1472,7 @@ describe('SessionBrowser', () => {
 
       const item = container.querySelector('.claudian-history-item')!;
       const title = item.querySelector('.claudian-history-item-title')!;
-      title.replaceWith = jest.fn();
+      title.replaceWith = vi.fn();
       item.querySelector('.claudian-history-item-actions')!.children.find((button: HTMLElement) => button.getAttribute('aria-label') === 'Rename')!.click();
       const input = item.querySelector('.claudian-rename-input')!;
       input.value = 'New title';
@@ -1483,19 +1486,19 @@ describe('SessionBrowser', () => {
 
     it('cancels the active inline rename without persisting the draft', async () => {
       const container = createMockEl();
-      const onRerender = jest.fn();
-      (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+      const onRerender = vi.fn();
+      (deps.plugin.getConversationList as Mock).mockReturnValue([
         { id: 'conv-1', title: 'Original title', createdAt: 1000 },
       ]);
 
       controller.renderHistoryDropdown(container, {
-        onSelectConversation: jest.fn(),
+        onSelectConversation: vi.fn(),
         onRerender,
       });
 
       const item = container.querySelector('.claudian-history-item')!;
       const title = item.querySelector('.claudian-history-item-title')!;
-      title.replaceWith = jest.fn();
+      title.replaceWith = vi.fn();
       item.querySelector('.claudian-history-item-actions')!.children.find((button: HTMLElement) => button.getAttribute('aria-label') === 'Rename')!.click();
       const input = item.querySelector('.claudian-rename-input')!;
       input.value = 'Unsaved title';
@@ -1512,17 +1515,17 @@ describe('SessionBrowser', () => {
     it('releases inline rename ownership when its surface rerenders without blur', () => {
       const container = createMockEl();
       const options = {
-        onSelectConversation: jest.fn(),
-        onRerender: jest.fn(),
+        onSelectConversation: vi.fn(),
+        onRerender: vi.fn(),
       };
-      (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+      (deps.plugin.getConversationList as Mock).mockReturnValue([
         { id: 'conv-1', title: 'Original title', createdAt: 1000 },
       ]);
 
       controller.renderHistoryDropdown(container, options);
       const item = container.querySelector('.claudian-history-item')!;
       const title = item.querySelector('.claudian-history-item-title')!;
-      title.replaceWith = jest.fn();
+      title.replaceWith = vi.fn();
       item.querySelector('.claudian-history-item-actions')!.children.find((button: HTMLElement) => button.getAttribute('aria-label') === 'Rename')!.click();
       const input = item.querySelector('.claudian-rename-input')!;
       input.value = 'Detached draft';
@@ -1536,7 +1539,7 @@ describe('SessionBrowser', () => {
     it('emits a delete intent for the clicked session without reloading the active tab', async () => {
       deps.state.currentConversationId = 'conv-1';
 
-      (deps.plugin.getConversationList as jest.Mock).mockReturnValue([
+      (deps.plugin.getConversationList as Mock).mockReturnValue([
         { id: 'conv-1', title: 'Current', createdAt: 1000, lastActivityAt: 2000 },
         { id: 'conv-2', title: 'Other', createdAt: 2000, lastActivityAt: 1000 },
       ]);
@@ -1548,7 +1551,7 @@ describe('SessionBrowser', () => {
       const deleteBtn = otherItem.querySelector('.claudian-delete-btn');
       const clickHandlers = deleteBtn!._eventListeners?.get('click');
 
-      await clickHandlers![0]({ stopPropagation: jest.fn() });
+      await clickHandlers![0]({ stopPropagation: vi.fn() });
 
       expect(deps.plugin.conversationLifecycle.delete).toHaveBeenCalledWith(['conv-2']);
       expect(deps.plugin.getConversationById).not.toHaveBeenCalled();

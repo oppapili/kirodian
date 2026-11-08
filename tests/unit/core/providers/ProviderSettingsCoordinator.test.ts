@@ -203,7 +203,7 @@ describe('ProviderSettingsCoordinator', () => {
 
   describe('reconcileProviders', () => {
     it('reconciles each provider against the projected settings', () => {
-      const reconcileSpy = jest.spyOn(
+      const reconcileSpy = vi.spyOn(
         ProviderRegistry.getSettingsReconciler(STUB_PROVIDER_ID),
         'reconcileModelWithEnvironment',
       );
@@ -224,33 +224,28 @@ describe('ProviderSettingsCoordinator', () => {
 
     it('defaults existing providers to invalidation and separates reload-policy providers', () => {
       const defaultReconciler: ProviderSettingsReconciler = {
-        invalidateConversationSessions: jest.fn(conversations => conversations),
-        reconcileModelWithEnvironment: jest.fn(() => ({
-          changed: true,
-        })),
-        normalizeModelVariantSettings: jest.fn(() => false),
+        invalidateConversationSessions: vi.fn(conversations => conversations),
+        reconcileModelWithEnvironment: vi.fn(() => ({ changed: true })),
+        normalizeModelVariantSettings: vi.fn(() => false),
       };
       const reloadReconciler: ProviderSettingsReconciler = {
-        invalidateConversationSessions: jest.fn(conversations => conversations),
-        reconcileModelWithEnvironment: jest.fn(() => ({
-          changed: true,
-          sessionPolicy: 'reload',
-        })),
-        normalizeModelVariantSettings: jest.fn(() => false),
+        invalidateConversationSessions: vi.fn(conversations => conversations),
+        reconcileModelWithEnvironment: vi.fn(() => ({ changed: true, sessionPolicy: 'reload' as const })),
+        normalizeModelVariantSettings: vi.fn(() => false),
       };
       const originalGetSettingsReconciler = ProviderRegistry.getSettingsReconciler.bind(
         ProviderRegistry,
       );
       const originalGetChatUIConfig = ProviderRegistry.getModelPolicy.bind(ProviderRegistry);
-      const reconcilerSpy = jest.spyOn(ProviderRegistry, 'getSettingsReconciler')
+      const reconcilerSpy = vi.spyOn(ProviderRegistry, 'getSettingsReconciler')
         .mockImplementation((providerId) => {
           if (providerId === 'fake-invalidate') return defaultReconciler;
           if (providerId === 'fake-reload') return reloadReconciler;
           return originalGetSettingsReconciler(providerId);
         });
-      const settingsProviderSpy = jest.spyOn(ProviderRegistry, 'resolveSettingsProviderId')
+      const settingsProviderSpy = vi.spyOn(ProviderRegistry, 'resolveSettingsProviderId')
         .mockReturnValue('fake-invalidate');
-      const uiConfigSpy = jest.spyOn(ProviderRegistry, 'getModelPolicy')
+      const uiConfigSpy = vi.spyOn(ProviderRegistry, 'getModelPolicy')
         .mockImplementation((providerId) => (
           providerId === 'fake-invalidate' || providerId === 'fake-reload'
             ? originalGetChatUIConfig('kiro')
@@ -265,7 +260,7 @@ describe('ProviderSettingsCoordinator', () => {
       uiConfigSpy.mockRestore();
 
       // An omitted sessionPolicy defaults to invalidate; the reload provider opts out explicitly.
-      expect(jest.mocked(defaultReconciler.reconcileModelWithEnvironment).mock.results[0]!.value)
+      expect(vi.mocked(defaultReconciler.reconcileModelWithEnvironment).mock.results[0]!.value)
         .not.toHaveProperty('sessionPolicy');
       expect(result.environmentChangedProviderIds).toEqual([
         'fake-invalidate',

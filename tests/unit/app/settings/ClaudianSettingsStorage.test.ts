@@ -1,6 +1,7 @@
 import '@/providers';
 
 import { DEFAULT_CLAUDIAN_SETTINGS as DEFAULT_SETTINGS } from '@test/helpers/defaultSettings';
+import type { Mocked } from 'vitest';
 
 import {
   CLAUDIAN_SETTINGS_PATH,
@@ -9,19 +10,21 @@ import {
 import type { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
 import { getKiroProviderSettings } from '@/providers/kiro/settings';
 
-const mockGetHostnameKey = jest.fn(() => 'host-a');
-const mockGetLegacyDeviceSettingsKey = jest.fn<string | null, []>(() => null);
+
+
+const mockGetHostnameKey = vi.fn(() => 'host-a');
+const mockGetLegacyDeviceSettingsKey = vi.fn<(...args: []) => string | null>(() => null);
 const originalPlatform = process.platform;
 
 const mockAdapter = {
-  exists: jest.fn(),
-  read: jest.fn(),
-  write: jest.fn(),
-  delete: jest.fn(),
-} as unknown as jest.Mocked<VaultFileAdapter>;
+  exists: vi.fn(),
+  read: vi.fn(),
+  write: vi.fn(),
+  delete: vi.fn(),
+} as unknown as Mocked<VaultFileAdapter>;
 
-jest.mock('@/core/device/InstallationKey', () => ({
-  ...jest.requireActual('@/core/device/InstallationKey'),
+vi.mock('@/core/device/InstallationKey', async () => ({
+  ...(await vi.importActual<typeof import('@/core/device/InstallationKey')>('@/core/device/InstallationKey')),
   getInstallationKey: () => mockGetHostnameKey(),
   getLegacyDeviceSettingsKey: () => mockGetLegacyDeviceSettingsKey(),
 }));
@@ -30,7 +33,7 @@ describe('ClaudianSettingsStorage', () => {
   let storage: ClaudianSettingsStorage;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     Object.defineProperty(process, 'platform', { value: originalPlatform });
     // Reset mock implementations to default resolved values
     mockAdapter.exists.mockResolvedValue(false);
@@ -53,6 +56,7 @@ describe('ClaudianSettingsStorage', () => {
         ...DEFAULT_SETTINGS,
         persistentExternalContextPaths: ['/old/project'],
         maxWarmAgentProcesses: 7,
+        projectSort: 'created',
         userName: 'Ada',
         providerConfigs: { kiro: { cliPath: '/custom/kiro-cli' } },
       }));
@@ -67,6 +71,7 @@ describe('ClaudianSettingsStorage', () => {
       expect(written).not.toHaveProperty('persistentExternalContextPaths');
       expect(loaded).not.toHaveProperty('maxWarmAgentProcesses');
       expect(written).not.toHaveProperty('maxWarmAgentProcesses');
+      expect(written).not.toHaveProperty('projectSort');
     });
 
 
@@ -555,15 +560,15 @@ describe('ClaudianSettingsStorage', () => {
 
 function createAdapter(
   stored: Record<string, unknown>,
-): jest.Mocked<VaultFileAdapter> {
+): Mocked<VaultFileAdapter> {
   return {
-    exists: jest.fn().mockImplementation(async (path: string) => (
+    exists: vi.fn().mockImplementation(async (path: string) => (
       path === CLAUDIAN_SETTINGS_PATH
     )),
-    read: jest.fn().mockResolvedValue(JSON.stringify(stored)),
-    write: jest.fn().mockResolvedValue(undefined),
-    delete: jest.fn().mockResolvedValue(undefined),
-  } as unknown as jest.Mocked<VaultFileAdapter>;
+    read: vi.fn().mockResolvedValue(JSON.stringify(stored)),
+    write: vi.fn().mockResolvedValue(undefined),
+    delete: vi.fn().mockResolvedValue(undefined),
+  } as unknown as Mocked<VaultFileAdapter>;
 }
 
 describe('ClaudianSettingsStorage Linked content migration', () => {
@@ -677,9 +682,4 @@ describe('ClaudianSettingsStorage project settings', () => {
     expect(written.sessionManagerOrganization).toBe('list');
   });
 
-  it('defaults the project sort to last activity', async () => {
-    const settings = await new ClaudianSettingsStorage(createAdapter({}), DEFAULT_SETTINGS).load();
-
-    expect(settings.projectSort).toBe('last-updated');
-  });
 });

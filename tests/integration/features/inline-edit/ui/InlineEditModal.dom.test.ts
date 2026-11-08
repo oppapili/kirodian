@@ -1,4 +1,5 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
+import { axe } from '@test/helpers/accessibility';
 import {
   createInlineEditHarness as createHarness,
   disposeInlineEditHarnesses,
@@ -9,12 +10,17 @@ import {
   typeInstruction,
 } from '@test/helpers/features/inline-edit/InlineEditDOMHarness';
 import { fireEvent, screen, waitFor, within } from '@testing-library/dom';
-import { MarkdownRenderer, Notice, TFolder } from 'obsidian';
+import { Component, MarkdownRenderer, Notice, TFolder } from 'obsidian';
+
+import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
+import { InlineEditSession } from '@/features/inline-edit/ui/InlineEditModal';
 
 afterEach(async () => {
   await disposeInlineEditHarnesses();
-  jest.mocked(MarkdownRenderer.render).mockReset();
-  jest.clearAllMocks();
+  vi.mocked(MarkdownRenderer.render).mockReset();
+  vi.clearAllMocks();
+  // Held provider starts must not outlive their test.
+  vi.restoreAllMocks();
 });
 
 describe('editor resolution', () => {
@@ -77,6 +83,173 @@ describe('provider and model resolution', () => {
   });
 });
 
+/**
+ * Holds a provider's start until the test settles it. Like the provider registry, callers share the
+ * start in flight, and a call after a failed start begins a new one.
+ */
+function holdProviderStart(heldProviderId: string) {
+  let pending: { promise: Promise<void>; resolve: () => void; reject: (error: Error) => void } | null = null;
+  const ensureInitialized = ProviderWorkspaceRegistry.ensureInitialized.bind(ProviderWorkspaceRegistry);
+  vi.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized').mockImplementation((host, providerId, reason) => {
+    if (providerId !== heldProviderId) return ensureInitialized(host, providerId, reason);
+    if (!pending) {
+      let resolve = (): void => {};
+      let reject = (_error: Error): void => {};
+      const promise = new Promise<void>((onResolve, onReject) => { resolve = onResolve; reject = onReject; });
+      pending = { promise, resolve, reject };
+    }
+    return pending.promise;
+  });
+  return {
+    finish: () => pending?.resolve(),
+    fail: (error: Error) => {
+      const failed = pending;
+      pending = null;
+      failed?.reject(error);
+    },
+  };
+}
+
+it('switches provider from the model picker until the first request, then keeps it', async () => {
+  const h = createHarness();
+  // GPT's Max effort is known only once the provider has fetched the picked model's metadata.
+  let gptMetadataReady = false;
+  const codex = registerFakeInlineEditProvider('codex', [{ value: 'gpt', label: 'GPT' }], {
+    getReasoningOptions: () => [
+      { value: 'low', label: 'Low' },
+      { value: 'high', label: 'High' },
+      ...(gptMetadataReady ? [{ value: 'max', label: 'Max' }] : []),
+    ],
+    prepareModelMetadata: async (model) => { gptMetadataReady ||= model === 'gpt'; },
+  });
+  const result = h.createModal().openAndWait();
+  await screen.findByRole('textbox', { name: 'Edit instructions' });
+  typeInstruction('Make it formal');
+  const codexStart = holdProviderStart('codex');
+
+  fireEvent.click(screen.getByRole('button', { name: 'Model: Sonnet, effort High' }));
+  const providers = within(screen.getByRole('dialog', { name: 'Model options' })).getAllByRole('tab');
+  expect(providers.map(tab => tab.getAttribute('aria-label'))).toEqual(['claude', 'codex']);
+  fireEvent.click(within(screen.getByRole('tablist', { name: 'Provider' })).getByRole('tab', { name: 'codex' }));
+  fireEvent.click(screen.getByRole('option', { name: 'GPT' }));
+  // The chip shows the pick while its provider starts, and an effort chosen meanwhile is kept.
+  await screen.findByRole('button', { name: 'Model: GPT, effort High' });
+  fireEvent.click(within(screen.getByRole('listbox', { name: 'Thinking' })).getByRole('option', { name: 'Low' }));
+  await screen.findByRole('button', { name: 'Model: GPT, effort Low' });
+  // Enter while the provider starts sends nothing until the edit runs on it.
+  fireEvent.keyDown(input(), { key: 'Enter' });
+  await new Promise(resolve => window.setTimeout(resolve, 0));
+  expect([h.backend.sessions, codex.sessions]).toEqual([[], []]);
+  codexStart.finish();
+
+  await waitFor(() => expect(codex.sessions[0]?.requests).toHaveLength(1));
+  expect(h.backend.sessions).toHaveLength(0);
+  expect(codex.sessions[0].requests[0].configuration).toMatchObject({ model: 'gpt', reasoning: 'low' });
+  // The instruction typed before the switch survives the composer's rebuild.
+  expect(codex.sessions[0].requests[0].input[0]).toMatchObject({ text: expect.stringContaining('Make it formal') });
+  expect(h.plugin.settings.inlineEditModel).toEqual({ providerId: 'codex', model: 'gpt', reasoning: 'low' });
+
+  // A clarification continues the conversation on its provider, so the picker offers only its models.
+  codex.sessions[0].emitText('Which tone?');
+  codex.sessions[0].complete();
+  await waitFor(() => expect(input().placeholder).toBe('Reply to continue...'));
+  fireEvent.click(screen.getByRole('button', { name: 'Model: GPT, effort Low' }));
+  const menu = screen.getByRole('dialog', { name: 'Model options' });
+  expect(within(menu).getAllByRole('option').map(option => option.textContent)).toContain('GPT');
+  expect(within(menu).queryAllByRole('tab')).toEqual([]);
+  expect(within(within(menu).getByRole('listbox', { name: 'Thinking' })).getByRole('option', { name: 'Max' })).toBeDefined();
+  fireEvent.keyDown(h.editorView.contentDOM, { key: 'Escape' });
+  fireEvent.keyDown(h.editorView.contentDOM, { key: 'Escape' });
+  await expect(result).resolves.toEqual({ decision: 'reject' });
+});
+
+describe('a submit waiting for a picked provider to start', () => {
+  /** Opens an edit with codex registered, whose start is held until the returned controls settle it. */
+  async function openWithHeldCodexStart() {
+    const h = createHarness();
+    const codex = registerFakeInlineEditProvider('codex', [{ value: 'gpt', label: 'GPT' }]);
+    const result = h.createModal().openAndWait();
+    await screen.findByRole('textbox', { name: 'Edit instructions' });
+    const start = holdProviderStart('codex');
+    fireEvent.click(screen.getByRole('button', { name: 'Model: Sonnet, effort High' }));
+    fireEvent.click(within(screen.getByRole('tablist', { name: 'Provider' })).getByRole('tab', { name: 'codex' }));
+    fireEvent.click(screen.getByRole('option', { name: 'GPT' }));
+    return { h, codex, result, start };
+  }
+
+  it('sends nothing when the picked provider fails to start, and retries it on the next submit', async () => {
+    const { h, codex, result, start } = await openWithHeldCodexStart();
+    submitInstruction('Make it formal');
+    start.fail(new Error('no CLI'));
+    await waitFor(() => expect(Notice).toHaveBeenCalledWith('Failed to start the codex provider.'));
+    await waitFor(() => expect(input().disabled).toBe(false));
+    expect([h.backend.sessions, codex.sessions]).toEqual([[], []]);
+    expect(input().value).toBe('Make it formal');
+
+    // The chip keeps the pick, so the retry starts its provider again and runs there.
+    expect(screen.getByRole('button', { name: 'Model: GPT, effort High' })).toBeDefined();
+    fireEvent.keyDown(input(), { key: 'Enter' });
+    start.finish();
+    await waitFor(() => expect(codex.sessions[0]?.requests).toHaveLength(1));
+    expect(codex.sessions[0].requests[0].configuration).toMatchObject({ model: 'gpt' });
+    expect(h.backend.sessions).toHaveLength(0);
+    fireEvent.keyDown(h.editorView.contentDOM, { key: 'Escape' });
+    await expect(result).resolves.toEqual({ decision: 'reject' });
+  });
+
+  it('sends at once on the current provider when a later pick returns to it', async () => {
+    const { h, codex, result } = await openWithHeldCodexStart();
+    fireEvent.click(within(screen.getByRole('tablist', { name: 'Provider' })).getByRole('tab', { name: 'claude' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Opus' }));
+    await screen.findByRole('button', { name: 'Model: Opus, effort High' });
+    submitInstruction();
+    // The codex start never settles; the edit no longer waits for it.
+    await waitFor(() => expect(h.backend.sessions[0]?.requests).toHaveLength(1));
+    expect(h.backend.sessions[0].requests[0].configuration).toMatchObject({ model: 'opus' });
+    expect(codex.sessions).toHaveLength(0);
+    fireEvent.keyDown(h.editorView.contentDOM, { key: 'Escape' });
+    await expect(result).resolves.toEqual({ decision: 'reject' });
+  });
+});
+
+it('shows a model or effort pick on the chip without waiting for it to save as the default', async () => {
+  const h = createHarness();
+  const saves: Array<() => void> = [];
+  const mutateSettings = h.plugin.mutateSettings;
+  h.plugin.mutateSettings = (mutation: (settings: Record<string, unknown>) => void) => new Promise<void>((resolve) => {
+    saves.push(() => { void mutateSettings(mutation).then(resolve); });
+  });
+  h.createSession().show();
+  fireEvent.click(screen.getByRole('button', { name: 'Model: Sonnet, effort High' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Opus' }));
+  await screen.findByRole('button', { name: 'Model: Opus, effort High' });
+  fireEvent.click(within(screen.getByRole('listbox', { name: 'Thinking' })).getByRole('option', { name: 'Low' }));
+  await screen.findByRole('button', { name: 'Model: Opus, effort Low' });
+  expect(h.plugin.settings.inlineEditModel).toBeUndefined();
+  for (const save of saves) save();
+  await waitFor(() => expect(h.plugin.settings.inlineEditModel).toEqual({ providerId: 'claude', model: 'opus', reasoning: 'low' }));
+});
+
+it('keeps the provider when a picked model is not uniquely owned by one enabled provider', async () => {
+  const h = createHarness();
+  const codex = registerFakeInlineEditProvider('codex', [{ value: 'opus', label: 'Opus' }]);
+  const result = h.createModal().openAndWait();
+  await screen.findByRole('textbox', { name: 'Edit instructions' });
+  fireEvent.click(screen.getByRole('button', { name: 'Model: Sonnet, effort High' }));
+  fireEvent.click(within(screen.getByRole('tablist', { name: 'Provider' })).getByRole('tab', { name: 'codex' }));
+  fireEvent.click(screen.getByRole('option', { name: 'Opus' }));
+  // Like a new chat, a model both providers own resolves to neither.
+  await waitFor(() => expect(Notice).toHaveBeenCalledWith('Select an available model in Claudian settings.'));
+  expect(screen.getByRole('button', { name: 'Model: Sonnet, effort High' })).toBeDefined();
+  expect(h.plugin.settings.inlineEditModel).toBeUndefined();
+  submitInstruction();
+  await waitFor(() => expect(h.backend.sessions[0]?.requests).toHaveLength(1));
+  expect(codex.sessions).toHaveLength(0);
+  expect(h.backend.sessions[0].requests[0].configuration).toMatchObject({ model: 'sonnet' });
+  fireEvent.keyDown(h.editorView.contentDOM, { key: 'Escape' });
+  await expect(result).resolves.toEqual({ decision: 'reject' });
+});
+
 it('suggests Vault folders for @ mentions', async () => {
   const h = createHarness();
   h.app.vault.getAllLoadedFiles = () => [Object.assign(new TFolder(), { name: 'src', path: 'src' })];
@@ -85,10 +258,54 @@ it('suggests Vault folders for @ mentions', async () => {
   expect(await screen.findByRole('option', { name: /src\// })).toBeDefined();
 });
 
+it('keeps open inline suggestions anchored after note scroll and viewport resize', async () => {
+  const h = createHarness();
+  h.app.vault.getAllLoadedFiles = () => [Object.assign(new TFolder(), { name: 'src', path: 'src' })];
+  const session = h.createSession();
+  session.show();
+  let top = 320;
+  let left = 80;
+  const measure = vi.spyOn(input(), 'getBoundingClientRect').mockImplementation(() => ({
+    top, bottom: top + 28, left, right: left + 300, width: 300, height: 28,
+  } as DOMRect));
+  typeInstruction('@s');
+  const option = await screen.findByRole('option', { name: /src\// });
+  const list = screen.getByRole('listbox', { name: 'Input suggestions' });
+  expect(list.style.getPropertyValue('--claudian-fixed-dropdown-bottom')).toBe(`${window.innerHeight - top + 4}px`);
+  const active = input().getAttribute('aria-activedescendant');
+  measure.mockClear();
+  list.scrollTop = 25;
+  fireEvent.scroll(list);
+  expect(measure).not.toHaveBeenCalled();
+  expect(list.scrollTop).toBe(25);
+  top = 210;
+  fireEvent.scroll(h.editorView.scrollDOM);
+  expect(list.style.getPropertyValue('--claudian-fixed-dropdown-bottom')).toBe(`${window.innerHeight - top + 4}px`);
+  left = 160;
+  fireEvent.resize(window);
+  expect(list.style.getPropertyValue('--claudian-fixed-dropdown-left')).toBe('160px');
+  expect(input().getAttribute('aria-activedescendant')).toBe(active);
+  expect(within(list).getByRole('option', { name: /src\// })).toBe(option);
+  expect(await axe(list)).toHaveNoViolations();
+  // Hiding and session teardown both release viewport listeners.
+  typeInstruction('No trigger');
+  measure.mockClear();
+  fireEvent.scroll(h.editorView.scrollDOM);
+  fireEvent.resize(window);
+  expect(measure).not.toHaveBeenCalled();
+  typeInstruction('@s');
+  await screen.findByRole('option', { name: /src\// });
+  session.close();
+  measure.mockClear();
+  fireEvent.scroll(h.editorView.scrollDOM);
+  fireEvent.resize(window);
+  expect(measure).not.toHaveBeenCalled();
+});
+
 it('shows only the newest clarification when an older render finishes last', async () => {
   const h = createHarness();
   const renders: Array<() => void> = [];
-  jest.mocked(MarkdownRenderer.render).mockImplementation((_app, markdown, element) => {
+  vi.mocked(MarkdownRenderer.render).mockImplementation((_app, markdown, element) => {
     (element as HTMLElement).textContent = markdown;
     return new Promise<void>(resolve => renders.push(resolve));
   });
@@ -104,7 +321,7 @@ it('shows only the newest clarification when an older render finishes last', asy
   h.backend.sessions[0].complete();
   await waitFor(() => expect(renders).toHaveLength(2));
   expect(MarkdownRenderer.render).toHaveBeenLastCalledWith(
-    h.app, 'Second question?', expect.any(HTMLElement), h.notePath, h.plugin,
+    h.app, 'Second question?', expect.any(HTMLElement), h.notePath, expect.any(Component),
   );
 
   const container = input().closest('.claudian-inline-input-container') as HTMLElement;
@@ -118,7 +335,7 @@ it('shows only the newest clarification when an older render finishes last', asy
 
 it('previews the selected source as deleted and the replacement as inserted Markdown', async () => {
   const h = createHarness();
-  jest.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, element) => {
+  vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, element) => {
     (element as HTMLElement).textContent = markdown;
   });
   h.createSession().show();
@@ -130,4 +347,196 @@ it('previews the selected source as deleted and the replacement as inserted Mark
   ])).toEqual([['delete', 'hello'], ['insert', 'Hi']]));
   // The previewed source is hidden from the editor until the edit settles.
   expect(h.editorView.contentDOM.textContent).toBe(`${preview.textContent} world`);
+});
+
+
+it('releases Markdown resources when clarification previews are replaced and the edit closes', async () => {
+  const h = createHarness();
+  const released: string[] = [];
+  vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, element, _path, component) => {
+    component.register(() => released.push(markdown));
+    (element as HTMLElement).textContent = markdown;
+  });
+  const session = h.createSession();
+  session.show();
+  submitInstruction('Improve');
+  await waitFor(() => expect(h.backend.sessions[0]?.getStatus()).toBe('executing'));
+  h.backend.sessions[0].emitText('First question?');
+  h.backend.sessions[0].complete();
+  await screen.findByText('First question?');
+  expect(released).toEqual([]);
+  submitInstruction('Formal');
+  await waitFor(() => expect(h.backend.sessions[0].requests).toHaveLength(2));
+  h.backend.sessions[0].emitText('Second question?');
+  h.backend.sessions[0].complete();
+  await screen.findByText('Second question?');
+  expect(released).toEqual(['First question?']);
+  session.close();
+  expect(released).toEqual(['First question?', 'Second question?']);
+  expect(screen.queryByRole('textbox', { name: 'Edit instructions' })).toBeNull();
+});
+
+it('releases late Markdown registrations after a preview is rejected', async () => {
+  const h = createHarness();
+  const released = vi.fn();
+  const childReleased = vi.fn();
+  let finishRender!: () => void;
+  vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, _markdown, _element, _path, component) => {
+    await new Promise<void>(resolve => { finishRender = resolve; });
+    component.register(released);
+    const child = new Component();
+    child.register(childReleased);
+    component.addChild(child);
+  });
+  const session = h.createSession();
+  session.show();
+  submitInstruction();
+  await waitFor(() => expect(h.backend.sessions[0]?.getStatus()).toBe('executing'));
+  h.backend.sessions[0].emitText('Which tone?');
+  h.backend.sessions[0].complete();
+  await waitFor(() => expect(finishRender).toBeDefined());
+  session.reject();
+  finishRender();
+  await waitFor(() => expect(released).toHaveBeenCalledTimes(1));
+  expect(childReleased).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText('Which tone?')).toBeNull();
+});
+
+it('releases both Markdown diff documents when review is rejected', async () => {
+  const h = createHarness();
+  const released: string[] = [];
+  vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, element, _path, component) => {
+    component.register(() => released.push(markdown));
+    (element as HTMLElement).textContent = markdown;
+  });
+  const session = h.createSession();
+  session.show();
+  await showReplacementPreview(h, 'Hi');
+  await screen.findByText('Hi');
+  expect(released).toEqual([]);
+  fireEvent.click(screen.getByRole('button', { name: 'Reject inline edit' }));
+  expect(released).toEqual(['hello', 'Hi']);
+  expect(screen.queryByRole('toolbar', { name: 'Inline edit actions' })).toBeNull();
+});
+
+it('keeps the floating model menu inside the viewport near the top and after scrolling', async () => {
+  const h = createHarness();
+  h.createSession().show();
+  const chip = screen.getByRole('button', { name: 'Model: Sonnet, effort High' });
+  const menu = document.querySelector<HTMLElement>('.claudian-model-popover')!;
+  let chipTop = 24;
+  const bounds = () => {
+    const cap = Number.parseFloat(menu.style.getPropertyValue('--claudian-toolbar-popover-max-height')) || 196;
+    const height = Math.min(196, cap);
+    const topValue = menu.style.getPropertyValue('--claudian-toolbar-popover-top');
+    const top = topValue && topValue !== 'auto' ? Number.parseFloat(topValue)
+      : window.innerHeight - Number.parseFloat(menu.style.getPropertyValue('--claudian-toolbar-popover-bottom')) - height;
+    return { top, bottom: top + height };
+  };
+  const rect = (top: number, height: number) => ({ top, bottom: top + height, left: 100, right: 200, width: 100, height } as DOMRect);
+  vi.spyOn(chip, 'getBoundingClientRect').mockImplementation(() => rect(chipTop, 28));
+  const measureMenu = vi.spyOn(menu, 'getBoundingClientRect').mockImplementation(() => rect(0, menu.hidden ? 0 : 196));
+  fireEvent.click(chip);
+  expect(screen.getByRole('dialog', { name: 'Model options' })).toBe(menu);
+  expect(bounds().top).toBeGreaterThanOrEqual(8);
+  expect(bounds().bottom).toBeLessThanOrEqual(window.innerHeight - 8);
+  expect(menu.style.getPropertyValue('--claudian-toolbar-popover-top')).toBe('60px');
+  expect(menu.style.getPropertyValue('--claudian-toolbar-popover-bottom')).toBe('auto');
+  // The chip's chevron points toward the side the menu opened on.
+  expect(chip.getAttribute('data-menu-placement')).toBe('below');
+  const limitBelow = window.innerHeight - 52 - 8 - 8;
+  expect(menu.style.getPropertyValue('--claudian-toolbar-popover-max-height')).toBe(`${limitBelow}px`);
+  expect((await axe(menu)).violations).toEqual([]);
+  fireEvent.click(within(menu).getByRole('option', { name: 'Opus' }));
+  await waitFor(() => expect(h.plugin.settings.inlineEditModel?.model).toBe('opus'));
+  measureMenu.mockClear();
+  const placement = menu.style.cssText;
+  fireEvent.scroll(within(menu).getByRole('listbox', { name: 'Model' }));
+  expect(measureMenu).not.toHaveBeenCalled();
+  expect(menu.style.cssText).toBe(placement);
+  chipTop = window.innerHeight - 60;
+  fireEvent.scroll(window);
+  expect(measureMenu).toHaveBeenCalledTimes(1);
+  expect(menu.style.getPropertyValue('--claudian-toolbar-popover-top')).toBe('auto');
+  expect(menu.style.getPropertyValue('--claudian-toolbar-popover-bottom')).toBe('68px');
+  expect(chip.hasAttribute('data-menu-placement')).toBe(false);
+  const viewport = window.innerHeight;
+  window.innerHeight = 120;
+  try {
+    chipTop = 24;
+    fireEvent.resize(window);
+    expect(menu.style.getPropertyValue('--claudian-toolbar-popover-max-height')).toBe('52px');
+    expect(bounds().top).toBeGreaterThanOrEqual(8);
+    expect(bounds().bottom).toBeLessThanOrEqual(window.innerHeight - 8);
+  } finally {
+    window.innerHeight = viewport;
+  }
+  fireEvent.keyDown(menu, { key: 'Escape' });
+  expect(menu.hidden).toBe(true);
+  expect(document.activeElement).toBe(chip);
+});
+
+it.each([
+  'Use `</replacement>` literally in XML.',
+  'Document <replacement>old</replacement> and <insertion>new</insertion>.',
+])('applies the complete raw replacement containing wrapper text: %s', async replacement => {
+  const h = createHarness();
+  h.createSession().show();
+  const accept = await showReplacementPreview(h, replacement);
+  expect(h.backend.sessions[0].requests[0].configuration.systemInstructions).toMatchObject({
+    instructions: expect.stringContaining('with no explanation outside the tag'),
+  });
+  expect((await axe(screen.getByRole('toolbar', { name: 'Inline edit actions' }))).violations).toEqual([]);
+  fireEvent.click(accept);
+  expect(h.editorView.state.doc.toString()).toBe(`${replacement} world`);
+  expect(h.settled).toHaveBeenCalledWith({ decision: 'accept', editedText: replacement });
+});
+
+
+it.each([false, true].flatMap(alreadyOpen => [
+  { alreadyOpen, target: 'target#Overview', label: 'Target', path: 'target', samePage: false },
+  { alreadyOpen, target: '#Overview', label: 'Overview', path: '', samePage: true },
+  { alreadyOpen, target: '#^quote-of-the-day', label: 'Quote', path: '', samePage: true },
+]))('opens inline-code $target from the edited note context (already open: $alreadyOpen)', async ({ alreadyOpen, target, label, path, samePage }) => {
+  const h = createHarness();
+  const sourcePath = 'Section/note.md';
+  const file = { path: samePage ? sourcePath : 'Section/target.md', basename: samePage ? 'note' : 'target' };
+  h.app.vault.getAbstractFileByPath = vi.fn((path: string) => path === sourcePath ? file : null);
+  const leaf = { getViewState: () => ({ state: { file: file.path } }), setEphemeralState: vi.fn() };
+  const unrelated = { getViewState: () => ({ state: { file: 'Elsewhere/target.md' } }), setEphemeralState: vi.fn() };
+  h.app.metadataCache = { getFirstLinkpathDest: vi.fn((_path: string, source: string) => source === sourcePath ? file : { path: 'Elsewhere/target.md' }) };
+  h.app.workspace = {
+    iterateAllLeaves: (visit: (entry: typeof leaf) => void) => [unrelated, ...(alreadyOpen ? [leaf] : [])].forEach(visit),
+    revealLeaf: vi.fn().mockResolvedValue(undefined),
+    openLinkText: vi.fn().mockResolvedValue(undefined),
+  };
+  vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, element) => {
+    expect(markdown).toBe(`Check \`[[${target}|${label}]]\`.`);
+    const code = element.createEl('code');
+    code.textContent = `[[${target}|${label}]]`;
+  });
+  const session = new InlineEditSession(h.app, h.plugin, h.plugin, h.editorView, h.editor,
+    { mode: 'selection', selectedText: 'hello' }, sourcePath, h.settled, { providerId: 'claude' });
+  try {
+    session.show();
+    submitInstruction();
+    await waitFor(() => expect(h.backend.sessions[0]?.getStatus()).toBe('executing'));
+    h.backend.sessions[0].emitText(`Check \`[[${target}|${label}]]\`.`);
+    h.backend.sessions[0].complete();
+    const link = await screen.findByRole('link', { name: label });
+    // Keep jsdom navigation out of the host-boundary assertion.
+    link.addEventListener('click', event => event.preventDefault());
+    fireEvent.click(link);
+    await waitFor(() => expect(alreadyOpen ? h.app.workspace.revealLeaf : h.app.workspace.openLinkText).toHaveBeenCalledTimes(1));
+    expect(h.app.workspace.revealLeaf.mock.calls).toEqual(alreadyOpen ? [[leaf]] : []);
+    expect(leaf.setEphemeralState.mock.calls).toEqual(alreadyOpen ? [[{ focus: true, subpath: target.slice(path.length) }]] : []);
+    expect(h.app.workspace.openLinkText.mock.calls).toEqual(alreadyOpen ? [] : [[target, sourcePath, 'tab']]);
+    const destinationReads = samePage ? h.app.vault.getAbstractFileByPath.mock.calls
+      : h.app.metadataCache.getFirstLinkpathDest.mock.calls;
+    expect(destinationReads).toContainEqual(samePage ? [sourcePath] : [path, sourcePath]);
+    expect(await axe(link)).toHaveNoViolations();
+    session.close();
+    fireEvent.click(link);
+    expect(alreadyOpen ? h.app.workspace.revealLeaf : h.app.workspace.openLinkText).toHaveBeenCalledTimes(1);
+  } finally { session.close(); }
 });

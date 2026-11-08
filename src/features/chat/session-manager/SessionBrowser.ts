@@ -1,10 +1,11 @@
-import { type Menu, setIcon } from 'obsidian';
+import { type Menu, Notice, setIcon } from 'obsidian';
 
 import type { TitleGenerationService } from '@/core/providers/types';
 import type { ConversationMeta, SessionManagerOrganization, SessionManagerSort } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { ConversationTitleGeneration } from '@/features/chat/conversation/ConversationTitleGeneration';
-import { getProjectSort, renderProjectsHeaderActions } from '@/features/chat/session-manager/ProjectsHeaderActions';
+import { moveProject, savedProjectOrder } from '@/features/chat/projects/projectOrder';
+import { renderProjectsHeaderActions } from '@/features/chat/session-manager/ProjectsHeaderActions';
 import {
   canMultiSelect,
   type SessionActionOptions,
@@ -42,6 +43,7 @@ import {
 } from '@/features/chat/session-manager/SessionStatusPresentation';
 import { bindMenuToggle, runSessionAction, showMenuAt } from '@/features/chat/session-manager/SessionSurfaceShared';
 import { t } from '@/i18n/i18n';
+import { LiveListSorter } from '@/shared/components/LiveListSorter';
 
 const DEFAULT_HISTORY_PAGE_SIZE = 100;
 
@@ -110,12 +112,23 @@ function isNewTabModifierClick(event: MouseEvent): boolean {
 }
 
 export class SessionBrowser {
-  private readonly metadataPopover = new SessionMetadataPopover(() => this.drag.isDragging);
+  private readonly metadataPopover = new SessionMetadataPopover(
+    () => this.drag.isDragging || this.projectSorter.isDragging,
+  );
   private readonly selection = new SessionMultiSelection();
   private readonly inlineRename = new SessionInlineRename();
   private readonly drag = new SessionDrag({
     onDragStart: () => this.metadataPopover.close(),
     onDrop: (conversationIds, target) => this.actions.placeSessions(conversationIds, target),
+  });
+  private readonly projectSorter = new LiveListSorter({
+    // Row controls keep their own clicks.
+    ignoreSelector: '.claudian-session-group-menu-action, .claudian-session-group-new-action',
+    onDragStart: () => this.metadataPopover.close(),
+    onDrop: (projectId, targetId, placement) => moveProject(this.deps.plugin, projectId, targetId, placement)
+      .catch(() => {
+        new Notice(t('chat.projects.errors.reorder'));
+      }),
   });
   private readonly actions: SessionActions;
   private readonly titles: ConversationTitleGeneration;
@@ -131,9 +144,18 @@ export class SessionBrowser {
 
   dispose(): void {
     this.drag.end();
+    this.projectSorter.dispose();
     this.selection.clear();
     this.inlineRename.cancel();
     this.metadataPopover.dispose();
+  }
+
+  /**
+   * Holds a render of the surface that shows the sortable list while a project is lifted or its drop is saving, so
+   * the gesture and dropped layout survive; the latest held render runs when the drag ends.
+   */
+  deferWhileSortingProjects(render: () => void): boolean {
+    return this.projectSorter.deferRender(render);
   }
 
   cancelInlineRename(): boolean {
@@ -158,12 +180,17 @@ export class SessionBrowser {
   ): void {
     const { plugin } = this.deps;
     if (options.signal?.aborted) return;
+    const canDrag = this.#canDrag(options);
     if (options.showMetadataPopover) {
       this.metadataPopover.close();
     }
     this.selection.beginRender(container, options.searchQuery ?? '', canMultiSelect(options));
-    const canDrag = this.#canDrag(options);
-    if (canDrag) this.drag.beginRender(container); else this.drag.end();
+    if (canDrag) {
+      this.drag.beginRender(container);
+      this.projectSorter.beginRender();
+    } else {
+      this.drag.end();
+    }
 
     const sectionScrolling = options.scrollLayout === 'sections';
     const previousPosition = options.preserveListState
@@ -184,7 +211,7 @@ export class SessionBrowser {
       showPinnedSection: options.showPinnedSection,
       pinnedLinkedContentPaths: options.pinnedLinkedContentPaths,
       projects: plugin.projects,
-      projectSort: getProjectSort(plugin),
+      projectOrder: savedProjectOrder(plugin.settings),
       isGroupCollapsed: options.isGroupCollapsed,
       contentExists: options.contentExists,
       contentIsNote: options.contentIsNote,
@@ -644,7 +671,9 @@ export class SessionBrowser {
     );
     groupHeader.setAttribute('data-project-id', project.id);
     const dropTarget = { kind: 'project', projectId: project.id } as const;
-    if (this.#canDrag(options)) this.drag.attachTarget(groupHeader, dropTarget);
+    const canDrag = this.#canDrag(options);
+    if (canDrag) this.drag.attachTarget(groupHeader, dropTarget);
+    const projectSortRow = { id: project.id, group: project.isPinned ? 'pinned' : 'unpinned' };
 
     // Named by its visible label: an aria-label would show Obsidian's hover tooltip.
     const toggle = groupHeader.createEl('button', {
@@ -707,10 +736,16 @@ export class SessionBrowser {
       options.onRerender();
     });
 
-    if (isCollapsed) return;
+    if (isCollapsed) {
+      if (canDrag) this.projectSorter.attach([groupHeader], projectSortRow);
+      return;
+    }
     const groupBody = list.createDiv({ cls: 'claudian-session-group-body' });
     groupBody.setAttribute('data-group-key', section.key);
-    if (this.#canDrag(options)) this.drag.attachTarget(groupBody, dropTarget);
+    if (canDrag) {
+      this.drag.attachTarget(groupBody, dropTarget);
+      this.projectSorter.attach([groupHeader, groupBody], projectSortRow);
+    }
     if (section.conversations.length === 0) {
       groupBody.createDiv({ cls: 'claudian-session-project-empty', text: t('chat.projects.noSessions') });
       return;
@@ -901,8 +936,8 @@ export class SessionBrowser {
       return;
     }
     if (
-      conversation.titleGenerationStatus !== 'failed'
-      && (conversation.titleGenerationStatus || !this.deps.plugin.settings.enableAutoTitleGeneration)
+      !this.deps.plugin.settings.enableAutoTitleGeneration
+      || (conversation.titleGenerationStatus && conversation.titleGenerationStatus !== 'failed')
     ) {
       return;
     }

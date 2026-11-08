@@ -1,14 +1,18 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
+import { axe } from '@test/helpers/accessibility';
+import { createPopoutDocument } from '@test/helpers/dom/popoutDocument';
 import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
 import { Menu } from 'obsidian';
+import type { Mock } from 'vitest';
 
 import type { ConversationMeta } from '@/core/types';
 import { SessionBrowser, type SessionBrowserDeps } from '@/features/chat/session-manager/SessionBrowser';
 import type { HistoryConversationStatus } from '@/features/chat/session-manager/SessionStatusPresentation';
+
+
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
@@ -48,12 +52,12 @@ const conversations = [
 ];
 
 function renderList(options: {
-  onSelectConversation?: jest.Mock;
-  onSetConversationsArchived?: jest.Mock;
+  onSelectConversation?: Mock;
+  onSetConversationsArchived?: Mock;
 } = {}) {
-  const onSetConversationsPinned = jest.fn().mockResolvedValue(undefined);
+  const onSetConversationsPinned = vi.fn().mockResolvedValue(undefined);
   const onSetConversationsArchived = options.onSetConversationsArchived
-    ?? jest.fn().mockResolvedValue(undefined);
+    ?? vi.fn().mockResolvedValue(undefined);
   const controller = new SessionBrowser({
     plugin: { getConversationList: () => conversations, settings: {}, projects: createProjectsFake(), conversationLifecycle: {
       archive: onSetConversationsArchived, setPinned: onSetConversationsPinned,
@@ -64,7 +68,7 @@ function renderList(options: {
   } as unknown as SessionBrowserDeps);
   const container = document.createElement('div');
   document.body.append(container);
-  const onSelectConversation = options.onSelectConversation ?? jest.fn().mockResolvedValue(undefined);
+  const onSelectConversation = options.onSelectConversation ?? vi.fn().mockResolvedValue(undefined);
   const render = (): void => controller.renderHistoryDropdown(container, {
     onSelectConversation,
 
@@ -137,31 +141,7 @@ describe('SessionBrowser multi-select archive', () => {
   });
 
   it('keeps the selection for pointer-downs inside a list rendered in another window', () => {
-    const frame = document.createElement('iframe');
-    document.body.append(frame);
-    const popoutDocument = frame.contentDocument!;
-    // Popout windows have their own DOM constructors, and Obsidian creates children in the owning document.
-    const popoutWindow = popoutDocument.defaultView! as unknown as typeof globalThis;
-    const popoutElement = popoutWindow.HTMLElement.prototype as unknown as Record<string, unknown>;
-    const createChild = function (this: HTMLElement, tag: string, info?: string | DomElementInfo): HTMLElement {
-      const el = this.ownerDocument.createElement(tag);
-      const options = typeof info === 'string' ? { cls: info } : info ?? {};
-      if (options.cls) el.className = ([] as string[]).concat(options.cls).join(' ');
-      if (options.text) el.textContent = String(options.text);
-      for (const [key, value] of Object.entries(options.attr ?? {})) el.setAttribute(key, String(value));
-      this.append(el);
-      return el;
-    };
-    popoutElement.createEl = createChild;
-    popoutElement.createDiv = function (this: HTMLElement, info?: DomElementInfo) { return createChild.call(this, 'div', info); };
-    popoutElement.createSpan = function (this: HTMLElement, info?: DomElementInfo) { return createChild.call(this, 'span', info); };
-    for (const name of ['Node', 'Element', 'HTMLElement'] as const) {
-      const source = globalThis[name].prototype;
-      const target = popoutWindow[name].prototype;
-      for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(source))) {
-        if (!(key in target)) Object.defineProperty(target, key, descriptor);
-      }
-    }
+    const popoutDocument = createPopoutDocument();
     const controller = new SessionBrowser({
       plugin: { getConversationList: () => conversations, settings: {}, projects: createProjectsFake() },
       getCurrentConversationId: () => null,
@@ -171,7 +151,7 @@ describe('SessionBrowser multi-select archive', () => {
     const container = popoutDocument.createElement('div');
     popoutDocument.body.append(container);
     controller.renderHistoryDropdown(container, {
-      onSelectConversation: jest.fn().mockResolvedValue(undefined),
+      onSelectConversation: vi.fn().mockResolvedValue(undefined),
 
       showMetadataPopover: true,
       sessionActionMode: 'active',

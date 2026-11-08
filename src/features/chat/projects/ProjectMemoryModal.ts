@@ -1,4 +1,5 @@
-import { type App, Component, MarkdownRenderer, Modal, Notice, setIcon } from 'obsidian';
+import { parser } from '@lezer/markdown';
+import { type App, getFrontMatterInfo, MarkdownRenderer, Modal, Notice, setIcon } from 'obsidian';
 
 import {
   ProjectMemoryConflictError,
@@ -8,6 +9,7 @@ import {
   type ProjectRecord,
 } from '@/core/types';
 import { t } from '@/i18n/i18n';
+import { MarkdownRenderScope } from '@/shared/components/MarkdownRenderScope';
 import { confirm } from '@/shared/modals/ConfirmModal';
 
 export interface ProjectMemoryModalOptions {
@@ -18,7 +20,6 @@ export interface ProjectMemoryModalOptions {
 /** Agents write the memory file outside Obsidian's index, so no vault event announces their edits. */
 const REFRESH_INTERVAL_MS = 2_000;
 const ATX_HEADING = /^ {0,3}#{1,6}(?:\s|$)/;
-const FENCE = /^ {0,3}(`{3,}|~{3,})/;
 
 let nextTitleId = 0;
 
@@ -38,7 +39,7 @@ export class ProjectMemoryModal extends Modal {
   private updatedEl!: HTMLElement;
   private cancelButton!: HTMLButtonElement;
   private saveButton!: HTMLButtonElement;
-  private previewComponent: Component | null = null;
+  private previewComponent: MarkdownRenderScope | null = null;
   private refreshTimer: number | null = null;
 
   private editing = false;
@@ -211,7 +212,7 @@ export class ProjectMemoryModal extends Modal {
   private renderPreview(): void {
     this.unloadPreview();
     if (this.baseline === null || this.missing) return;
-    const component = new Component();
+    const component = new MarkdownRenderScope();
     component.load();
     this.previewComponent = component;
     // Each render owns a fresh target, so a superseded render cannot write into the current view.
@@ -237,12 +238,14 @@ export class ProjectMemoryModal extends Modal {
     if (!target || target.closest('a')) return;
     const heading = target.closest('h1, h2, h3, h4, h5, h6');
     if (!heading || !this.previewEl.contains(heading)) return;
-    const index = Array.from(this.previewEl.querySelectorAll('h1, h2, h3, h4, h5, h6')).indexOf(heading);
-    const line = headingLines(this.contentArea.value)[index];
-    if (line === undefined) return;
+    const headings = Array.from(this.previewEl.querySelectorAll('h1, h2, h3, h4, h5, h6'));
+    const offsets = headingOffsets(this.contentArea.value);
+    // Raw HTML or host extensions may add headings that the Markdown parser does not own.
+    if (headings.length !== offsets.length) return;
+    const offset = offsets[headings.indexOf(heading)];
+    if (offset === undefined) return;
+    const line = this.contentArea.value.slice(0, offset).split('\n').length - 1;
     this.setEditing(true);
-    const lines = this.contentArea.value.split('\n');
-    const offset = lines.slice(0, line).reduce((total, text) => total + text.length + 1, 0);
     this.contentArea.setSelectionRange(offset, offset);
     const lineHeight = Number.parseFloat(getComputedStyle(this.contentArea).lineHeight) || 20;
     this.contentArea.scrollTop = Math.max(0, line * lineHeight - lineHeight);
@@ -438,10 +441,7 @@ export class ProjectMemoryModal extends Modal {
   private showConflict(): void {
     const actions = this.showNotice(t('chat.projects.memory.conflict'), 'alert');
     const reloadButton = actions.createEl('button', { text: t('chat.projects.memory.reload'), attr: { type: 'button' } });
-    reloadButton.addEventListener('click', () => {
-      this.contentArea.value = this.baseline ?? '';
-      void this.load();
-    });
+    reloadButton.addEventListener('click', () => { void this.load(); });
     const overwriteButton = actions.createEl('button', {
       cls: 'mod-warning',
       text: t('chat.projects.memory.overwrite'),
@@ -451,20 +451,19 @@ export class ProjectMemoryModal extends Modal {
   }
 }
 
-/** Zero-based source lines of ATX headings outside fenced code, in rendered order. */
-function headingLines(markdown: string): number[] {
-  const lines: number[] = [];
-  let fence: string | null = null;
-  markdown.split('\n').forEach((text, index) => {
-    const marker = FENCE.exec(text)?.[1];
-    if (marker) {
-      if (fence === null) fence = marker[0].repeat(marker.length);
-      else if (marker.startsWith(fence)) fence = null;
-      return;
-    }
-    if (fence === null && ATX_HEADING.test(text)) lines.push(index);
+/** Source offsets of Markdown headings, including Setext and container headings, in rendered order. */
+function headingOffsets(markdown: string): number[] {
+  const start = getFrontMatterInfo(markdown).contentStart;
+  const offsets: number[] = [];
+  parser.parse(markdown.slice(start)).iterate({
+    enter(node) {
+      if (/^(?:ATX|Setext)Heading[1-6]$/.test(node.name)) {
+        offsets.push(start + node.from);
+        return false;
+      }
+    },
   });
-  return lines;
+  return offsets;
 }
 
 /** Whether the memory holds anything beyond headings, such as the untouched template. */

@@ -1,6 +1,7 @@
 import type { FakeRun } from '@test/helpers/ChatExecutionHarness';
 import { beginExecution, createHarness, createSubmission, deferred, FakeSession, requestedScope } from '@test/helpers/ChatExecutionHarness';
 import { testDate } from '@test/helpers/testClock';
+import type { MockedFunction } from 'vitest';
 
 import { ConversationExecutionBindings } from '@/app/conversations/ConversationExecutionBindings';
 import type { ConversationRecordFence } from '@/app/conversations/ConversationRecordFence';
@@ -10,14 +11,14 @@ import { ChatExecutionInteractionStaleError, ChatExecutionPreHandoffError } from
 
 const IDLE_MS = 30 * 60_000;
 
-afterEach(() => jest.useRealTimers());
+afterEach(() => vi.useRealTimers());
 
 describe('ChatExecutionCoordinator', () => {
   it.each(['claude', 'kiro'] as const)(
     'validates %s events without serializing resume history after an equivalent rebind',
     async (providerId) => {
       const harness = createHarness();
-      const serializeHistory = jest.fn(() => ({ result: 'x'.repeat(1024 * 1024) }));
+      const serializeHistory = vi.fn(() => ({ result: 'x'.repeat(1024 * 1024) }));
       const makeBinding = () => ({
         conversationId: 'conversation-1',
         providerId,
@@ -34,7 +35,7 @@ describe('ChatExecutionCoordinator', () => {
       const backend = harness.backends.get(providerId)!;
       const session = backend.sessions[0];
       const execute = session.execute.bind(session);
-      jest.spyOn(session, 'execute').mockImplementationOnce((request) => {
+      vi.spyOn(session, 'execute').mockImplementationOnce((request) => {
         const run = execute(request) as FakeRun;
         for (let sequence = 1; sequence <= 20; sequence++) {
           run.events.push({
@@ -90,7 +91,7 @@ describe('ChatExecutionCoordinator', () => {
   });
 
   describe('idle session release', () => {
-    beforeEach(() => jest.useFakeTimers());
+    beforeEach(() => vi.useFakeTimers());
 
     it('releases an idle session after 30 minutes and resumes it on the next turn', async () => {
       const harness = createHarness({ idleReleaseMs: IDLE_MS });
@@ -100,9 +101,9 @@ describe('ChatExecutionCoordinator', () => {
       const backend = harness.backends.get('claude')!;
       const session = backend.sessions[0];
 
-      await jest.advanceTimersByTimeAsync(IDLE_MS - 1);
+      await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
       expect(session.disposeCalls).toBe(0);
-      await jest.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(1);
       expect(session.disposeCalls).toBe(1);
       expect(harness.coordinator.state).toBe('absent');
       expect(harness.repository.releaseExecutionBinding).toHaveBeenCalledTimes(1);
@@ -115,7 +116,7 @@ describe('ChatExecutionCoordinator', () => {
     });
 
     it('retries idle release after a snapshot persistence failure', async () => {
-      const onError = jest.fn();
+      const onError = vi.fn();
       const harness = createHarness({ idleReleaseMs: IDLE_MS, onError });
       await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
       await harness.coordinator.prepare();
@@ -124,14 +125,14 @@ describe('ChatExecutionCoordinator', () => {
       const error = new Error('Storage unavailable');
       harness.repository.persistExecutionSnapshot.mockRejectedValueOnce(error);
 
-      await jest.advanceTimersByTimeAsync(IDLE_MS);
+      await vi.advanceTimersByTimeAsync(IDLE_MS);
       expect(onError).toHaveBeenCalledWith(error);
       expect(session.disposeCalls).toBe(0);
       expect(harness.repository.releaseExecutionBinding).not.toHaveBeenCalled();
 
-      await jest.advanceTimersByTimeAsync(IDLE_MS - 1);
+      await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
       expect(session.disposeCalls).toBe(0);
-      await jest.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(1);
       expect(session.disposeCalls).toBe(1);
       expect(harness.repository.persistExecutionSnapshot).toHaveBeenLastCalledWith(
         'conversation-1', expect.any(String), expect.any(Number), session.snapshot,
@@ -142,7 +143,7 @@ describe('ChatExecutionCoordinator', () => {
     });
 
     it('honors a new idle period when background activity finishes during expiry persistence', async () => {
-      const onIdleRelease = jest.fn();
+      const onIdleRelease = vi.fn();
       const harness = createHarness({ idleReleaseMs: IDLE_MS, onIdleRelease });
       await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
       await harness.coordinator.prepare();
@@ -151,22 +152,22 @@ describe('ChatExecutionCoordinator', () => {
       const persistence = deferred<boolean>();
       harness.repository.persistExecutionSnapshot.mockReturnValueOnce(persistence.promise);
 
-      await jest.advanceTimersByTimeAsync(IDLE_MS);
+      await vi.advanceTimersByTimeAsync(IDLE_MS);
       expect(harness.repository.persistExecutionSnapshot).toHaveBeenCalledTimes(2);
       const scope = { kind: 'background' as const, sessionInstanceId: session.sessionInstanceId, turnId: 'background', sequence: 1 };
       session.emit({ type: 'background_turn_started', scope });
       session.emit({ type: 'background_turn_completed', scope: { ...scope, sequence: 2 }, reason: 'completed' });
-      await jest.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
       // Let part of the new idle period elapse before the old expiry save finishes.
-      await jest.advanceTimersByTimeAsync(IDLE_MS / 2);
+      await vi.advanceTimersByTimeAsync(IDLE_MS / 2);
       persistence.resolve(true);
-      await jest.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
       expect(session.disposeCalls).toBe(0);
       expect(onIdleRelease).not.toHaveBeenCalled();
 
-      await jest.advanceTimersByTimeAsync(IDLE_MS / 2 - 1);
+      await vi.advanceTimersByTimeAsync(IDLE_MS / 2 - 1);
       expect(session.disposeCalls).toBe(0);
-      await jest.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(1);
       expect(session.disposeCalls).toBe(1);
       expect(onIdleRelease).toHaveBeenCalledTimes(1);
       await harness.coordinator.dispose();
@@ -177,20 +178,20 @@ describe('ChatExecutionCoordinator', () => {
       const harness = createHarness({ idleReleaseMs: IDLE_MS });
       const { session, run, resultPromise } = await beginExecution(harness);
       if (retainSteer) {
-        jest.spyOn(session, 'steer').mockResolvedValueOnce(true);
+        vi.spyOn(session, 'steer').mockResolvedValueOnce(true);
         await harness.coordinator.steer(createSubmission({ submissionId: 'retained-input' }));
       }
       expect(!!harness.coordinator.getSteerSubmission('retained-input')).toBe(retainSteer);
-      await jest.advanceTimersByTimeAsync(IDLE_MS + 1);
+      await vi.advanceTimersByTimeAsync(IDLE_MS + 1);
       expect(session.disposeCalls).toBe(0);
       run.events.push({ type: 'turn_started', scope: requestedScope(session, run, 1), accepted: true });
       run.events.push({ type: 'turn_completed', scope: requestedScope(session, run, 2), reason: 'completed' });
       run.events.end();
       await expect(resultPromise).resolves.toMatchObject({ status: 'completed' });
 
-      await jest.advanceTimersByTimeAsync(IDLE_MS - 1);
+      await vi.advanceTimersByTimeAsync(IDLE_MS - 1);
       expect(session.disposeCalls).toBe(0);
-      await jest.advanceTimersByTimeAsync(1);
+      await vi.advanceTimersByTimeAsync(1);
       expect(session.disposeCalls).toBe(1);
       expect(harness.coordinator.getSteerSubmission('retained-input')).toBeUndefined();
       await harness.coordinator.dispose();
@@ -202,13 +203,13 @@ describe('ChatExecutionCoordinator', () => {
       await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'kiro' });
       await harness.coordinator.prepare();
       const session = harness.backends.get('kiro')!.sessions[0];
-      const hasBackgroundWork = jest.fn(() => true);
+      const hasBackgroundWork = vi.fn(() => true);
       Object.assign(session, { hasBackgroundWork });
 
-      await jest.advanceTimersByTimeAsync(IDLE_MS);
+      await vi.advanceTimersByTimeAsync(IDLE_MS);
       expect(session.disposeCalls).toBe(0);
       hasBackgroundWork.mockReturnValue(false);
-      await jest.advanceTimersByTimeAsync(IDLE_MS);
+      await vi.advanceTimersByTimeAsync(IDLE_MS);
       expect(session.disposeCalls).toBe(1);
       await harness.coordinator.dispose();
       await harness.registry.dispose();
@@ -216,17 +217,17 @@ describe('ChatExecutionCoordinator', () => {
 
     it('keeps a session alive while its owner is busy and reports the eventual release', async () => {
       let ownerIdle = false;
-      const onIdleRelease = jest.fn();
+      const onIdleRelease = vi.fn();
       const harness = createHarness({ idleReleaseMs: IDLE_MS, isOwnerIdle: () => ownerIdle, onIdleRelease });
       await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
       await harness.coordinator.prepare();
       const session = harness.backends.get('claude')!.sessions[0];
 
-      await jest.advanceTimersByTimeAsync(IDLE_MS);
+      await vi.advanceTimersByTimeAsync(IDLE_MS);
       expect(session.disposeCalls).toBe(0);
       expect(onIdleRelease).not.toHaveBeenCalled();
       ownerIdle = true;
-      await jest.advanceTimersByTimeAsync(IDLE_MS);
+      await vi.advanceTimersByTimeAsync(IDLE_MS);
       expect(session.disposeCalls).toBe(1);
       expect(onIdleRelease).toHaveBeenCalledTimes(1);
       await harness.coordinator.dispose();
@@ -246,10 +247,10 @@ describe('ChatExecutionCoordinator', () => {
       session.emit({ type: 'background_turn_started', scope });
       session.emit({ type: 'background_turn_completed', scope: { ...scope, sequence: 2 }, reason: 'completed' });
 
-      await jest.advanceTimersByTimeAsync(IDLE_MS);
+      await vi.advanceTimersByTimeAsync(IDLE_MS);
       expect(session.disposeCalls).toBe(0);
       eventWork.resolve();
-      await jest.advanceTimersByTimeAsync(IDLE_MS);
+      await vi.advanceTimersByTimeAsync(IDLE_MS);
       expect(session.disposeCalls).toBe(1);
       await harness.coordinator.dispose();
       await harness.registry.dispose();
@@ -299,7 +300,7 @@ describe('ChatExecutionCoordinator', () => {
   });
 
   it('normalizes synchronous session event handler rejections to errors', async () => {
-    const onError = jest.fn();
+    const onError = vi.fn();
     const harness = createHarness({
       onError,
       onSessionEvent: () => {
@@ -475,7 +476,7 @@ describe('ChatExecutionCoordinator', () => {
     const cause = new Error('conversation assigned to another device');
     const authorityCheck = (
       harness.repository as unknown as {
-        assertConversationExecutionAuthority: jest.MockedFunction<
+        assertConversationExecutionAuthority: MockedFunction<
           (conversationId: string) => Promise<void>
         >;
       }
@@ -486,7 +487,7 @@ describe('ChatExecutionCoordinator', () => {
     });
     await harness.coordinator.prepare();
     const session = harness.backends.get('claude')!.sessions[0];
-    const execute = jest.spyOn(session, 'execute').mockImplementation(() => {
+    const execute = vi.spyOn(session, 'execute').mockImplementation(() => {
       throw new Error('provider handoff occurred');
     });
     authorityCheck.mockRejectedValueOnce(cause);
@@ -507,7 +508,7 @@ describe('ChatExecutionCoordinator', () => {
     });
     await harness.coordinator.prepare();
     const session = harness.backends.get('claude')!.sessions[0];
-    session.execute = jest.fn(() => {
+    session.execute = vi.fn(() => {
       throw new Error('not sent');
     });
 
@@ -775,7 +776,7 @@ describe('ChatExecutionCoordinator', () => {
     const harness = createHarness();
     const { session, resultPromise } = await beginExecution(harness);
     const nativeSteer = deferred<boolean>();
-    const steer = jest.spyOn(session, 'steer').mockReturnValue(
+    const steer = vi.spyOn(session, 'steer').mockReturnValue(
       nativeSteer.promise,
     );
 
@@ -804,7 +805,7 @@ describe('ChatExecutionCoordinator', () => {
     const harness = createHarness();
     const { session, resultPromise } = await beginExecution(harness);
     const nativeSteer = deferred<boolean>();
-    const steer = jest.spyOn(session, 'steer').mockReturnValue(
+    const steer = vi.spyOn(session, 'steer').mockReturnValue(
       nativeSteer.promise,
     );
 
@@ -833,7 +834,7 @@ describe('ChatExecutionCoordinator', () => {
     const harness = createHarness();
     const { session, resultPromise } = await beginExecution(harness);
     const nativeSteer = deferred<boolean>();
-    const steer = jest.spyOn(session, 'steer').mockReturnValue(nativeSteer.promise);
+    const steer = vi.spyOn(session, 'steer').mockReturnValue(nativeSteer.promise);
 
     const steerResult = harness.coordinator.steer(createSubmission({
       submissionId: 'event-before-false',
@@ -859,7 +860,7 @@ describe('ChatExecutionCoordinator', () => {
     const harness = createHarness();
     const { session, resultPromise } = await beginExecution(harness);
     const nativeSteer = deferred<boolean>();
-    const steer = jest.spyOn(session, 'steer').mockReturnValue(nativeSteer.promise);
+    const steer = vi.spyOn(session, 'steer').mockReturnValue(nativeSteer.promise);
 
     const steerResult = harness.coordinator.steer(createSubmission({
       submissionId: 'event-before-true',
@@ -887,7 +888,7 @@ describe('ChatExecutionCoordinator', () => {
   it('retains acknowledged steer correlation until the first live event', async () => {
     const harness = createHarness();
     const { session, run, resultPromise } = await beginExecution(harness);
-    jest.spyOn(session, 'steer').mockResolvedValueOnce(true);
+    vi.spyOn(session, 'steer').mockResolvedValueOnce(true);
 
     await expect(harness.coordinator.steer(createSubmission({
       submissionId: 'ack-before-event',
@@ -916,7 +917,7 @@ describe('ChatExecutionCoordinator', () => {
     async (boundary) => {
       const harness = createHarness();
       const { session, resultPromise } = await beginExecution(harness);
-      jest.spyOn(session, 'steer').mockResolvedValueOnce(true);
+      vi.spyOn(session, 'steer').mockResolvedValueOnce(true);
 
       await expect(harness.coordinator.steer(createSubmission({
         submissionId: `accepted-before-${boundary}`,
@@ -943,7 +944,7 @@ describe('ChatExecutionCoordinator', () => {
   it('drops acknowledged correlation when terminal history delegation sees no live event', async () => {
     const harness = createHarness();
     const { session, run, resultPromise } = await beginExecution(harness);
-    jest.spyOn(session, 'steer').mockResolvedValueOnce(true);
+    vi.spyOn(session, 'steer').mockResolvedValueOnce(true);
 
     await expect(harness.coordinator.steer(createSubmission({
       submissionId: 'accepted-without-event',
@@ -968,7 +969,7 @@ describe('ChatExecutionCoordinator', () => {
     const harness = createHarness();
     const { session, resultPromise } = await beginExecution(harness);
     const nativeSteer = deferred<boolean>();
-    const steer = jest.spyOn(session, 'steer').mockReturnValue(nativeSteer.promise);
+    const steer = vi.spyOn(session, 'steer').mockReturnValue(nativeSteer.promise);
 
     const steerResult = harness.coordinator.steer(createSubmission({
       submissionId: 'event-before-error',
@@ -993,7 +994,7 @@ describe('ChatExecutionCoordinator', () => {
     const harness = createHarness();
     const { session, run, resultPromise } = await beginExecution(harness);
     const nativeSteer = deferred<boolean>();
-    const steer = jest.spyOn(session, 'steer').mockReturnValue(nativeSteer.promise);
+    const steer = vi.spyOn(session, 'steer').mockReturnValue(nativeSteer.promise);
 
     void harness.coordinator.steer(createSubmission({
       submissionId: 'event-before-never',
@@ -1029,7 +1030,7 @@ describe('ChatExecutionCoordinator', () => {
     const harness = createHarness();
     const { session, run, resultPromise } = await beginExecution(harness);
     const steerError = new Error('acknowledgement lost');
-    jest.spyOn(session, 'steer').mockRejectedValueOnce(steerError);
+    vi.spyOn(session, 'steer').mockRejectedValueOnce(steerError);
 
     await expect(harness.coordinator.steer(createSubmission({
       submissionId: 'event-after-error',
@@ -1055,7 +1056,7 @@ describe('ChatExecutionCoordinator', () => {
   it('drops ambiguous in-memory correlation when durable history takes ownership', async () => {
     const harness = createHarness();
     const { session, run, resultPromise } = await beginExecution(harness);
-    jest.spyOn(session, 'steer').mockRejectedValueOnce(new Error('acknowledgement lost'));
+    vi.spyOn(session, 'steer').mockRejectedValueOnce(new Error('acknowledgement lost'));
 
     await expect(harness.coordinator.steer(createSubmission({
       submissionId: 'delegated-ambiguous',
@@ -1080,7 +1081,7 @@ describe('ChatExecutionCoordinator', () => {
     const harness = createHarness();
     const { session, run, resultPromise } = await beginExecution(harness);
     const nativeSteer = deferred<boolean>();
-    const steer = jest.spyOn(session, 'steer').mockReturnValue(nativeSteer.promise);
+    const steer = vi.spyOn(session, 'steer').mockReturnValue(nativeSteer.promise);
     harness.repository.recordConversationActivity.mockRejectedValueOnce(
       new Error('accept save failed'),
     );
@@ -1110,7 +1111,7 @@ describe('ChatExecutionCoordinator', () => {
   });
 
   it('routes correlated background turns, persists their snapshots, and rejects stale output', async () => {
-    const onBackgroundWorkChanged = jest.fn();
+    const onBackgroundWorkChanged = vi.fn();
     const harness = createHarness({ onBackgroundWorkChanged });
     await harness.coordinator.bindConversation({
       conversationId: 'conversation-1',
@@ -1175,7 +1176,7 @@ describe('ChatExecutionCoordinator', () => {
   });
 
   it.each(['subagent_updated', 'session_state_changed'] as const)('publishes background work transitions from %s', async eventType => {
-    const onBackgroundWorkChanged = jest.fn();
+    const onBackgroundWorkChanged = vi.fn();
     const harness = createHarness({ onBackgroundWorkChanged });
     await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'kiro' });
     await harness.coordinator.prepare();
@@ -1344,7 +1345,7 @@ describe('ChatExecutionCoordinator', () => {
     const backend = harness.backends.get('claude')!;
     const session = backend.sessions[0];
     const disposeError = new Error('provider cleanup failed');
-    jest.spyOn(session, 'dispose').mockImplementationOnce(async () => {
+    vi.spyOn(session, 'dispose').mockImplementationOnce(async () => {
       session.disposeCalls += 1;
       session.status = 'disposed';
       throw disposeError;
@@ -1354,7 +1355,7 @@ describe('ChatExecutionCoordinator', () => {
       disposeError,
     );
 
-    const reacquire = jest.spyOn(backend, 'createSession').mockImplementationOnce(() => {
+    const reacquire = vi.spyOn(backend, 'createSession').mockImplementationOnce(() => {
       throw new Error('provider was reacquired');
     });
     await expect(harness.coordinator.execute(createSubmission())).rejects.toThrow(
@@ -1563,7 +1564,7 @@ describe('ChatExecutionCoordinator', () => {
     await harness.coordinator.prepare();
     const session = harness.backends.get('claude')!.sessions[0];
     const nativeRewind = deferred<typeof session.rewindResult>();
-    const rewind = jest.spyOn(session, 'rewind').mockReturnValue(nativeRewind.promise);
+    const rewind = vi.spyOn(session, 'rewind').mockReturnValue(nativeRewind.promise);
 
     const resultPromise = harness.coordinator.rewind(
       'user-before-transition',
@@ -1625,7 +1626,7 @@ describe('ChatExecutionCoordinator', () => {
     await harness.coordinator.prepare();
     const session = harness.backends.get('claude')!.sessions[0];
     harness.repository.persistExecutionSnapshot.mockClear();
-    jest.spyOn(session, 'dispose').mockImplementationOnce(async () => {
+    vi.spyOn(session, 'dispose').mockImplementationOnce(async () => {
       // A stopped turn's native state settles once its process exits, after event routing ends.
       await new Promise(resolve => setTimeout(resolve, 0));
       session.snapshot = { ...session.snapshot, revision: session.snapshot.revision + 1, providerState: { leafId: 'stopped' } };
@@ -1701,7 +1702,7 @@ describe('ChatExecutionCoordinator', () => {
     await harness.coordinator.prepare();
     const backend = harness.backends.get('claude')!;
     const disposal = deferred<void>();
-    jest.spyOn(backend.sessions[0], 'dispose').mockImplementationOnce(() => disposal.promise);
+    vi.spyOn(backend.sessions[0], 'dispose').mockImplementationOnce(() => disposal.promise);
 
     const preparation = harness.coordinator.prepare();
     for (let tick = 0; tick < ticks; tick++) await Promise.resolve();
@@ -1766,20 +1767,20 @@ test.each([undefined, 'provider-reported-model'])(
 );
 
 it('protects branch navigation from idle release and concurrent input and persists the resulting native cursor', async () => {
-  jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'queueMicrotask'] });
   const harness = createHarness({ idleReleaseMs: IDLE_MS });
   await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
   await harness.coordinator.prepare();
   const session = harness.backends.get('claude')!.sessions[0];
   const navigation = deferred<{ status: string; messages: ChatMessage[] }>();
-  const navigate = jest.fn(() => navigation.promise);
+  const navigate = vi.fn(() => navigation.promise);
   Object.assign(session, { navigateConversationBranch: navigate, getConversationBranches: async () => ({}),
     reconcileConversationBranch: async () => ({ status: 'committed', messages: [] }) });
   const request = { userMessageId: 'user', configuration: { systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' } } };
   const pending = harness.coordinator.navigateConversationBranch(request);
   await new Promise(resolve => setImmediate(resolve));
   expect(navigate).toHaveBeenCalledWith({ ...request, signal: expect.any(AbortSignal) });
-  await jest.advanceTimersByTimeAsync(IDLE_MS);
+  await vi.advanceTimersByTimeAsync(IDLE_MS);
   expect(session.disposeCalls).toBe(0);
   await expect(harness.coordinator.execute(createSubmission())).rejects.toThrow('already active');
   navigation.resolve({ status: 'committed', messages: [] });
@@ -1788,7 +1789,7 @@ it('protects branch navigation from idle release and concurrent input and persis
 });
 
 it('reports recovery after native branching succeeds but snapshot persistence fails', async () => {
-  jest.useFakeTimers();
+  vi.useFakeTimers();
   const harness = createHarness({ idleReleaseMs: IDLE_MS });
   await harness.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'claude' });
   await harness.coordinator.prepare();
@@ -1805,7 +1806,7 @@ it('reports recovery after native branching succeeds but snapshot persistence fa
   harness.repository.persistExecutionSnapshot.mockRejectedValueOnce(new Error('Storage unavailable'));
   await expect(harness.coordinator.navigateConversationBranch({ userMessageId: 'old', configuration: { systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' } } }))
     .resolves.toMatchObject({ status: 'recovery-required', messages });
-  await jest.advanceTimersByTimeAsync(IDLE_MS);
+  await vi.advanceTimersByTimeAsync(IDLE_MS);
   expect(session.disposeCalls).toBe(0);
   await expect(harness.coordinator.execute(createSubmission())).rejects.toThrow('recovery must finish');
   await expect(harness.coordinator.reconcileConversationBranch({ configuration: { systemInstructions: { kind: 'main-agent' as const, instructions: 'Main Agent prompt.' } } }))

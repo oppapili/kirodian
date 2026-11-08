@@ -2,6 +2,7 @@ import { createFixture, deferred, waitForCall } from '@test/helpers/ChatInputHar
 import { createProjectsFake, projectRecord } from '@test/helpers/features/chat/ProjectsFake';
 import { testDate } from '@test/helpers/testClock';
 import { Notice } from 'obsidian';
+import type { Mock } from 'vitest';
 
 import type { ProviderExecutionErrorEvent, ProviderExecutionEvent } from '@/core/execution';
 import { buildSystemPrompt } from '@/core/prompt/mainAgent';
@@ -11,11 +12,13 @@ import type { ImageAttachment } from '@/core/types';
 import { ChatExecutionPreHandoffError, type ChatTurnSubmission } from '@/features/chat/execution/ChatExecutionCoordinator';
 import { createQueuedMessage } from '@/features/chat/state/chatTurnRequest';
 
-jest.mock('@/core/providers/ProviderRegistry', () => ({
+
+
+vi.mock('@/core/providers/ProviderRegistry', () => ({
   ProviderRegistry: {
-    formatQuestionReply: jest.fn(),
-    resolveTitleGenerationSelection: jest.fn().mockReturnValue(null),
-    getCapabilities: jest.fn().mockReturnValue({
+    formatQuestionReply: vi.fn(),
+    resolveTitleGenerationSelection: vi.fn().mockReturnValue(null),
+    getCapabilities: vi.fn().mockReturnValue({
       providerId: 'claude',
       supportsFork: true,
       supportsNativeHistory: true,
@@ -26,8 +29,8 @@ jest.mock('@/core/providers/ProviderRegistry', () => ({
 
 describe('MainTurnExecution', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
-    jest.mocked(ProviderRegistry.getCapabilities).mockReturnValue({
+    vi.clearAllMocks();
+    vi.mocked(ProviderRegistry.getCapabilities).mockReturnValue({
       providerId: 'claude',
       supportsFork: true,
       supportsNativeHistory: true,
@@ -83,6 +86,60 @@ describe('MainTurnExecution', () => {
     await fixture.controller.sendMessage({ content: 'second' });
     expect(fixture.deps.streamController.beginResponse).toHaveBeenCalledTimes(2);
   });
+
+  it.each(['creation', 'initialization'] as const)(
+    'recovers queued follow-ups and newer drafts in admission order after %s fails', async failureAt => {
+      const images: ImageAttachment[] = ['first', 'queued', 'draft'].map(id => ({
+        id, name: `${id}.png`, mediaType: 'image/png', data: 'aGVsbG8=', size: 5, source: 'paste',
+      }));
+      let attachedImages = [images[0]];
+      const imageContextManager = {
+        clearImages: () => { attachedImages = []; },
+        getAttachedImages: () => attachedImages,
+        hasImages: () => attachedImages.length > 0,
+        setImages: (next: ImageAttachment[]) => { attachedImages = next; },
+      };
+      const initialization = deferred<boolean>();
+      const initialize = vi.fn().mockResolvedValue(true);
+      if (failureAt === 'initialization') initialize.mockReturnValueOnce(initialization.promise);
+      const fixture = createFixture({
+        getImageContextManager: () => imageContextManager,
+        ensureExecutionInitialized: initialize,
+      });
+      const creation = deferred<{ id: string }>();
+      if (failureAt === 'creation') {
+        fixture.state.currentConversationId = null;
+        fixture.plugin.createConversation.mockReturnValueOnce(creation.promise)
+          .mockResolvedValue({ id: 'conversation-1' });
+      }
+      fixture.input.value = 'First request';
+      const first = fixture.controller.sendMessage();
+      const settled = first.catch((error: unknown) => error);
+      await waitForCall(failureAt === 'creation' ? fixture.plugin.createConversation : initialize);
+      fixture.input.value = 'Follow-up request';
+      attachedImages = [images[1]];
+      await fixture.controller.sendMessage();
+      fixture.input.value = '    newerDraft()\n';
+      attachedImages = [images[2]];
+      if (failureAt === 'creation') creation.reject(new Error('Disk full'));
+      else initialization.resolve(false);
+      expect(await settled).toEqual(failureAt === 'creation' ? new Error('Disk full') : undefined);
+
+      expect(fixture.session.turns.isActive).toBe(false);
+      expect(fixture.coordinator.execute).not.toHaveBeenCalled();
+      expect(fixture.state.messages).toEqual([]);
+      expect(fixture.controller.queue.message).toBeNull();
+      expect(fixture.input.value).toBe('First request\n\nFollow-up request\n\n    newerDraft()\n');
+      expect(attachedImages).toEqual(images);
+
+      await fixture.controller.sendMessage();
+      expect(fixture.coordinator.execute).toHaveBeenCalledTimes(1);
+      expect(fixture.coordinator.execute.mock.calls[0][0]).toMatchObject({
+        canonicalText: 'First request\n\nFollow-up request\n\n    newerDraft()',
+        images,
+      });
+    },
+  );
 
   it('does not launch execution when close overlaps execution initialization', async () => {
     let closing = false;
@@ -298,12 +355,12 @@ describe('MainTurnExecution', () => {
     };
     let attachedImages: ImageAttachment[] = [image];
     const imageContextManager = {
-      clearImages: jest.fn(() => {
+      clearImages: vi.fn(() => {
         attachedImages = [];
       }),
-      getAttachedImages: jest.fn(() => attachedImages),
-      hasImages: jest.fn(() => attachedImages.length > 0),
-      setImages: jest.fn((images: ImageAttachment[]) => {
+      getAttachedImages: vi.fn(() => attachedImages),
+      hasImages: vi.fn(() => attachedImages.length > 0),
+      setImages: vi.fn((images: ImageAttachment[]) => {
         attachedImages = images;
       }),
     };
@@ -428,7 +485,7 @@ describe('MainTurnExecution', () => {
     const startedAt = testDate().getTime();
     const finishedAt = testDate({ seconds: 65 }).getTime();
     let now = startedAt;
-    const nowSpy = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
     try {
       const fixture = createFixture();
       fixture.coordinator.execute.mockImplementationOnce(async () => {
@@ -446,7 +503,7 @@ describe('MainTurnExecution', () => {
 
   it.each([false, true])('stores response duration without a completion flavor on success (compaction: %s)', async compaction => {
     let currentTime = 1000;
-    const nowSpy = jest.spyOn(performance, 'now').mockImplementation(() => currentTime);
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => currentTime);
     try {
       const fixture = createFixture();
       fixture.coordinator.execute.mockImplementationOnce(async () => {
@@ -467,7 +524,7 @@ describe('MainTurnExecution', () => {
 
   it('suppresses response duration on normalized execution errors when elapsed time exceeds one second', async () => {
     let currentTime = 1000;
-    const nowSpy = jest.spyOn(performance, 'now').mockImplementation(() => currentTime);
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => currentTime);
     try {
       const fixture = createFixture();
       const errorEvent: ProviderExecutionErrorEvent = {
@@ -505,7 +562,7 @@ describe('MainTurnExecution', () => {
 
   it('suppresses response duration on catch-path rejections when elapsed time exceeds one second', async () => {
     let currentTime = 1000;
-    const nowSpy = jest.spyOn(performance, 'now').mockImplementation(() => currentTime);
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => currentTime);
     try {
       const fixture = createFixture();
       fixture.coordinator.execute.mockImplementationOnce(async () => {
@@ -603,7 +660,7 @@ describe('MainTurnExecution', () => {
     const fixture = createFixture();
     fixture.input.value = 'deleted turn';
     const lateSteer = createQueuedMessage('late steer', { text: 'late steer' });
-    jest.mocked(Notice).mockImplementationOnce(() => {
+    vi.mocked(Notice).mockImplementationOnce(function () {
       // The steer's provider rejection arrives after the deletion recovery, before the turn ends.
       fixture.controller.queue.returnUnsent(lateSteer);
       return {} as Notice;
@@ -623,7 +680,7 @@ describe('MainTurnExecution', () => {
 
   it('keeps pending input intact when execution preparation fails', async () => {
     const fixture = createFixture({
-      ensureExecutionInitialized: jest.fn().mockResolvedValue(false),
+      ensureExecutionInitialized: vi.fn().mockResolvedValue(false),
     });
     fixture.input.value = 'not sent';
 
@@ -635,7 +692,7 @@ describe('MainTurnExecution', () => {
   });
 
   it('reports a terminal completed turn as reviewable', async () => {
-    const onReviewableSettlement = jest.fn();
+    const onReviewableSettlement = vi.fn();
     const fixture = createFixture({ onReviewableSettlement });
 
     await fixture.controller.sendMessage({ content: 'finish this' });
@@ -645,7 +702,7 @@ describe('MainTurnExecution', () => {
   });
 
   it('reports a terminal accepted error as reviewable', async () => {
-    const onReviewableSettlement = jest.fn();
+    const onReviewableSettlement = vi.fn();
     const fixture = createFixture({ onReviewableSettlement });
     fixture.coordinator.execute.mockResolvedValueOnce({
       accepted: true,
@@ -662,7 +719,7 @@ describe('MainTurnExecution', () => {
   it.each(['cancelled', 'invalidated', 'missing-session'] as const)(
     'does not report a %s turn as reviewable',
     async (status) => {
-      const onReviewableSettlement = jest.fn();
+      const onReviewableSettlement = vi.fn();
       const fixture = createFixture({ onReviewableSettlement });
       fixture.coordinator.execute.mockResolvedValueOnce({
         accepted: status !== 'missing-session',
@@ -677,7 +734,7 @@ describe('MainTurnExecution', () => {
   );
 
   it('does not report a definite pre-handoff failure as reviewable', async () => {
-    const onReviewableSettlement = jest.fn();
+    const onReviewableSettlement = vi.fn();
     const fixture = createFixture({ onReviewableSettlement });
     fixture.coordinator.execute.mockRejectedValueOnce(
       new ChatExecutionPreHandoffError('not handed off'),
@@ -689,9 +746,9 @@ describe('MainTurnExecution', () => {
   });
 
   it('reports completed work when terminal persistence fails', async () => {
-    const onReviewableSettlement = jest.fn();
+    const onReviewableSettlement = vi.fn();
     const fixture = createFixture({ onReviewableSettlement });
-    jest.mocked(fixture.deps.conversationController.save).mockRejectedValueOnce(
+    vi.mocked(fixture.deps.conversationController.save).mockRejectedValueOnce(
       new Error('save failed'),
     );
 
@@ -749,10 +806,10 @@ it('cancels a turn while it commits a branch draft before provider handoff', asy
   const commit = deferred<{ status: 'committed'; messages: [] }>();
   const conversation = fixture.deps.conversationController;
   Object.defineProperty(conversation, 'hasBranchDraft', { configurable: true, get: () => true });
-  Object.defineProperty(conversation, 'commitBranchDraft', { configurable: true, value: jest.fn(() => commit.promise) });
+  Object.defineProperty(conversation, 'commitBranchDraft', { configurable: true, value: vi.fn(() => commit.promise) });
   fixture.input.value = 'branch prompt';
   const sending = fixture.controller.sendMessage();
-  await waitForCall(conversation.commitBranchDraft as jest.Mock);
+  await waitForCall(conversation.commitBranchDraft as Mock);
   expect(fixture.state.isStreaming).toBe(true);
 
   fixture.controller.cancelStreaming();
@@ -771,10 +828,10 @@ describe('branch draft submission', () => {
     const prompt = { id: 'second', role: 'user' as const, content: 'Original', timestamp: Date.now(), userMessageId: 'native-second' };
     fixture.state.messages = [first, prompt];
     const navigation = deferred<{ status: string; messages?: typeof first[] }>();
-    const navigateConversationBranch = jest.fn().mockReturnValue(navigation.promise);
+    const navigateConversationBranch = vi.fn().mockReturnValue(navigation.promise);
     Object.assign(fixture.coordinator, { navigateConversationBranch });
-    Object.assign(fixture.deps.renderer, { renderMessages: jest.fn(), refreshBranchButtonState: jest.fn(),
-      captureReadingAnchor: () => null, restoreReadingAnchor: jest.fn() });
+    Object.assign(fixture.deps.renderer, { renderMessages: vi.fn(), refreshBranchButtonState: vi.fn(),
+      captureReadingAnchor: () => null, restoreReadingAnchor: vi.fn() });
     // The harness conversation owner is real; turn admission is wired to it at construction.
     const conversation = fixture.deps.conversationController;
     await conversation.navigateBranch('second');

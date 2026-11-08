@@ -24,17 +24,17 @@ function makeHost() {
   const host = {
     settings, mutateSettings: coordinator.mutate.bind(coordinator),
     mutateSettingsConditionally: coordinator.mutateConditionally.bind(coordinator),
-    notifyProviderChatOptionsChanged: jest.fn(),
+    notifyProviderChatOptionsChanged: vi.fn(),
   } as unknown as ProviderHost;
   return { host, storage, read: () => JSON.parse(content) };
 }
 
 beforeEach(() => {
-  jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized').mockResolvedValue();
+  vi.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized').mockResolvedValue();
 });
 afterEach(() => {
   for (const { id } of cases) ProviderWorkspaceRegistry.setServices(id, undefined);
-  jest.restoreAllMocks();
+  vi.restoreAllMocks();
 });
 
 // No provider currently requests reasoning-metadata backfill
@@ -59,7 +59,7 @@ it.each([
 it('completes without error for a fully populated provider catalog', async () => {
   const { host } = makeHost();
   cases[0].populate(host.settings);
-  const refresh = jest.fn();
+  const refresh = vi.fn();
   ProviderWorkspaceRegistry.setServices('kiro', { modelCatalog: { refresh } as any });
 
   await migrateSelectedModelMetadata(host, new AbortController().signal);

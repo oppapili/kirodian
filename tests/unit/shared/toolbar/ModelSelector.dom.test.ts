@@ -1,4 +1,4 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
 import '@/providers';
 
@@ -48,7 +48,8 @@ it('renders saved model order top-to-bottom through the real provider UI config'
     getUIConfig: () => kiroChatUIConfig,
   } as unknown as ModelPickerCallbacks);
   fireEvent.click(within(host).getByRole('button', { name: /^Model: haiku/ }));
-  const labels = () => within(host).getAllByRole('option').map(node => node.textContent);
+  const labels = () => within(host).getAllByRole('option')
+    .map(node => node.querySelector('.claudian-toolbar-popover-option-label')?.textContent);
   // Rendered through the real kiro UI config; its selection-aware ordering.
   expect(labels()).toEqual(['opus', 'sonnet', 'haiku']);
   // A single-provider list takes the view's active-provider brand; rows name no provider.

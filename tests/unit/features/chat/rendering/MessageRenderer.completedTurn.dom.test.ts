@@ -1,10 +1,10 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
 import '@/providers';
 
+import { axe } from '@test/helpers/accessibility';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
@@ -20,7 +20,7 @@ HTMLElement.prototype.removeClass = function (...classes) { this.classList.remov
 
 function setup(providerId = 'kiro', capabilityOverride: Record<string, unknown> = {}) {
   const messagesEl = document.body.createDiv();
-  const fork = jest.fn().mockResolvedValue(undefined);
+  const fork = vi.fn().mockResolvedValue(undefined);
   const settings = { mediaFolder: '', showMessageTimestamps: true };
   const renderer = new MessageRenderer(
     { app: {}, settings } as any,
@@ -45,11 +45,11 @@ const messages: ChatMessage[] = [
 
 beforeEach(() => {
   document.body.replaceChildren();
-  jest.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
+  vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
     (el as HTMLElement).createEl('p', { text: markdown });
   });
   Object.defineProperty(navigator, 'clipboard', {
-    configurable: true, value: { writeText: jest.fn().mockResolvedValue(undefined) },
+    configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) },
   });
 });
 
@@ -261,21 +261,21 @@ it('offers fork on the final live response of a multi-message turn', async () =>
   renderer.dispose();
 });
 
-it('offers full-session fork only on the latest reply and removes it when another turn starts', async () => {
+it('offers full-session fork on each finalized reply and forks the latest from its own checkpoint', async () => {
   const { renderer, messagesEl, fork } = setup('kiro', { supportsFork: true, forkMode: 'full-session' });
   const latest: ChatMessage = { id: 'a3', role: 'assistant', content: 'Latest answer', timestamp: 7,
     assistantMessageId: 'native-a3' };
   renderer.renderMessages([...messages, { id: 'u2', role: 'user', content: 'Next', timestamp: 6 }, latest], () => 'Hello');
+  // Every finalized reply with a native checkpoint carries fork; the latest forks from its own id.
   const buttons = within(messagesEl).getAllByRole('button', { name: 'Fork conversation' });
-  expect(buttons).toHaveLength(1);
-  expect(buttons[0].closest('[data-message-id]')?.getAttribute('data-message-id')).toBe('a3');
-  expect(buttons[0].getAttribute('type')).toBe('button');
-  fireEvent.click(buttons[0]);
+  expect(buttons.map(button => button.closest('[data-message-id]')?.getAttribute('data-message-id'))).toEqual(['a2', 'a3']);
+  const latestButton = buttons[buttons.length - 1];
+  expect(latestButton.closest('[data-message-id]')?.getAttribute('data-message-id')).toBe('a3');
+  expect(latestButton.getAttribute('type')).toBe('button');
+  fireEvent.click(latestButton);
   await Promise.resolve();
   expect(fork).toHaveBeenCalledWith('a3');
   expect((await axe(messagesEl)).violations).toEqual([]);
-  renderer.addMessage({ id: 'u3', role: 'user', content: 'Continue', timestamp: 8 });
-  expect(within(messagesEl).queryByRole('button', { name: 'Fork conversation' })).toBeNull();
   renderer.dispose();
 });
 
@@ -475,12 +475,12 @@ it('keeps time after throughput when timestamps are refreshed or toggled', () =>
 
 it('defers Markdown for collapsed thinking and notifications until their own disclosure opens', async () => {
   const { renderer, messagesEl } = setup();
-  jest.mocked(MarkdownRenderer.render).mockClear();
+  vi.mocked(MarkdownRenderer.render).mockClear();
   renderer.renderStoredMessage({ id: 'lazy', role: 'assistant', timestamp: testDate().getTime(), content: 'Answer',
     contentBlocks: [{ type: 'thinking', content: '**Reasoning**' },
       { type: 'task_notification', content: '**Notification**' }, { type: 'text', content: 'Answer' }],
   });
-  expect(jest.mocked(MarkdownRenderer.render).mock.calls.map(call => call[1])).toEqual(['Answer']);
+  expect(vi.mocked(MarkdownRenderer.render).mock.calls.map(call => call[1])).toEqual(['Answer']);
   fireEvent.click(within(messagesEl).getByRole('button', { name: 'Worked' }));
   const thinking = within(messagesEl).getByRole('button', { name: 'Thought' });
   fireEvent.keyDown(thinking, { key: 'Enter' });
@@ -489,18 +489,18 @@ it('defers Markdown for collapsed thinking and notifications until their own dis
   fireEvent.click(notification);
   fireEvent.click(notification);
   await Promise.resolve();
-  expect(jest.mocked(MarkdownRenderer.render).mock.calls.map(call => call[1])).toEqual(['Answer', '**Reasoning**', '**Notification**']);
+  expect(vi.mocked(MarkdownRenderer.render).mock.calls.map(call => call[1])).toEqual(['Answer', '**Reasoning**', '**Notification**']);
   expect((await axe(messagesEl)).violations).toEqual([]);
   renderer.dispose();
 });
 
 it('reuses created message elements instead of searching the growing history for each response', () => {
   const { renderer, messagesEl } = setup();
-  const query = jest.spyOn(messagesEl, 'querySelector');
+  const query = vi.spyOn(messagesEl, 'querySelector');
   const history: ChatMessage[] = Array.from({ length: 100 }, (_, index) => ({
     id: `indexed-${index}`, role: index % 2 ? 'assistant' : 'user', content: `Message ${index}`, timestamp: testDate().getTime(),
   }));
-  const positionLookup = jest.spyOn(history, 'indexOf');
+  const positionLookup = vi.spyOn(history, 'indexOf');
   renderer.renderMessages(history, () => 'Hello');
   expect(positionLookup).not.toHaveBeenCalled();
   expect(query.mock.calls.filter(([selector]) => selector.includes('data-message-id') || selector.includes('data-work-message-id'))).toHaveLength(0);

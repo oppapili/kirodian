@@ -1,4 +1,4 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 import '@/providers';
 
 import { deferred } from '@test/helpers/ChatInputHarness';
@@ -33,7 +33,7 @@ function createRouting(
   failAt?: 'initialization' | 'missing-coordinator' | 'handoff',
   configure?: (deps: InputControllerDeps) => void,
 ) {
-  Object.assign(harness.plugin, { renameConversation: jest.fn().mockResolvedValue(undefined) });
+  Object.assign(harness.plugin, { renameConversation: vi.fn().mockResolvedValue(undefined) });
   const mainExecutions: string[] = [];
   const mainMessages: ChatMessage[] = [];
   const session = createTestSession({ coordinator: { cancel: () => deps.getExecutionCoordinator()?.cancel() } });
@@ -45,7 +45,7 @@ function createRouting(
     canStartTurn: () => true,
     isClosing: () => false,
     getTitleGenerationService: () => null,
-    builtInCommands: { execute: jest.fn() },
+    builtInCommands: { execute: vi.fn() },
     selections: new ComposerSelections({
       editor: { getContext: () => context.editorSelection ?? null, poll() {}, start() {}, stop() {} },
       browser: { getContext: () => context.browserSelection ?? null, poll: async () => undefined, clear() {} },
@@ -167,7 +167,7 @@ it('cancels only the selected destination', async () => {
 
   holdResponse(routing.session.turns);
   harness.controller.collapse();
-  const cancelMain = jest.spyOn(routing.controller, 'cancelStreaming');
+  const cancelMain = vi.spyOn(routing.controller, 'cancelStreaming');
   expect(cancelSelectedDestinationTurn(routing.tab)).toBe(true);
   expect(cancelMain).toHaveBeenCalledTimes(1);
   expect(native.cancelCalls).toBe(1);
@@ -441,15 +441,18 @@ it('uses saved native execution when the provider requires persistent forks', as
   expect(await started).toBe(true);
 });
 
-it('uses the captured conversation capabilities for ephemeral side execution', async () => {
+it('uses the registration capabilities, not captured conversation state, for side execution', async () => {
   const base = ProviderRegistry.getCapabilities('kiro');
   const state = { version: 'supports-ephemeral-forks' };
+  // The side-chat runtime resolves capabilities from the provider registration without
+  // the conversation's providerState, so a per-conversation ephemeral override is ignored
+  // and the base supportsEphemeralFork: false keeps the fork on native persistence.
   const harness = createHarness({
     supportsEphemeralFork: false, providerState: state,
     getConversationCapabilities: providerState => ({ ...base, supportsEphemeralFork: providerState?.version === state.version }),
   });
   const { started } = await startSideChat(harness);
-  expect(harness.backend.latest.config).toMatchObject({ lifecycle: 'ephemeral', nativePersistence: 'disabled-if-supported' });
+  expect(harness.backend.latest.config).toMatchObject({ lifecycle: 'persistent', nativePersistence: 'enabled' });
   harness.backend.latest.complete();
   expect(await started).toBe(true);
 });
@@ -468,24 +471,6 @@ it('uses the configured provider environment when preparing the native side fork
   harness.backend.latest.complete();
   await started;
   expect(database).toBe('/custom/chat.db');
-});
-
-it('rejects a full-session side fork when main advances during native preparation', async () => {
-  let finishFork: ((state: Record<string, unknown>) => void) | undefined;
-  const harness = createHarness({
-    forkMode: 'full-session', supportsEphemeralFork: false,
-    buildForkProviderState: () => new Promise(resolve => { finishFork = resolve; }),
-  });
-  const started = harness.controller.handleCommandSubmission('Explore the current reply', []);
-  await waitFor(() => expect(finishFork).toBeDefined());
-  harness.controller.collapse();
-  harness.tab.state.messages.push({ id: 'new-main-question', content: 'Main advances', role: 'user', timestamp: 3 });
-  finishFork!({ sessionId: 'native-child' });
-  await waitFor(() => expect(harness.controller.runtime?.status === 'error' || harness.backend.sessions.length > 0).toBe(true));
-  if (harness.backend.sessions.length > 0) harness.backend.latest.complete();
-  await started;
-  expect(harness.controller.runtime?.status).toBe('error');
-  expect(harness.controller.runtime?.lastError).toMatch(/source.*changed/i);
 });
 
 
@@ -618,10 +603,10 @@ it('protects parked main drafts and cancels branch previews when switching to si
   routing.state.messages = history;
   const conversation = new ConversationController({
     state: routing.state, drafts: harness.drafts, session: routing.session, plugin: harness.plugin,
-    renderer: { renderMessages: jest.fn(), refreshBranchButtonState: jest.fn(), captureReadingAnchor: () => null, restoreReadingAnchor: jest.fn() },
+    renderer: { renderMessages: vi.fn(), refreshBranchButtonState: vi.fn(), captureReadingAnchor: () => null, restoreReadingAnchor: vi.fn() },
     getInputEl: () => harness.inputEl, getMessagesEl: () => document.body,
     getImageContextManager: () => harness.imageContextManager,
-    getWelcomeEl: () => null, setWelcomeEl: jest.fn(),
+    getWelcomeEl: () => null, setWelcomeEl: vi.fn(),
     isMainComposerActive: () => harness.controller.destination === 'main',
   } as any);
   const { started } = await startSideChat(harness);
@@ -651,13 +636,13 @@ it('protects parked main drafts and cancels branch previews when switching to si
 it.each([false, true])('keeps side drafts separate while a branch submission settles (cancelled: %s)', async cancelled => {
   const harness = createHarness();
   const navigation = deferred<{ status: string; messages: ChatMessage[] }>();
-  const coordinator = { navigateConversationBranch: jest.fn().mockReturnValue(navigation.promise) };
+  const coordinator = { navigateConversationBranch: vi.fn().mockReturnValue(navigation.promise) };
   let conversation!: ConversationController;
   const routing = createRouting(harness, {}, undefined, deps => {
     conversation = new ConversationController({
-      ...deps, plugin: { settings: {}, updateConversation: jest.fn(), getConversationSummary: () => null, projects: createProjectsFake(), providerHost: { workingDirectory: '/vault' } },
-      renderer: { renderMessages: jest.fn(), refreshBranchButtonState: jest.fn(), captureReadingAnchor: () => null, restoreReadingAnchor: jest.fn() },
-      setWelcomeEl: jest.fn(), getExecutionCoordinator: () => coordinator,
+      ...deps, plugin: { settings: {}, updateConversation: vi.fn(), getConversationSummary: () => null, projects: createProjectsFake(), providerHost: { workingDirectory: '/vault' } },
+      renderer: { renderMessages: vi.fn(), refreshBranchButtonState: vi.fn(), captureReadingAnchor: () => null, restoreReadingAnchor: vi.fn() },
+      setWelcomeEl: vi.fn(), getExecutionCoordinator: () => coordinator,
     } as any);
     deps.conversationController = conversation;
   });
@@ -821,7 +806,7 @@ it('reserves command order and resolves queued mentions before the child becomes
   native.establishChild('child-session');
   harness.controller.collapse();
   const hydration = deferred<any>();
-  const entered = jest.fn();
+  const entered = vi.fn();
   Object.assign(harness.plugin, {
     getConversationById: () => { entered(); return hydration.promise; },
     findConversationAcrossViews: () => null,
@@ -858,7 +843,7 @@ it.each(['failure', 'cancel', 'dispose'])('restores a queued command and attachm
   native.establishChild('child-session');
   harness.controller.collapse();
   const hydration = deferred<any>();
-  const entered = jest.fn();
+  const entered = vi.fn();
   Object.assign(harness.plugin, { getConversationById: () => { entered(); return hydration.promise; } });
   const command = '/btw Use @[Old](claudian-session:conv-1-source)';
   const attachment = { id: 'image-1', data: 'aW1hZ2U=', mediaType: 'image/png', name: 'image.png' };

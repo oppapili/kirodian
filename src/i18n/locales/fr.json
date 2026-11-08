@@ -372,10 +372,10 @@
         "archive": "Impossible d’archiver le projet",
         "restore": "Impossible de restaurer le projet",
         "pin": "Impossible de modifier l’épinglage du projet",
+        "reorder": "Impossible de réorganiser les projets",
         "move": "Impossible de déplacer les sessions vers le projet",
         "remove": "Impossible de retirer les sessions du projet",
-        "start": "Impossible de démarrer une session dans ce projet",
-        "sort": "Impossible de mettre à jour le tri des projets"
+        "start": "Impossible de démarrer une session dans ce projet"
       },
       "editor": {
         "titleNew": "Nouveau projet",

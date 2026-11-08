@@ -2,7 +2,7 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 
-jest.mock('cross-spawn', () => jest.fn());
+vi.mock('cross-spawn', () => ({ default: vi.fn() }));
 
 import spawn from 'cross-spawn';
 
@@ -24,7 +24,7 @@ function createNativeProcess() {
       return true;
     },
   });
-  jest.mocked(spawn).mockReturnValue(proc as unknown as ChildProcessWithoutNullStreams);
+  vi.mocked(spawn).mockReturnValue(proc as unknown as ChildProcessWithoutNullStreams);
   return proc;
 }
 

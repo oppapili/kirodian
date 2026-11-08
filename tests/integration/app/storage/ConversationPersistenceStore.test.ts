@@ -17,6 +17,7 @@ import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
 import type { Conversation, SessionMetadata } from '@/core/types';
+import { organizeSessionList } from '@/features/chat/session-manager/SessionListOrganizer';
 const DEVICE_KEY = `device-${'a'.repeat(64)}`;
 const DEVICE_PATH = getDeviceSessionsPath(DEVICE_KEY);
 const metadata: SessionMetadata = {
@@ -55,7 +56,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  jest.restoreAllMocks();
+  vi.restoreAllMocks();
   await fs.rm(root, { recursive: true, force: true });
 });
 
@@ -92,7 +93,7 @@ test('initial metadata loading reads unchanged payloads once through the storage
   for (let index = 0; index < 25; index++) {
     await store.saveMetadata({ ...metadata, id: `saved-${index}` });
   }
-  const read = jest.spyOn(adapter, 'read');
+  const read = vi.spyOn(adapter, 'read');
   const conversations = createRepository();
   const loader = new SessionMetadataLoader({
     sessions: store.metadataReader, conversations,
@@ -115,7 +116,7 @@ test('preserves higher-priority metadata authority when its stat is unavailable'
   const scanned = await store.metadataReader.scan();
   await store.saveMetadata({ ...metadata, title: 'Device owner' });
   const stat = app.vault.adapter.stat.bind(app.vault.adapter);
-  jest.spyOn(app.vault.adapter, 'stat').mockImplementation(async file => {
+  vi.spyOn(app.vault.adapter, 'stat').mockImplementation(async file => {
     if (file === `${DEVICE_PATH}/${metadata.id}.meta.json`) throw new Error('Stat temporarily unavailable');
     return stat(file);
   });
@@ -162,7 +163,7 @@ test('reopening uses provider messages as the authoritative history', async () =
     id: 'native-message', userMessageId: 'native-user', role: 'user' as const,
     content: 'Provider text', displayContent: 'Provider text', timestamp: 2,
   };
-  jest.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+  vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
     hydrateConversationHistory: async () => ({ messages: [nativeMessage] }),
   } as unknown as ReturnType<typeof ProviderRegistry.getConversationHistoryService>);
   await adapter.write(`${SESSIONS_PATH}/${metadata.id}.inputs.json`, JSON.stringify({
@@ -225,6 +226,29 @@ test('migration retains assigned metadata and respects the scope of old deletion
   });
 });
 
+test('assignment recovery retains its valid source until the existing device target is readable', async () => {
+  const source = `${SESSIONS_PATH}/${metadata.id}.meta.json`;
+  const target = `${DEVICE_PATH}/${metadata.id}.meta.json`;
+  const marker = `${SESSIONS_PATH}/${metadata.id}.assigned.json`;
+  await store.saveMetadata(metadata, 'unscoped');
+  await adapter.write(target, '{');
+  await adapter.write(marker, JSON.stringify({ schemaVersion: 1, conversationId: metadata.id, deviceKey: DEVICE_KEY }));
+  await adapter.write(CLAUDIAN_SETTINGS_PATH, JSON.stringify({ userName: 'Example' }));
+
+  await new SharedStorageService({ app } as Plugin, DEFAULT_CLAUDIAN_SETTINGS).initialize();
+
+  expect(await adapter.read(source)).toBe(JSON.stringify(metadata));
+  expect(await adapter.read(target)).toBe('{');
+  expect(await adapter.exists(marker)).toBe(true);
+
+  const repaired = { ...metadata, title: 'Repaired device record' };
+  await adapter.write(target, JSON.stringify(repaired));
+  await new SharedStorageService({ app } as Plugin, DEFAULT_CLAUDIAN_SETTINGS).initialize();
+  expect(await adapter.exists(source)).toBe(false);
+  expect(await adapter.exists(marker)).toBe(false);
+  expect(await store.metadataReader.load(metadata.id)).toMatchObject({ source: 'device', metadata: repaired });
+});
+
 test.each(['{', JSON.stringify({ schemaVersion: 1, conversationId: metadata.id, deviceKey: '../invalid' })])(
   'migration retains unassigned metadata when its obsolete assignment is invalid: %s', async (content) => {
     await store.saveMetadata(metadata, 'unscoped');
@@ -276,7 +300,7 @@ test('migration continues when a listed assignment disappears before it is read'
   await adapter.write(assignmentPath, '{}');
   await adapter.write(`${SESSIONS_PATH}/${metadata.id}.inputs.json`, '{}');
   const read = app.vault.adapter.read.bind(app.vault.adapter);
-  jest.spyOn(app.vault.adapter, 'read').mockImplementation(async (file) => {
+  vi.spyOn(app.vault.adapter, 'read').mockImplementation(async (file) => {
     if (file === assignmentPath) await fs.unlink(path.join(root, file));
     return read(file);
   });
@@ -298,12 +322,12 @@ test('initialization loads settings while sidecar discovery is pending and waits
   const listingStarted = new Promise<void>(resolve => { entered = resolve; });
   let release!: () => void;
   const listingGate = new Promise<void>(resolve => { release = resolve; });
-  jest.spyOn(app.vault.adapter, 'list').mockImplementation(async folder => {
+  vi.spyOn(app.vault.adapter, 'list').mockImplementation(async folder => {
     entered();
     await listingGate;
     return list(folder);
   });
-  const exists = jest.spyOn(app.vault.adapter, 'exists');
+  const exists = vi.spyOn(app.vault.adapter, 'exists');
   const storage = new SharedStorageService({ app } as Plugin, DEFAULT_CLAUDIAN_SETTINGS);
   let finished = false;
   const initializing = storage.initialize().then(result => { finished = true; return result; });
@@ -327,7 +351,7 @@ test('initialization joins recovery before reporting a settings failure', async 
   await adapter.write(CLAUDIAN_SETTINGS_PATH, '{}');
   const failure = new Error('Settings unavailable');
   const read = app.vault.adapter.read.bind(app.vault.adapter);
-  jest.spyOn(app.vault.adapter, 'read').mockImplementation(file => {
+  vi.spyOn(app.vault.adapter, 'read').mockImplementation(file => {
     if (file === CLAUDIAN_SETTINGS_PATH) return Promise.reject(failure);
     return read(file);
   });
@@ -348,14 +372,14 @@ test.each(['list', 'read', 'rename'] as const)(
     const storage = new SharedStorageService({ app } as Plugin, DEFAULT_CLAUDIAN_SETTINGS);
     const original = app.vault.adapter[operation].bind(app.vault.adapter) as (...args: string[]) => ReturnType<App['vault']['adapter'][typeof operation]>;
     let failed = false;
-    jest.spyOn(app.vault.adapter, operation).mockImplementation((...args: string[]): ReturnType<App['vault']['adapter'][typeof operation]> => {
+    (vi.spyOn(app.vault.adapter, operation) as import('vitest').MockInstance<(...args: string[]) => ReturnType<App['vault']['adapter'][typeof operation]>>).mockImplementation((...args: string[]): ReturnType<App['vault']['adapter'][typeof operation]> => {
       if (!failed && args[0].startsWith(SESSIONS_PATH)) {
         failed = true;
         throw new Error('Storage unavailable');
       }
       return original(...args);
     });
-    jest.mocked(Notice).mockClear();
+    vi.mocked(Notice).mockClear();
 
     await expect(storage.initialize()).resolves.toMatchObject({ claudian: { userName: 'Example' } });
     expect(Notice).toHaveBeenCalledWith('Failed to clean up obsolete session files; will retry next launch');
@@ -365,3 +389,21 @@ test.each(['list', 'read', 'rename'] as const)(
     expect(JSON.parse(await adapter.read(`${DEVICE_PATH}/${metadata.id}.meta.json`))).toEqual(metadata);
   },
 );
+
+
+test.each([null, 42, {}, [], undefined])('leaves a malformed title record untouched and keeps the session list usable (%o)', async title => {
+  const invalid = { ...metadata, id: 'zz-bad-title', title };
+  const invalidPath = `${DEVICE_PATH}/${invalid.id}.meta.json`;
+  await store.saveMetadata(metadata);
+  await adapter.write(invalidPath, JSON.stringify(invalid));
+  const before = await adapter.read(invalidPath);
+  const scan = await store.metadataReader.scanMetadata();
+  const repository = createRepository();
+  repository.mergeMetadataConversations(scan.metadata.map(record => ({
+    ...record, providerId: record.providerId ?? 'claude', messages: [], sessionId: null,
+  })));
+  const sections = organizeSessionList(repository.list(), { organization: 'list', sort: 'last-updated', language: 'en' });
+  expect(sections[0].conversations.map(record => record.id)).toEqual([metadata.id]);
+  expect(scan).toMatchObject({ complete: true, invalidMetadataCount: 1 });
+  expect(await adapter.read(invalidPath)).toBe(before);
+});

@@ -2,6 +2,7 @@ import '@/providers';
 
 import { createMockEl } from '@test/helpers/MockElement';
 import { Component, Menu } from 'obsidian';
+import type { Mock } from 'vitest';
 
 import {
   TOOL_APPLY_PATCH,
@@ -21,28 +22,28 @@ import { renderStoredToolCall } from '@/features/chat/rendering/tools/ToolCallRe
 import { renderStoredWriteEdit } from '@/features/chat/rendering/tools/WriteEditRenderer';
 import { renderStoredAsyncSubagent, renderStoredSubagent } from '@/features/chat/subagents/SubagentRenderer';
 
-jest.mock('@/features/chat/subagents/SubagentRenderer', () => ({
-  renderStoredAsyncSubagent: jest.fn().mockReturnValue({ wrapperEl: {}, cleanup: jest.fn() }),
-  renderStoredSubagent: jest.fn(),
+vi.mock('@/features/chat/subagents/SubagentRenderer', () => ({
+  renderStoredAsyncSubagent: vi.fn().mockReturnValue({ wrapperEl: {}, cleanup: vi.fn() }),
+  renderStoredSubagent: vi.fn(),
 }));
-jest.mock('@/features/chat/rendering/ThinkingBlockRenderer', () => ({
-  renderStoredThinkingBlock: jest.fn(),
+vi.mock('@/features/chat/rendering/ThinkingBlockRenderer', () => ({
+  renderStoredThinkingBlock: vi.fn(),
 }));
-jest.mock('@/features/chat/rendering/CitationRenderer', () => ({
-  renderCitationGroup: jest.fn((parent: HTMLElement) => parent.createDiv()),
+vi.mock('@/features/chat/rendering/CitationRenderer', () => ({
+  renderCitationGroup: vi.fn((parent: HTMLElement) => parent.createDiv()),
 }));
-jest.mock('@/features/chat/rendering/tools/ToolCallRenderer', () => ({
-  renderStoredToolCall: jest.fn(),
+vi.mock('@/features/chat/rendering/tools/ToolCallRenderer', () => ({
+  renderStoredToolCall: vi.fn(),
 }));
-jest.mock('@/features/chat/rendering/tools/WriteEditRenderer', () => ({
-  renderStoredWriteEdit: jest.fn(),
+vi.mock('@/features/chat/rendering/tools/WriteEditRenderer', () => ({
+  renderStoredWriteEdit: vi.fn(),
 }));
-jest.mock('@/utils/imageEmbed', () => ({
-  replaceImageEmbedsWithHTML: jest.fn().mockImplementation((md: string) => md),
+vi.mock('@/utils/imageEmbed', () => ({
+  replaceImageEmbedsWithHTML: vi.fn().mockImplementation((md: string) => md),
 }));
-jest.mock('@/utils/fileLink', () => ({
-  processFileLinks: jest.fn(),
-  registerFileLinkHandler: jest.fn().mockImplementation(() => jest.fn()),
+vi.mock('@/utils/fileLink', () => ({
+  processFileLinks: vi.fn(),
+  registerFileLinkHandler: vi.fn().mockImplementation(() => vi.fn()),
 }));
 
 function createMockComponent() {
@@ -88,7 +89,7 @@ function createRenderer(
 
 describe('MessageRenderer', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     (Menu as typeof Menu & { instances: unknown[] }).instances.length = 0;
   });
 
@@ -98,10 +99,10 @@ describe('MessageRenderer', () => {
 
   it('renders welcome element and calls renderStoredMessage for each message', () => {
     const messagesEl = createMockEl();
-    const emptySpy = jest.spyOn(messagesEl, 'empty');
+    const emptySpy = vi.spyOn(messagesEl, 'empty');
     const mockComponent = createMockComponent();
     const renderer = new MessageRenderer({} as any, mockComponent as any, messagesEl);
-    const renderStoredSpy = jest.spyOn(renderer, 'renderStoredMessage').mockImplementation(() => {});
+    const renderStoredSpy = vi.spyOn(renderer, 'renderStoredMessage').mockImplementation(() => {});
 
     const messages: ChatMessage[] = [
       { id: 'm1', role: 'assistant', content: '', timestamp: Date.now(), toolCalls: [], contentBlocks: [] },
@@ -119,7 +120,7 @@ describe('MessageRenderer', () => {
 
   it('renders empty messages list with just welcome element', () => {
     const { renderer } = createRenderer();
-    const renderStoredSpy = jest.spyOn(renderer, 'renderStoredMessage').mockImplementation(() => {});
+    const renderStoredSpy = vi.spyOn(renderer, 'renderStoredMessage').mockImplementation(() => {});
 
     const welcomeEl = renderer.renderMessages([], () => 'Welcome!');
 
@@ -296,7 +297,7 @@ describe('MessageRenderer', () => {
   it('renders user message with text content', () => {
     const messagesEl = createMockEl();
     const { renderer } = createRenderer(messagesEl);
-    jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const msg: ChatMessage = {
       id: 'u1',
@@ -315,7 +316,7 @@ describe('MessageRenderer', () => {
   it('renders user message with displayContent instead of content', () => {
     const messagesEl = createMockEl();
     const { renderer } = createRenderer(messagesEl);
-    const renderContentSpy = jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    const renderContentSpy = vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const msg: ChatMessage = {
       id: 'u1',
@@ -333,7 +334,7 @@ describe('MessageRenderer', () => {
   it('renders extracted user display content when stored message has hidden XML context', () => {
     const messagesEl = createMockEl();
     const { renderer } = createRenderer(messagesEl);
-    const renderContentSpy = jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    const renderContentSpy = vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const msg: ChatMessage = {
       id: 'u1',
@@ -373,7 +374,7 @@ describe('MessageRenderer', () => {
   it('renders user message with images above bubble', () => {
     const messagesEl = createMockEl();
     const { renderer } = createRenderer(messagesEl);
-    jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const images: ImageAttachment[] = [
       { id: 'img-1', name: 'photo.png', mediaType: 'image/png', data: 'base64data', size: 200, source: 'file' },
@@ -394,8 +395,8 @@ describe('MessageRenderer', () => {
 
   it('adds rewind but not fork for a completed first user message', () => {
     const messagesEl = createMockEl();
-    const rewindCallback = jest.fn().mockResolvedValue(undefined);
-    const forkCallback = jest.fn().mockResolvedValue(undefined);
+    const rewindCallback = vi.fn().mockResolvedValue(undefined);
+    const forkCallback = vi.fn().mockResolvedValue(undefined);
     const renderer = new MessageRenderer(
       { app: {}, settings: { mediaFolder: '' } } as any,
       createMockComponent() as any,
@@ -404,7 +405,7 @@ describe('MessageRenderer', () => {
       forkCallback,
       mockCapabilities(),
     );
-    jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const allMessages: ChatMessage[] = [
       { id: 'u1', role: 'user', content: 'hello', timestamp: 1, userMessageId: 'user-u' },
@@ -419,9 +420,9 @@ describe('MessageRenderer', () => {
 
   it('does not add a rewind button when stored render is called without context', () => {
     const messagesEl = createMockEl();
-    const rewindCallback = jest.fn().mockResolvedValue(undefined);
+    const rewindCallback = vi.fn().mockResolvedValue(undefined);
     const renderer = new MessageRenderer({ app: {}, settings: { mediaFolder: '' } } as any, createMockComponent() as any, messagesEl, rewindCallback, undefined, mockCapabilities());
-    jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const msg: ChatMessage = {
       id: 'u1',
@@ -438,9 +439,9 @@ describe('MessageRenderer', () => {
 
   it('positions the rewind menu for pointer and keyboard activation', async () => {
     const messagesEl = createMockEl();
-    const rewindCallback = jest.fn().mockResolvedValue(undefined);
+    const rewindCallback = vi.fn().mockResolvedValue(undefined);
     const renderer = new MessageRenderer({ app: {}, settings: { mediaFolder: '' } } as any, createMockComponent() as any, messagesEl, rewindCallback, undefined, mockCapabilities());
-    jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const userMsg: ChatMessage = {
       id: 'u1',
@@ -464,7 +465,7 @@ describe('MessageRenderer', () => {
 
     const pointerEvent = {
       detail: 1,
-      stopPropagation: jest.fn(),
+      stopPropagation: vi.fn(),
       type: 'click',
     };
     btn!.dispatchEvent(pointerEvent);
@@ -480,10 +481,10 @@ describe('MessageRenderer', () => {
 
     expect(rewindCallback).toHaveBeenCalledWith('u1', 'conversation');
 
-    btn!.getBoundingClientRect = jest.fn().mockReturnValue({ bottom: 48, left: 24 });
+    btn!.getBoundingClientRect = vi.fn().mockReturnValue({ bottom: 48, left: 24 });
     btn!.dispatchEvent({
       detail: 0,
-      stopPropagation: jest.fn(),
+      stopPropagation: vi.fn(),
       type: 'click',
     });
 
@@ -497,8 +498,8 @@ describe('MessageRenderer', () => {
 
   it('refreshes rewind but not fork for a streamed first user message', () => {
     const messagesEl = createMockEl();
-    const rewindCallback = jest.fn().mockResolvedValue(undefined);
-    const forkCallback = jest.fn().mockResolvedValue(undefined);
+    const rewindCallback = vi.fn().mockResolvedValue(undefined);
+    const forkCallback = vi.fn().mockResolvedValue(undefined);
     const renderer = new MessageRenderer(
       { app: {}, settings: { mediaFolder: '' } } as any,
       createMockComponent() as any,
@@ -507,7 +508,7 @@ describe('MessageRenderer', () => {
       forkCallback,
       mockCapabilities(),
     );
-    jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const userMsg: ChatMessage = {
       id: 'u1',
@@ -537,7 +538,7 @@ describe('MessageRenderer', () => {
     const renderer = new MessageRenderer(
       {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities(),
     );
-    const renderContentSpy = jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    const renderContentSpy = vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const msg: ChatMessage = {
       id: 'm1',
@@ -654,7 +655,7 @@ describe('MessageRenderer', () => {
   it('skips empty or whitespace-only text blocks', () => {
     const messagesEl = createMockEl();
     const { renderer } = createRenderer(messagesEl);
-    const renderContentSpy = jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    const renderContentSpy = vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const msg: ChatMessage = {
       id: 'm1',
@@ -710,8 +711,8 @@ describe('MessageRenderer', () => {
   it('renders fallback content for old conversations without contentBlocks', () => {
     const messagesEl = createMockEl();
     const { renderer } = createRenderer(messagesEl);
-    const renderContentSpy = jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
-    const addCopySpy = jest.spyOn(renderer, 'addTextCopyButton').mockImplementation(() => {});
+    const renderContentSpy = vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    const addCopySpy = vi.spyOn(renderer, 'addTextCopyButton').mockImplementation(() => {});
 
     const msg: ChatMessage = {
       id: 'm1',
@@ -736,9 +737,9 @@ describe('MessageRenderer', () => {
   it('renders unreferenced tool calls when contentBlocks miss tool_use blocks', () => {
     const messagesEl = createMockEl();
     const { renderer } = createRenderer(messagesEl);
-    const renderContentSpy = jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    const renderContentSpy = vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
-    (renderStoredToolCall as jest.Mock).mockClear();
+    (renderStoredToolCall as Mock).mockClear();
 
     const msg: ChatMessage = {
       id: 'm-unreferenced-tool',
@@ -767,7 +768,7 @@ describe('MessageRenderer', () => {
     const messagesEl = createMockEl();
     const { renderer } = createRenderer(messagesEl);
 
-    (renderStoredSubagent as jest.Mock).mockClear();
+    (renderStoredSubagent as Mock).mockClear();
 
     const msg: ChatMessage = {
       id: 'm1',
@@ -805,8 +806,8 @@ describe('MessageRenderer', () => {
     const messagesEl = createMockEl();
     const { renderer } = createRenderer(messagesEl);
 
-    (renderStoredAsyncSubagent as jest.Mock).mockClear();
-    (renderStoredSubagent as jest.Mock).mockClear();
+    (renderStoredAsyncSubagent as Mock).mockClear();
+    (renderStoredSubagent as Mock).mockClear();
 
     const msg: ChatMessage = {
       id: 'm-task-async',
@@ -855,7 +856,7 @@ describe('MessageRenderer', () => {
       {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities(),
     );
 
-    (renderStoredToolCall as jest.Mock).mockClear();
+    (renderStoredToolCall as Mock).mockClear();
 
     const msg: ChatMessage = {
       id: 'm1',
@@ -891,7 +892,7 @@ describe('MessageRenderer', () => {
       {} as any, mockComponent as any, messagesEl, undefined, undefined, mockCapabilities(),
     );
 
-    (renderStoredToolCall as jest.Mock).mockClear();
+    (renderStoredToolCall as Mock).mockClear();
 
     const msg: ChatMessage = {
       id: 'm1',
@@ -938,7 +939,7 @@ describe('MessageRenderer', () => {
   it('addMessage creates user message bubble with text', () => {
     const messagesEl = createMockEl();
     const { renderer } = createRenderer(messagesEl);
-    jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const msg: ChatMessage = {
       id: 'u1',
@@ -955,7 +956,7 @@ describe('MessageRenderer', () => {
   it('addMessage stores a truncated first-line table-of-contents title for user messages', () => {
     const messagesEl = createMockEl();
     const { renderer } = createRenderer(messagesEl);
-    jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const msg: ChatMessage = {
       id: 'u1',
@@ -972,7 +973,7 @@ describe('MessageRenderer', () => {
   it('addMessage renders images for user messages', () => {
     const messagesEl = createMockEl();
     const { renderer } = createRenderer(messagesEl);
-    jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const images: ImageAttachment[] = [
       { id: 'img-1', name: 'photo.png', mediaType: 'image/png', data: 'base64data', size: 200, source: 'file' },
@@ -994,7 +995,7 @@ describe('MessageRenderer', () => {
   it('addMessage skips empty bubble for image-only user messages', () => {
     const messagesEl = createMockEl();
     const { renderer } = createRenderer(messagesEl);
-    const scrollSpy = jest.spyOn(renderer, 'scrollToBottom').mockImplementation(() => {});
+    const scrollSpy = vi.spyOn(renderer, 'scrollToBottom').mockImplementation(() => {});
 
     const msg: ChatMessage = {
       id: 'u1',
@@ -1123,7 +1124,7 @@ describe('MessageRenderer', () => {
   it('renderMessages should store table-of-contents title from displayContent before content', () => {
     const messagesEl = createMockEl();
     const { renderer } = createRenderer(messagesEl);
-    jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const messages: ChatMessage[] = [
       {
@@ -1150,7 +1151,7 @@ describe('MessageRenderer', () => {
       const messagesEl = createMockEl();
       const { renderer } = createRenderer(messagesEl);
 
-      (renderStoredSubagent as jest.Mock).mockClear();
+      (renderStoredSubagent as Mock).mockClear();
 
       const msg: ChatMessage = {
         id: 'm1',
@@ -1188,7 +1189,7 @@ describe('MessageRenderer', () => {
       const messagesEl = createMockEl();
       const { renderer } = createRenderer(messagesEl);
 
-      (renderStoredSubagent as jest.Mock).mockClear();
+      (renderStoredSubagent as Mock).mockClear();
 
       const msg: ChatMessage = {
         id: 'm1',
@@ -1224,7 +1225,7 @@ describe('MessageRenderer', () => {
       const messagesEl = createMockEl();
       const { renderer } = createRenderer(messagesEl);
 
-      (renderStoredSubagent as jest.Mock).mockClear();
+      (renderStoredSubagent as Mock).mockClear();
 
       const msg: ChatMessage = {
         id: 'm1',
@@ -1281,10 +1282,10 @@ describe('MessageRenderer', () => {
       expect(imgEl.getAttribute('src')).toBe('data:image/png;base64,base64data');
 
       const overlayEl = createMockEl();
-      const removeOverlay = jest.spyOn(overlayEl, 'remove');
-      const mockBody = { createDiv: jest.fn().mockReturnValue(overlayEl) };
+      const removeOverlay = vi.spyOn(overlayEl, 'remove');
+      const mockBody = { createDiv: vi.fn().mockReturnValue(overlayEl) };
       const origDocument = globalThis.document;
-      (globalThis as any).document = { body: mockBody, addEventListener: jest.fn(), removeEventListener: jest.fn() };
+      (globalThis as any).document = { body: mockBody, addEventListener: vi.fn(), removeEventListener: vi.fn() };
       try {
         previewButton.click();
         expect(mockBody.createDiv).toHaveBeenCalledWith({ cls: 'claudian-image-modal-overlay' });
@@ -1307,7 +1308,7 @@ describe('MessageRenderer', () => {
   it('addMessage renders displayContent instead of content when available', () => {
     const messagesEl = createMockEl();
     const { renderer } = createRenderer(messagesEl);
-    const renderContentSpy = jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+    const renderContentSpy = vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
     const msg: ChatMessage = {
       id: 'u1',
@@ -1330,9 +1331,9 @@ describe('MessageRenderer', () => {
     it('should pass durationSeconds to renderStoredThinkingBlock', () => {
       const messagesEl = createMockEl();
       const { renderer } = createRenderer(messagesEl);
-      jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+      vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
-      (renderStoredThinkingBlock as jest.Mock).mockClear();
+      (renderStoredThinkingBlock as Mock).mockClear();
 
       const msg: ChatMessage = {
         id: 'm1',
@@ -1357,9 +1358,9 @@ describe('MessageRenderer', () => {
     it('should pass undefined durationSeconds when not set', () => {
       const messagesEl = createMockEl();
       const { renderer } = createRenderer(messagesEl);
-      jest.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
+      vi.spyOn(renderer, 'renderContent').mockResolvedValue(undefined);
 
-      (renderStoredThinkingBlock as jest.Mock).mockClear();
+      (renderStoredThinkingBlock as Mock).mockClear();
 
       const msg: ChatMessage = {
         id: 'm1',

@@ -1,4 +1,4 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -49,9 +49,10 @@ describe('inline-edit.css', () => {
       + '<div class="claudian-toolbar-popover claudian-toolbar-popover--floating"></div></div>';
     const menu = window.getComputedStyle(document.querySelector('.claudian-toolbar-popover')!);
 
-    // ToolbarMenu sets the variable from the chip's position, so the menu opens upward from it.
+    // ToolbarMenu supplies the chosen edge and available height; CSS must consume all three.
     expect(menu.position).toBe('fixed');
-    expect(menu.top).toBe('auto');
+    expect(menu.top).toBe('var(--claudian-toolbar-popover-top, auto)');
+    expect(menu.maxHeight).toBe('min(var(--claudian-toolbar-popover-max-height, 420px), 60vh)');
     expect(menu.bottom).toBe('var(--claudian-toolbar-popover-bottom)');
   });
 
@@ -77,5 +78,13 @@ describe('inline-edit.css', () => {
     const composer = window.getComputedStyle(document.querySelector('.claudian-inline-input-container')!);
 
     expect(parseFloat(composer.marginBottom || '0') + parseFloat(composer.paddingBottom || '0')).toBeGreaterThanOrEqual(8);
+  });
+
+  it('gates the ::highlight rule, since an ungated one adds a highlight style to every element restyle', () => {
+    const css = readFileSync(path.resolve('src/style/features/inline-edit.css'), 'utf8');
+    const highlightSelectors = css.match(/^[^{}\n]*::highlight\([^{]*/gm) ?? [];
+
+    expect(highlightSelectors.map(selector => selector.trim()))
+      .toEqual(['body.claudian-selection-highlight-active ::highlight(claudian-selection)']);
   });
 });

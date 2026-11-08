@@ -10,7 +10,7 @@ import {
   type ManagedStdioProcessOptions,
 } from '@/core/process/ManagedStdioProcess';
 
-jest.setTimeout(45_000);
+vi.setConfig({ testTimeout: 45_000 });
 
 let directory: string;
 const processes: ManagedStdioProcess[] = [];
@@ -127,6 +127,18 @@ it.each([false, true])('delivers opaque arguments, cwd, environment and stdin wi
   expect(await withinDeadline(closed, managed)).toMatchObject({ closed: true, code: 0, signal: null });
   expect(managed.getStderrSnapshot()).toBe('diagnostic only');
   expect(managed.isAlive()).toBe(false);
+});
+
+it('keeps a bounded stderr diagnostic well-formed when its tail cuts an emoji', async () => {
+  const retained = 'x'.repeat(7_999);
+  const diagnostic = 'discarded prefix 🚀' + retained;
+  const { managed, closed } = await launch(`process.stderr.write(${JSON.stringify(diagnostic)});`);
+  managed.stdin.end();
+  expect(await withinDeadline(closed, managed)).toMatchObject({ closed: true, code: 0 });
+  const snapshot = managed.getStderrSnapshot();
+  expect(snapshot.codePointAt(0)).toBe('x'.codePointAt(0));
+  expect(snapshot).toHaveLength(retained.length);
+  expect(snapshot.endsWith(retained)).toBe(true);
 });
 
 it('reports a missing executable through the direct spawn error path', async () => {

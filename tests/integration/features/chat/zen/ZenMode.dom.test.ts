@@ -1,16 +1,16 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 import '@/providers';
 
 import { deserialize, serialize } from 'node:v8';
 
+import { axe } from '@test/helpers/accessibility';
 import { createClaudianView } from '@test/helpers/features/chat/ClaudianViewHarness';
 import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { createHarness, releaseSideChatHarnesses } from '@test/helpers/features/chat/SideChatDOMHarness';
 import { FakeSideSession } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { modelCatalogCases } from '@test/helpers/providerModelCatalogs';
 import { testDate } from '@test/helpers/testClock';
-import { fireEvent, screen, waitFor, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
+import { fireEvent, screen, waitFor as waitForDOM, within } from '@testing-library/dom';
 import { App, Component, Scope, setIcon } from 'obsidian';
 
 import { ChatModelSelectionCoordinator } from '@/app/settings/ChatModelSelectionCoordinator';
@@ -24,12 +24,15 @@ import type { ProviderCapabilities } from '@/core/providers/types';
 import { getToolIcon } from '@/core/tools/toolIcons';
 import type { ClaudianSettings, Conversation } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
+import { ChatState } from '@/features/chat/state/ChatState';
 import { destroyTab } from '@/features/chat/tabs/TabLifecycle';
 import { createTabRuntime } from '@/features/chat/tabs/TabRuntimeFactory';
 import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 import { FLAVOR_TEXTS } from '@/features/chat/turns/flavorTexts';
 import { createChatFocusCommand } from '@/features/chat/workspace/ChatFocusCommand';
+import type { ZenPresentationPort } from '@/features/chat/zen/types';
 import { ZenModeController } from '@/features/chat/zen/ZenModeController';
+import { ZenModePanel } from '@/features/chat/zen/ZenModePanel';
 import { VaultMentionDataProvider } from '@/shared/mention/VaultMentionDataProvider';
 
 const originalResizeObserver = globalThis.ResizeObserver;
@@ -46,9 +49,20 @@ afterEach(async () => {
   globalThis.ResizeObserver = originalResizeObserver;
   globalThis.structuredClone = originalStructuredClone;
   ProviderWorkspaceRegistry.clear();
-  jest.restoreAllMocks();
+  vi.restoreAllMocks();
   await releaseSideChatHarnesses();
+  vi.useRealTimers();
 });
+
+// Drive the same DOM assertions and their timeout with virtual time in clock-only cases.
+async function waitFor<T>(callback: () => T | Promise<T>, options?: Parameters<typeof waitForDOM>[1]): Promise<T> {
+  if (!vi.isFakeTimers()) return waitForDOM(callback, options);
+  let settled = false;
+  const result = waitForDOM(callback, options);
+  void result.then(() => { settled = true; }, () => { settled = true; });
+  while (!settled) await vi.advanceTimersByTimeAsync(50);
+  return result;
+}
 
 type Split = { collapsed: boolean; containerEl: HTMLElement; collapse: () => void };
 type Tabs = { selected: Leaf | null };
@@ -99,9 +113,9 @@ function createWorkspace() {
     listenerCount: () => [...listeners.values()].reduce((total, set) => total + set.size, 0),
     getLeavesOfType: () => leaves,
     iterateAllLeaves: (callback: (leaf: Leaf) => void) => [...leaves, ...otherLeaves].forEach(callback),
-    getActiveViewOfType: jest.fn(),
+    getActiveViewOfType: vi.fn(),
     getActiveFile: () => null,
-    revealLeaf: jest.fn(async (leaf: Leaf) => {
+    revealLeaf: vi.fn(async (leaf: Leaf) => {
       const root = leaf.getRoot() as Split;
       root.collapsed = false;
       if (leaf.parent) leaf.parent.selected = leaf;
@@ -139,7 +153,7 @@ async function createZenFixture(options: { enabled?: boolean; ready?: boolean } 
   const layout = createWorkspace();
   Object.assign(app, { workspace: layout.workspace, keymap: layout.keymap, scope: new Scope() });
   const sessions: FakeSideSession[] = [];
-  jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockImplementation((_host, providerId = 'kiro') => ({
+  vi.spyOn(ProviderRegistry, 'createExecutionBackend').mockImplementation((_host, providerId = 'kiro') => ({
     providerId,
     createSession: config => {
       const session = new FakeSideSession(config);
@@ -371,7 +385,7 @@ it('loads a chat that Obsidian deferred in an already collapsed sidebar', async 
     view: {},
     getRoot: () => fixture.leftSplit,
     isDeferred: true,
-    loadIfDeferred: jest.fn(async () => {
+    loadIfDeferred: vi.fn(async () => {
       fixture.leaves.splice(fixture.leaves.indexOf(deferred), 1);
       loaded = await fixture.addView('left');
     }),
@@ -399,7 +413,7 @@ it('prefers a loaded chat over loading a deferred one', async () => {
     view: {},
     getRoot: () => fixture.leftSplit,
     isDeferred: true,
-    loadIfDeferred: jest.fn(async () => undefined),
+    loadIfDeferred: vi.fn(async () => undefined),
   };
   fixture.leaves.push(deferred);
   fixture.setCollapsed(fixture.rightSplit, true);
@@ -524,6 +538,7 @@ it.each([
 });
 
 it('shares one status across waiting, thinking, tools, text and silent pauses, then clears it', async () => {
+  vi.useFakeTimers({ now: testDate() });
   const { tab, sessions, rightSplit, setCollapsed } = await createZenFixture();
   setCollapsed(rightSplit, true);
   const transcript = within(tab.dom.messagesEl);
@@ -558,11 +573,14 @@ it('shares one status across waiting, thinking, tools, text and silent pauses, t
   await waitFor(() => expect(tab.state.isStreaming).toBe(false));
   await waitFor(() => expect(preview()).toMatch(/^Worked for \d{2}:\d{2} · Here is the answer\.$/));
   expect(waitingIndicatorText(tab)).toBeNull();
+  // The accessibility engine runs on real timers after the clock-dependent assertions.
+  vi.useRealTimers();
   // The drawer holds the moved transcript, its navigation and the preview line.
   expect(await axe(zenPanel()!.querySelector<HTMLElement>('.claudian-zen-drawer')!)).toHaveNoViolations();
 });
 
 it('gives a pending approval priority over the waiting status and resumes it afterwards', async () => {
+  vi.useFakeTimers({ now: testDate() });
   const { tab, sessions, rightSplit, setCollapsed } = await createZenFixture();
   setCollapsed(rightSplit, true);
   const session = await sendFromZen(tab, sessions, 'Write a note');
@@ -580,7 +598,7 @@ it('gives a pending approval priority over the waiting status and resumes it aft
     type: 'tool_started', toolCallId: 'tool-1', name: 'Write', input: { file_path: 'note.md' },
     toolScope: { kind: 'main' },
   } as never);
-  await new Promise(resolve => setTimeout(resolve, 600));
+  await vi.advanceTimersByTimeAsync(600);
   expect(waitingIndicatorText(tab)).toBeNull();
   expect(preview()).toBe('Needs your input');
 
@@ -595,6 +613,7 @@ it('gives a pending approval priority over the waiting status and resumes it aft
 });
 
 it('keeps explicit compaction status across a prompt', async () => {
+  vi.useFakeTimers({ now: testDate() });
   const { tab, sessions, rightSplit, setCollapsed } = await createZenFixture();
   setCollapsed(rightSplit, true);
   const session = await sendFromZen(tab, sessions, '/compact');
@@ -616,6 +635,7 @@ it('keeps explicit compaction status across a prompt', async () => {
 });
 
 it('clears a pending waiting status when provider invalidation ends the turn', async () => {
+  vi.useFakeTimers({ now: testDate() });
   const { tab, view, sessions, rightSplit, setCollapsed } = await createZenFixture();
   setCollapsed(rightSplit, true);
   const session = await sendFromZen(tab, sessions, 'Invalidate during text');
@@ -626,12 +646,13 @@ it('clears a pending waiting status when provider invalidation ends the turn', a
   expect(session.cancelCalls).toBeGreaterThan(0);
 
   // Past the text-pause delay, the ended turn must not bring its indicator back.
-  await new Promise(resolve => setTimeout(resolve, 1_700));
+  await vi.advanceTimersByTimeAsync(1_700);
   expect(waitingIndicatorText(tab)).toBeNull();
   expect(tab.state.waitingStatus).toBeNull();
 });
 
 it('leaves no waiting indicator behind when plugin shutdown dismisses a pending approval', async () => {
+  vi.useFakeTimers({ now: testDate() });
   const { tab, sessions, rightSplit, setCollapsed } = await createZenFixture();
   setCollapsed(rightSplit, true);
   const session = await sendFromZen(tab, sessions, 'Write a note');
@@ -646,11 +667,12 @@ it('leaves no waiting indicator behind when plugin shutdown dismisses a pending 
   // Persistence that outlasts the indicator delay leaves time for a stale resume to fire.
   const { conversationController } = tab.controllers;
   const save = conversationController.save.bind(conversationController);
-  jest.spyOn(conversationController, 'save').mockImplementation(async (...args) => {
+  vi.spyOn(conversationController, 'save').mockImplementation(async (...args) => {
     await new Promise(resolve => setTimeout(resolve, 600));
     return save(...args);
   });
-  await tab.session.runtime.dispose();
+  const disposal = tab.session.runtime.dispose();
+  await waitFor(() => disposal);
   await approval;
 
   expect(tab.state.isStreaming).toBe(false);
@@ -674,6 +696,7 @@ it('reports a provider failure after streamed output as an error', async () => {
 });
 
 it('leaves sending and stopping to the moved composer', async () => {
+  vi.useFakeTimers({ now: testDate() });
   const { tab, sessions, rightSplit, setCollapsed } = await createZenFixture();
   setCollapsed(rightSplit, true);
   const panel = zenPanel()!;
@@ -688,7 +711,7 @@ it('leaves sending and stopping to the moved composer', async () => {
   expect(session.cancelCalls).toBe(1);
   await waitFor(() => expect(preview()).toBe('Interrupted'));
   // A cancelled turn leaves no waiting indicator behind, even after a text pause would have elapsed.
-  await new Promise(resolve => setTimeout(resolve, 1_500));
+  await vi.advanceTimersByTimeAsync(1_500);
   expect(waitingIndicatorText(tab)).toBeNull();
   expect(preview()).toBe('Interrupted');
 });
@@ -734,7 +757,7 @@ it('moves the composer controls to their own row only once the typed text would 
   // jsdom has no layout: a 400px input row, a 180px control group, and 8px per typed character.
   Object.defineProperty(tab.dom.inputWrapper, 'clientWidth', { configurable: true, value: 400 });
   let toolbarWidth = 180;
-  jest.spyOn(toolbar, 'getBoundingClientRect').mockImplementation(() => ({ width: toolbarWidth } as DOMRect));
+  vi.spyOn(toolbar, 'getBoundingClientRect').mockImplementation(() => ({ width: toolbarWidth } as DOMRect));
   Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
     configurable: true,
     value(this: Range) {
@@ -958,7 +981,7 @@ it('closes the resume picker with Escape through the Obsidian keymap', async () 
   Object.assign(app, { metadataCache: { on: () => ({}), offref: () => undefined } });
   view.wireEventHandlers();
   // Obsidian answers Escape at the app scope when no nearer scope consumes it.
-  const appEscape = jest.fn(() => false);
+  const appEscape = vi.fn(() => false);
   app.scope.register([], 'Escape', appEscape);
   // The keymap resolves unmodified keys through the active scope chain during window capture and
   // stops a key a handler consumes before it reaches the focused element.
@@ -1170,18 +1193,18 @@ it('moves the panel by its grip, docks it magnetically, and remembers where it w
   // drawer, when shown, sits on it, 526px wide.
   Object.defineProperty(rootEl, 'clientWidth', { configurable: true, value: 1000 });
   Object.defineProperty(rootEl, 'clientHeight', { configurable: true, value: 800 });
-  jest.spyOn(rootEl, 'getBoundingClientRect').mockImplementation(() => ({ left: 0, right: 1000, width: 1000, top: 0, bottom: 800, height: 800 } as DOMRect));
+  vi.spyOn(rootEl, 'getBoundingClientRect').mockImplementation(() => ({ left: 0, right: 1000, width: 1000, top: 0, bottom: 800, height: 800 } as DOMRect));
   let panelHeight = 100;
   let drawerHeight = 0;
   const stubPanel = (panel: HTMLElement) => {
     const composerBottom = () => 800 - Number.parseFloat(panel.style.getPropertyValue('--claudian-zen-offset-y') || '0');
-    jest.spyOn(panel, 'getBoundingClientRect').mockImplementation(() => ({
+    vi.spyOn(panel, 'getBoundingClientRect').mockImplementation(() => ({
       left: 200, right: 800, top: composerBottom() + 8 - panelHeight, bottom: composerBottom() + 8,
       width: 600, height: panelHeight,
     } as DOMRect));
-    jest.spyOn(panel.querySelector<HTMLElement>('.claudian-zen-composer')!, 'getBoundingClientRect')
+    vi.spyOn(panel.querySelector<HTMLElement>('.claudian-zen-composer')!, 'getBoundingClientRect')
       .mockImplementation(() => ({ left: 208, right: 792, top: composerBottom() - 60, bottom: composerBottom() } as DOMRect));
-    jest.spyOn(panel.querySelector<HTMLElement>('.claudian-zen-drawer')!, 'getBoundingClientRect')
+    vi.spyOn(panel.querySelector<HTMLElement>('.claudian-zen-drawer')!, 'getBoundingClientRect')
       .mockImplementation(() => ({
         left: 237, right: 763, top: composerBottom() - 60 - drawerHeight, bottom: composerBottom() - 60,
         height: drawerHeight,
@@ -1317,7 +1340,7 @@ it('moves the panel by its grip, docks it magnetically, and remembers where it w
   let statusLeft = 750;
   let statusHeight = 30;
   let statusBottom = 800;
-  jest.spyOn(statusBar, 'getBoundingClientRect').mockImplementation(() => ({
+  vi.spyOn(statusBar, 'getBoundingClientRect').mockImplementation(() => ({
     left: statusLeft, right: 1000, width: 1000 - statusLeft,
     top: statusBottom - statusHeight, bottom: statusBottom, height: statusHeight,
   } as DOMRect));
@@ -1673,4 +1696,81 @@ it('releases every moved node and subscription on close and disposal', async () 
   expect(zenPanel()).toBeNull();
   expect(workspace.listenerCount()).toBe(0);
   expect(screen.queryByRole('region', { name: 'Claudian chat' })).toBeNull();
+});
+
+it('announces the current error when the same zen panel binds another failed session', async () => {
+  const host = document.body.createDiv();
+  const panel = new ZenModePanel(host, { keymap: null, parentScope: new Scope(),
+    historyExpanded: false, position: null, onPositionChange() {}, onHistoryExpandedChange() {} });
+  cleanups.push(() => panel.destroy());
+  const source = (message: string): ZenPresentationPort => {
+    const state = new ChatState();
+    state.addMessage({ id: 'prompt', role: 'user', content: 'Please help', timestamp: testDate().getTime() });
+    state.addMessage({ id: 'reply', role: 'assistant', content: message, timestamp: testDate().getTime() });
+    state.recordActivity({ kind: 'error', message });
+    return { state, window, subscribeActivity: listener => state.subscribeActivity(listener),
+      captureScroll: () => ({ top: 0, follow: false }), restoreScroll() {} };
+  };
+  const first = source('Provider overloaded');
+  const second = source('Authentication expired');
+  panel.bind(first, 'claude');
+  const status = within(host).getByRole('status');
+  expect(status.textContent).toBe('Error: Provider overloaded');
+  panel.bind(second, 'claude');
+  expect(status.textContent).toBe('Error: Authentication expired');
+  expect(within(host).getByRole('button', { name: 'Show conversation', description: 'Error: Authentication expired' })).toBeDefined();
+  expect(await axe(host)).toHaveNoViolations();
+
+  const mutations = new MutationObserver(() => undefined);
+  mutations.observe(status, { childList: true, characterData: true, subtree: true });
+  vi.useFakeTimers();
+  try {
+    panel.bind(second, 'claude');
+    vi.advanceTimersByTime(50);
+    expect(status.textContent).toBe('Error: Authentication expired');
+    expect(mutations.takeRecords()).toHaveLength(0);
+  } finally {
+    mutations.disconnect(); vi.useRealTimers();
+  }
+});
+
+it('keeps Open Claudian on the active chat view before applying an explicit destination', async () => {
+  const fixture = await createZenFixture();
+  const second = await fixture.addView('main');
+  fixture.tab.controllers.drafts.restore('main', { content: 'First session draft' });
+  second.tab.controllers.drafts.restore('main', { content: 'Second session draft' });
+  fixture.workspace.getActiveViewOfType.mockReturnValue(second.view);
+  second.tab.composer.focus();
+  expect(second.tab.composer.isFocused()).toBe(true);
+
+  await fixture.views.activateView();
+  expect(fixture.workspace.revealLeaf.mock.calls.at(-1)?.[0] === second.leaf).toBe(true);
+  expect(second.tab.composer.isFocused()).toBe(true);
+  expect(fixture.tab.composer.isFocused()).toBe(false);
+  expect(second.tab.controllers.drafts.capture('main').content).toBe('Second session draft');
+  expect(fixture.tab.controllers.drafts.capture('main').content).toBe('First session draft');
+  expect(fixture.sessions).toHaveLength(0);
+
+  await fixture.views.activateView(fixture.view.leaf);
+  expect(fixture.workspace.revealLeaf.mock.calls.at(-1)?.[0] === fixture.leaf).toBe(true);
+  expect(fixture.tab.composer.isFocused()).toBe(true);
+  fixture.workspace.getActiveViewOfType.mockReturnValue(null);
+  await fixture.views.activateView();
+  expect(fixture.workspace.revealLeaf.mock.calls.at(-1)?.[0] === fixture.leaf).toBe(true);
+  fixture.leaves.splice(fixture.leaves.indexOf(second.leaf), 1);
+  fixture.workspace.getActiveViewOfType.mockReturnValue(second.view);
+  await fixture.views.activateView();
+  expect(fixture.workspace.revealLeaf.mock.calls.at(-1)?.[0] === fixture.leaf).toBe(true);
+  expect(fixture.sessions).toHaveLength(0);
+});
+
+it('retains the first deferred chat leaf fallback when no chat is active', async () => {
+  const fixture = await createZenFixture();
+  const deferredLeaf = { ...fixture.leaf, view: {}, isDeferred: true };
+  fixture.leaves.unshift(deferredLeaf);
+  fixture.workspace.getActiveViewOfType.mockReturnValue(null);
+  await fixture.views.activateView();
+  expect(fixture.workspace.revealLeaf.mock.calls.at(-1)?.[0] === deferredLeaf).toBe(true);
+  expect(fixture.views.getView() === fixture.view).toBe(true);
+  expect(fixture.sessions).toHaveLength(0);
 });

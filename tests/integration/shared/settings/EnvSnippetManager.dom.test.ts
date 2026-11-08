@@ -1,15 +1,15 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
 import '@/providers';
 
+import { axe } from '@test/helpers/accessibility';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
 
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@/app/settings/defaultSettings';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
 import { EnvSnippetManager } from '@/shared/settings/EnvSnippetManager';
 
-jest.mock('obsidian', () => jest.requireActual('../../../helpers/ObsidianSettingsDOM'));
+vi.mock('obsidian', async () => vi.importActual('../../../helpers/ObsidianSettingsDOM'));
 
 afterEach(() => document.body.replaceChildren());
 
@@ -19,14 +19,14 @@ it('applies a snippet environment to its provider scope', async () => {
     id: 'snippet', name: 'Custom endpoint', description: '', scope: 'provider:kiro',
     envVars: 'KIRO_MODEL=custom',
   }];
-  const applyEnvironmentVariables = jest.fn().mockResolvedValue(undefined);
+  const applyEnvironmentVariables = vi.fn().mockResolvedValue(undefined);
   const host = {
     settings, applyEnvironmentVariables,
     app: { workspace: { getLeavesOfType: () => [] } },
     mutateSettings: async (mutate: Parameters<ProviderHost['mutateSettings']>[0]) => { await mutate(settings); },
   } as unknown as ProviderHost;
   const container = document.body.createEl('main');
-  const onChanged = jest.fn();
+  const onChanged = vi.fn();
   new EnvSnippetManager(container, host, 'provider:kiro', onChanged);
   fireEvent.click(within(container).getByRole('button', { name: 'Insert' }));
   await waitFor(() => expect(onChanged).toHaveBeenCalled());

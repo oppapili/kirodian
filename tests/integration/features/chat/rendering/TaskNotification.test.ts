@@ -1,10 +1,9 @@
-/** @jest-environment jsdom */
-
+/** @vitest-environment jsdom */
 import '@/providers';
 
+import { axe } from '@test/helpers/accessibility';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { fireEvent, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import type { ProviderBackgroundEventScope } from '@/core/execution';
@@ -26,7 +25,7 @@ function backgroundScope(sequence: number): ProviderBackgroundEventScope {
 
 beforeEach(() => {
   document.body.replaceChildren();
-  jest.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
+  vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
     (el as HTMLElement).createEl('p', { text: markdown });
   });
 });
@@ -137,7 +136,7 @@ it.each(['text', 'image', 'image-only'])('keeps preceding output before a %s pro
   let release!: () => void;
   const entered = new Promise<void>(resolve => { rendering = resolve; });
   const gate = new Promise<void>(resolve => { release = resolve; });
-  jest.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
+  vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
     if (markdown === 'Earlier automatic output') { rendering(); await gate; }
     (el as HTMLElement).textContent = markdown;
   });
@@ -194,6 +193,50 @@ it.each([false, true])('flushes an automatic tool card before stream disposal wi
   }
 });
 
+it.each([false, true])('keeps automatic Agent results across requested settlement with pending=%s', async pendingAgent => {
+  const { renderAutoTriggeredTurn } = await import('@/features/chat/turns/BackgroundTurnRenderer');
+  const messagesEl = document.body.createDiv();
+  const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
+  const renderer = new MessageRenderer(plugin,
+    new Component(), messagesEl);
+  const state = new ChatState();
+  const subagents = new SubagentManager(() => undefined);
+  const stream = new StreamController({ plugin, state, renderer, subagentManager: subagents,
+    getMessagesEl: () => messagesEl, updateQueueIndicator: () => undefined });
+  let entered!: () => void;
+  let release!: () => void;
+  const rendering = new Promise<void>(resolve => { entered = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
+    if (markdown === 'Automatic continuation') { entered(); await gate; }
+    (el as HTMLElement).textContent = markdown;
+  });
+  const pending = renderAutoTriggeredTurn({ state, renderer, stream, createMessageId: () => 'automatic' }, { spans: [{ events: [
+      { type: 'tool_started', toolCallId: 'agent', toolScope: { kind: 'main' }, name: 'Agent', input: { ...(pendingAgent ? {} : { run_in_background: false }), description: 'Automatic helper', prompt: 'Inspect output' }, scope: backgroundScope(1) },
+      { type: 'text_delta', text: 'Automatic continuation', scope: backgroundScope(2) },
+      { type: 'tool_started', toolCallId: 'main-read', toolScope: { kind: 'main' }, name: 'Read', input: { file_path: '/tmp/main.txt' }, scope: backgroundScope(3) },
+      { type: 'tool_started', toolCallId: 'child', toolScope: { kind: 'subagent', subagentId: 'agent' }, name: 'Read', input: { file_path: '/tmp/output.txt' }, scope: backgroundScope(4) },
+      { type: 'tool_completed', toolCallId: 'child', toolScope: { kind: 'subagent', subagentId: 'agent' }, content: 'Child output', scope: backgroundScope(5) },
+      { type: 'tool_completed', toolCallId: 'agent', toolScope: { kind: 'main' }, content: 'Helper done', scope: backgroundScope(6) },
+    ] }], metadata: {} }, () => true);
+  try {
+    await rendering;
+    stream.subagents.releaseManaged();
+    release();
+    await pending;
+    const worked = within(messagesEl).queryByRole('button', { name: /^Worked/ });
+    if (worked) fireEvent.click(worked);
+    fireEvent.click(within(messagesEl).getByRole('button', { name: /^Agent/ }));
+    expect(within(messagesEl).getByText('Helper done')).toBeDefined();
+    expect(state.messages[0].toolCalls?.find(tool => tool.id === 'agent')).toEqual(expect.objectContaining({
+      status: 'completed', result: 'Helper done',
+    }));
+    expect((await axe(messagesEl)).violations).toEqual([]);
+  } finally {
+    release(); await pending;
+    stream.dispose(); subagents.clear(); renderer.dispose();
+  }
+});
 it.each([false, true])('matches task-notification grouping before and after replay with intervening input=%s', async interveningInput => {
   const { renderAutoTriggeredTurn, renderSessionTaskNotification } = await import('@/features/chat/turns/BackgroundTurnRenderer');
   const messagesEl = document.body.createDiv();

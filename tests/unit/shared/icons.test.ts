@@ -1,4 +1,4 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
 import type { ProviderIconSvg } from '@/core/providers/types';
 import {

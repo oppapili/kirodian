@@ -1,8 +1,5 @@
 import { Notice, setIcon } from 'obsidian';
 
-import type { ProviderIconSvg } from '@/core/providers/types';
-import { createProviderIconSvg } from '@/shared/icons';
-
 export function runToolbarAction(action: () => Promise<void>, failureMessage: string): void {
   void action().catch(() => {
     new Notice(failureMessage);
@@ -13,12 +10,11 @@ const MENU_ITEM_SELECTOR = [
   '[role="menuitemradio"]',
   '[role="menuitemcheckbox"]',
   '[role="option"]',
+  '[role="tab"]',
   '[role="switch"]',
-  'input[type="range"]',
 ].join(', ');
-const RANGE_SELECTOR = 'input[type="range"]';
-/** Keys a focused range input uses to change its own value. */
-const RANGE_VALUE_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown']);
+/** Lists that keep Home and End to themselves. */
+const LIST_SELECTOR = '[role="listbox"], [role="tablist"]';
 
 let toolbarElementSequence = 0;
 
@@ -63,7 +59,7 @@ export class ToolbarMenuGroup implements ToolbarMenus {
 
 interface ToolbarMenuOptions {
   anchorCls: string;
-  /** A menu holds only menu items; a dialog also holds other controls, such as a slider. */
+  /** A menu holds only menu items; a dialog also holds other controls, such as lists and switches. */
   popupRole?: 'menu' | 'dialog';
   buttonCls?: string;
   menuLabel: string;
@@ -71,7 +67,7 @@ interface ToolbarMenuOptions {
   group?: ToolbarMenuGroup;
   /**
    * For hosts that clip their content, such as CodeMirror widgets: while open, the menu moves into this
-   * layer, fixed above its button's end edge, and returns to its button when it closes.
+   * layer, fixed beside its button's end edge, and returns to its button when it closes.
    */
   floatingLayer?: HTMLElement;
   /** Rereads settings into the button and menu before the menu shows. */
@@ -80,22 +76,22 @@ interface ToolbarMenuOptions {
 
 /** Gap between a floating menu and its button, matching the anchored menu's. */
 const FLOATING_MENU_GAP = 8;
+const FLOATING_MENU_VIEWPORT_MARGIN = 8;
 /** A floating menu keeps the anchored model menu's minimum width. */
 const FLOATING_MENU_MIN_WIDTH = 160;
 
 interface ToolbarMenuItemOptions {
-  role: 'menuitemradio' | 'menuitemcheckbox' | 'option' | 'switch';
-  /** Options report aria-selected; the other roles report aria-checked. */
+  role: 'menuitemradio' | 'menuitemcheckbox' | 'option' | 'tab' | 'switch';
+  /** Options and tabs report aria-selected; the other roles report aria-checked. */
   checked: boolean;
   /** Dialog controls take one tab stop each; menu items are reached with arrow keys only. */
   tabbable?: boolean;
   label: string;
+  /** Identifies the item across rebuilds when its label is not unique, such as a model value. */
+  key?: string;
   cls?: string;
   detail?: string;
   title?: string;
-  providerIcon?: ProviderIconSvg | null;
-  /** Names the option's provider for per-provider brand styling. */
-  providerId?: string;
   leadingIcon?: string;
   showCheck?: boolean;
   onSelect: () => void;
@@ -161,20 +157,11 @@ export class ToolbarMenu {
       attr: {
         type: 'button',
         role: options.role,
-        [options.role === 'option' ? 'aria-selected' : 'aria-checked']: String(options.checked),
+        [options.role === 'option' || options.role === 'tab' ? 'aria-selected' : 'aria-checked']: String(options.checked),
         tabindex: options.tabbable ? '0' : '-1',
-        'data-menu-key': `${options.role}:${options.label}`,
+        'data-menu-key': `${options.role}:${options.key ?? options.label}`,
       },
     });
-    if (options.providerId) itemEl.dataset.provider = options.providerId;
-    if (options.providerIcon) {
-      createProviderIconSvg(options.providerIcon, {
-        className: 'claudian-model-provider-icon',
-        height: 12,
-        parent: itemEl,
-        width: 12,
-      });
-    }
     if (options.leadingIcon) {
       setIcon(itemEl.createSpan({ cls: 'claudian-toolbar-popover-option-icon' }), options.leadingIcon);
     }
@@ -205,8 +192,8 @@ export class ToolbarMenu {
         this.#options.group?.release(this);
         return;
       }
-      this.#float();
       this.menuEl.hidden = false;
+      this.#float();
       this.buttonEl.setAttribute('aria-expanded', 'true');
       this.anchorEl.ownerDocument.addEventListener('pointerdown', this.#onDocumentPointerDown, true);
       // Window capture runs ahead of Obsidian's keymap, whose view scope cancels a running turn on Escape.
@@ -261,16 +248,34 @@ export class ToolbarMenu {
     this.#floatingWindow?.removeEventListener('resize', this.#placeFloating);
     this.#floatingWindow = null;
     this.menuEl.removeClass('claudian-toolbar-popover--floating');
+    this.buttonEl.removeAttribute('data-menu-placement');
     this.anchorEl.appendChild(this.menuEl);
   }
 
-  readonly #placeFloating = (): void => {
+  readonly #placeFloating = (event?: Event): void => {
+    // Scrolling a menu column does not move its anchor or change available space.
+    if (event?.type === 'scroll' && event.target && 'nodeType' in event.target
+      && this.menuEl.contains(event.target as Node)) return;
     const view = this.#floatingWindow;
     if (!view) return;
     const button = this.buttonEl.getBoundingClientRect();
+    // Measure its preferred CSS height again after a previously constrained placement.
+    this.menuEl.style.removeProperty('--claudian-toolbar-popover-max-height');
+    const height = this.menuEl.getBoundingClientRect().height;
+    const margin = FLOATING_MENU_VIEWPORT_MARGIN;
+    const aboveEdge = Math.max(margin, Math.min(view.innerHeight - margin, button.top - FLOATING_MENU_GAP));
+    const belowEdge = Math.max(margin, Math.min(view.innerHeight - margin, button.bottom + FLOATING_MENU_GAP));
+    const above = aboveEdge - margin;
+    const below = view.innerHeight - margin - belowEdge;
+    const opensBelow = height > above && below > above;
+    // The chip's chevron points toward the open menu.
+    if (opensBelow) this.buttonEl.setAttribute('data-menu-placement', 'below');
+    else this.buttonEl.removeAttribute('data-menu-placement');
     this.menuEl.setCssProps({
+      '--claudian-toolbar-popover-top': opensBelow ? `${belowEdge}px` : 'auto',
+      '--claudian-toolbar-popover-max-height': `${Math.max(0, opensBelow ? below : above)}px`,
       '--claudian-toolbar-popover-right': `${view.innerWidth - button.right}px`,
-      '--claudian-toolbar-popover-bottom': `${view.innerHeight - button.top + FLOATING_MENU_GAP}px`,
+      '--claudian-toolbar-popover-bottom': opensBelow ? 'auto' : `${view.innerHeight - aboveEdge}px`,
       '--claudian-toolbar-popover-min-width': `${Math.max(button.width, FLOATING_MENU_MIN_WIDTH)}px`,
     });
   };
@@ -281,24 +286,24 @@ export class ToolbarMenu {
 
   #items(scopeEl: Element = this.menuEl): HTMLElement[] {
     return Array.from(scopeEl.querySelectorAll<HTMLElement>(MENU_ITEM_SELECTOR))
-      .filter(item => !(item as HTMLButtonElement).disabled && !item.closest('.claudian-hidden'));
+      .filter(item => !(item as HTMLButtonElement).disabled && !item.closest('.claudian-hidden, [inert]'));
   }
 
   #focusItem(target: MenuFocusTarget): void {
     const items = this.#items();
-    // The current choice: a selected option, or a checked menu item (a switch is a setting, not a choice).
+    // The current choice: a selected option, or a checked menu item. A switch is a setting and a tab
+    // only browses, so neither is a choice.
     const checked = target === 'checked'
-      ? items.find(item => item.getAttribute('aria-selected') === 'true'
+      ? items.find(item => (item.getAttribute('role') === 'option' && item.getAttribute('aria-selected') === 'true')
         || (item.getAttribute('role')?.startsWith('menuitem') && item.getAttribute('aria-checked') === 'true'))
       : undefined;
     const item = target === 'last' ? items[items.length - 1] : checked ?? items[0];
     (item ?? this.menuEl).focus();
   }
 
-  /** Up and Down step through every control; a focused slider keeps its own value keys. */
+  /** Up and Down step through every control. */
   #moveFocus(event: KeyboardEvent): boolean {
     const target = event.target as HTMLElement;
-    if (target.matches(RANGE_SELECTOR) && RANGE_VALUE_KEYS.has(event.key)) return false;
     const items = this.#items();
     const current = items.indexOf(target);
     if (current < 0) return false;
@@ -312,8 +317,8 @@ export class ToolbarMenu {
         return true;
       case 'Home':
       case 'End': {
-        // In the model list these jump within the list, not to the popover's other controls.
-        const scoped = this.#items(target.closest('[role="listbox"]') ?? this.menuEl);
+        // In a list these jump within that list, not to the popover's other controls.
+        const scoped = this.#items(target.closest(LIST_SELECTOR) ?? this.menuEl);
         scoped[event.key === 'Home' ? 0 : scoped.length - 1].focus();
         return true;
       }

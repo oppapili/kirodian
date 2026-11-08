@@ -165,6 +165,11 @@ export class ProviderRegistry {
     return this.getProviderRegistration(providerId).chatUIConfig;
   }
 
+  static prepareAssistantMarkdown(providerId: ProviderId, markdown: string): string {
+    const ui = Object.hasOwn(this.registrations, providerId) ? this.registrations[providerId]?.chatUIConfig : undefined;
+    return ui?.prepareAssistantMarkdown?.(markdown) ?? markdown;
+  }
+
   static getTitleGenerationModelOptions(
     settings: Record<string, unknown>,
   ): ProviderUIOption[] {
@@ -183,7 +188,8 @@ export class ProviderRegistry {
         seenValues.add(option.value);
         options.push({
           ...option,
-          label: `${this.getProviderDisplayName(providerId)}: ${option.label}`,
+          // The flat list has no group headings, so an upstream group stays in the label.
+          label: `${this.getProviderDisplayName(providerId)}: ${option.group ? `${option.group}/` : ''}${option.label}`,
         });
       }
     }

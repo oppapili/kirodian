@@ -1,6 +1,8 @@
+const actualModule0 = await vi.importActual<typeof fs>('node:fs/promises');
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
+import { parser } from '@lezer/markdown';
 import { DesktopVault } from '@test/helpers/core/DesktopVault';
 import * as obsidian from 'obsidian';
 
@@ -14,11 +16,12 @@ import {
 } from '@/features/agent-skills/AgentSkillRepository';
 import { AgentSkillValidationError } from '@/features/agent-skills/validateAgentSkill';
 
-jest.mock('node:fs/promises', () => {
-  const actual = jest.requireActual<typeof fs>('node:fs/promises');
-  return { ...actual, mkdir: jest.fn(actual.mkdir), writeFile: jest.fn(actual.writeFile) };
+
+vi.mock('node:fs/promises', async () => {
+  const actual = (await vi.importActual<typeof fs>('node:fs/promises'));
+  return { ...actual, mkdir: vi.fn(actual.mkdir), writeFile: vi.fn(actual.writeFile) };
 });
-const actualFs = jest.requireActual<typeof fs>('node:fs/promises');
+const actualFs = actualModule0;
 
 function markdown(name: string, description = 'Description', instructions = 'Instructions'): string {
   return [
@@ -46,8 +49,8 @@ describe('AgentSkillRepository', () => {
   });
 
   afterEach(async () => {
-    jest.mocked(fs.mkdir).mockImplementation(actualFs.mkdir);
-    jest.mocked(fs.writeFile).mockImplementation(actualFs.writeFile);
+    vi.mocked(fs.mkdir).mockImplementation(actualFs.mkdir);
+    vi.mocked(fs.writeFile).mockImplementation(actualFs.writeFile);
     await vault.dispose();
   });
 
@@ -55,9 +58,45 @@ describe('AgentSkillRepository', () => {
     return vault.write(`${AGENT_SKILLS_ROOT}/${name}/SKILL.md`, content);
   }
 
+  it.each(['strict', 'lenient'] as const)('reads and edits UTF-8 BOM skill documents under the %s policy', async readPolicy => {
+    await addSkill('bom-skill', `\uFEFF${markdown('bom-skill')}`);
+    const owner = new AgentSkillRepository(vaultFiles, { readPolicy });
+
+    const initial = await owner.list();
+    expect(initial.diagnostics).toEqual([]);
+    expect(initial.skills).toHaveLength(1);
+    const [loaded] = initial.skills;
+    expect(loaded.instructions).toBe('Instructions');
+    expect(loaded.frontmatter.license).toBe('MIT');
+
+    await owner.update(loaded.name, loaded.revision, {
+      name: loaded.name, description: 'Edited', instructions: 'Updated instructions',
+    });
+    const reloaded = await owner.list();
+    expect(reloaded.diagnostics).toEqual([]);
+    expect(reloaded.skills[0]).toMatchObject({
+      description: 'Edited', instructions: 'Updated instructions', frontmatter: { license: 'MIT' },
+    });
+  });
+
+  it.each(['strict', 'lenient'] as const)('keeps a leading Markdown code block through description edits under %s reading', async readPolicy => {
+    const instructions = '    echo first\n    echo second';
+    await addSkill('code-example', markdown('code-example', 'Original', `\n \n${instructions}\n\n`));
+    const owner = new AgentSkillRepository(vaultFiles, { readPolicy });
+    const [loaded] = (await owner.list()).skills;
+
+    expect(parser.parse(loaded.instructions).topNode.firstChild?.name).toBe('CodeBlock');
+    await owner.update(loaded.name, loaded.revision, { name: loaded.name, description: 'Changed description', instructions: loaded.instructions });
+    const persisted = await vault.read(`${AGENT_SKILLS_ROOT}/code-example/SKILL.md`);
+    expect(persisted).toContain(`---\n${instructions}\n`);
+    const [reloaded] = (await owner.list()).skills;
+    expect(reloaded.description).toBe('Changed description');
+    expect(reloaded.instructions).toBe(instructions);
+  });
+
   it('validates each skill file once through the safe reader', async () => {
     await addSkill('one'); await addSkill('two');
-    const verify = jest.spyOn(vaultFiles, 'verifyManagedPath');
+    const verify = vi.spyOn(vaultFiles, 'verifyManagedPath');
     const result = await repository.list();
     expect(result.skills).toHaveLength(2);
     expect(verify.mock.calls.filter(([file]) => file.endsWith('/SKILL.md'))).toHaveLength(2);
@@ -82,17 +121,17 @@ describe('AgentSkillRepository', () => {
 
   it('treats an unsafe managed root as fatal and unsafe child packages as diagnostics', async () => {
     const rootUnsafeFiles = {
-      verifyManagedPath: jest.fn().mockRejectedValue(new Error('Managed resource must not be a symlink')),
+      verifyManagedPath: vi.fn().mockRejectedValue(new Error('Managed resource must not be a symlink')),
     } as unknown as VaultFileAdapter;
     await expect(new AgentSkillRepository(rootUnsafeFiles).list()).rejects.toThrow('symlink');
 
     const childUnsafeFiles = {
-      readManagedFile: jest.fn().mockRejectedValue(new Error('Managed resource must not be a symlink')),
-      verifyManagedPath: jest.fn(async (candidate: string) => {
+      readManagedFile: vi.fn().mockRejectedValue(new Error('Managed resource must not be a symlink')),
+      verifyManagedPath: vi.fn(async (candidate: string) => {
         if (candidate.endsWith('/unsafe')) throw new Error('Managed resource must not be a symlink');
         return true;
       }),
-      listManagedFolderEntries: jest.fn().mockResolvedValue([
+      listManagedFolderEntries: vi.fn().mockResolvedValue([
         { path: `${AGENT_SKILLS_ROOT}/unsafe`, type: 'folder' },
       ]),
     } as unknown as VaultFileAdapter;
@@ -132,7 +171,7 @@ describe('AgentSkillRepository', () => {
   });
 
   it('rejects a target created during the exclusive claim race', async () => {
-    jest.mocked(fs.mkdir).mockImplementation(async (target, options) => {
+    vi.mocked(fs.mkdir).mockImplementation(async (target, options) => {
       // Another writer claims the package between the existence check and the claim.
       if (target === vault.resolve(`${AGENT_SKILLS_ROOT}/racing`)) await actualFs.mkdir(target);
       return actualFs.mkdir(target, options);
@@ -202,7 +241,7 @@ describe('AgentSkillRepository', () => {
     await addSkill('old-name');
     await vault.write(`${AGENT_SKILLS_ROOT}/old-name/reference.txt`, 'reference');
     const loaded = (await repository.list()).skills[0];
-    jest.mocked(fs.writeFile).mockImplementation(async (file, data, options) => {
+    vi.mocked(fs.writeFile).mockImplementation(async (file, data, options) => {
       if (path.dirname(String(file)) === vault.resolve(`${AGENT_SKILLS_ROOT}/new-name`)) throw new Error('write failed');
       return actualFs.writeFile(file, data, options);
     });
@@ -409,7 +448,7 @@ describe('AgentSkillRepository', () => {
       const parseYaml = obsidian.parseYaml;
       // Narrow spy: only empty YAML returns the external empty-document value;
       // every other input keeps the existing external parser.
-      const parseYamlSpy = jest.spyOn(obsidian, 'parseYaml').mockImplementation(content => (
+      const parseYamlSpy = vi.spyOn(obsidian, 'parseYaml').mockImplementation(content => (
         content.trim() === '' ? emptyDocument as Record<string, unknown> : parseYaml(content)
       ));
       try {
@@ -546,7 +585,9 @@ describe('AgentSkillRepository', () => {
     it('moves a broken package folder to trash', async () => {
       await vault.write(`${AGENT_SKILLS_ROOT}/broken/SKILL.md`, '---\nname: broken\n---\nBody\n');
 
-      await repository.trashBroken('broken');
+      const [diagnostic] = (await repository.list()).diagnostics;
+      expect(diagnostic.repairRevision).toBe((await repository.readForRepair('broken')).revision);
+      await repository.trashBroken('broken', diagnostic.repairRevision!);
 
       expect(vault.trashed).toEqual([`${AGENT_SKILLS_ROOT}/broken`]);
     });

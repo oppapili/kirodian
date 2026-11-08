@@ -1,18 +1,21 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
+import { axe } from '@test/helpers/accessibility';
 import { createProjectsFake, projectRecord } from '@test/helpers/features/chat/ProjectsFake';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
 import { Menu } from 'obsidian';
+import type { Mock } from 'vitest';
 
-import type { ConversationMeta, ProjectRecord, SessionManagerSort } from '@/core/types';
+import type { ConversationMeta, ProjectRecord } from '@/core/types';
 import { SessionBrowser, type SessionBrowserDeps } from '@/features/chat/session-manager/SessionBrowser';
 import type { HistoryConversationStatus } from '@/features/chat/session-manager/SessionStatusPresentation';
 import { t } from '@/i18n/i18n';
 import { confirm } from '@/shared/modals/ConfirmModal';
 
-jest.mock('@/shared/modals/ConfirmModal', () => ({ confirm: jest.fn(), confirmDelete: jest.fn() }));
+
+
+vi.mock('@/shared/modals/ConfirmModal', () => ({ confirm: vi.fn(), confirmDelete: vi.fn() }));
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
 HTMLElement.prototype.addClass = function (...classes) { this.classList.add(...classes); };
@@ -26,7 +29,7 @@ type MockMenuItem = {
   title: string; checked: boolean | null; disabled: boolean; isWarning?: boolean;
   clickHandler: ((event?: unknown) => void) | null;
 };
-type MockMenu = { items: MockMenuItem[]; showAtPosition: jest.Mock; showAtMouseEvent: jest.Mock };
+type MockMenu = { items: MockMenuItem[]; showAtPosition: Mock; showAtMouseEvent: Mock };
 
 const menus = (): MockMenu[] => (Menu as unknown as { instances: MockMenu[] }).instances;
 const titles = (menu: MockMenu): string[] => menu.items.map(item => item.title);
@@ -46,7 +49,6 @@ const idle = projectRecord({ id: 'idle', name: 'Idle', createdAt: testDate({ day
 function setup(options: {
   conversations?: ConversationMeta[];
   records?: ProjectRecord[];
-  projectSort?: SessionManagerSort;
   render?: Record<string, unknown>;
   /** The document showing the list, such as a popped-out window's. */
   doc?: Document;
@@ -61,23 +63,23 @@ function setup(options: {
   const reader = createProjectsFake(options.records ?? [launch, research, idle]);
   const projects = {
     ...reader,
-    create: jest.fn(),
-    update: jest.fn().mockResolvedValue(undefined),
-    setPinned: jest.fn().mockResolvedValue(undefined),
-    delete: jest.fn().mockResolvedValue(undefined),
-    readMemory: jest.fn(), saveMemory: jest.fn(), recreateMemory: jest.fn(),
+    create: vi.fn(),
+    update: vi.fn().mockResolvedValue(undefined),
+    setPinned: vi.fn().mockResolvedValue(undefined),
+    delete: vi.fn().mockResolvedValue(undefined),
+    readMemory: vi.fn(), saveMemory: vi.fn(), recreateMemory: vi.fn(),
   };
   const lifecycle = {
-    archive: jest.fn().mockResolvedValue(undefined),
-    archiveProject: jest.fn().mockResolvedValue(undefined),
-    restoreProject: jest.fn().mockResolvedValue(undefined),
-    setPinned: jest.fn(),
-    setPlacement: jest.fn().mockResolvedValue(undefined),
+    archive: vi.fn().mockResolvedValue(undefined),
+    archiveProject: vi.fn().mockResolvedValue(undefined),
+    restoreProject: vi.fn().mockResolvedValue(undefined),
+    setPinned: vi.fn(),
+    setPlacement: vi.fn().mockResolvedValue(undefined),
   };
   const browser = new SessionBrowser({
     plugin: {
       app: {},
-      settings: { enableAutoTitleGeneration: false, projectSort: options.projectSort ?? 'last-updated' },
+      settings: { enableAutoTitleGeneration: false },
       getConversationList: () => conversations,
       conversationLifecycle: lifecycle, projects,
     },
@@ -86,11 +88,11 @@ function setup(options: {
     onListChanged: () => undefined,
   } as unknown as SessionBrowserDeps);
   const container = (options.doc ?? document).body.createDiv();
-  const onStartProjectConversation = jest.fn().mockResolvedValue(undefined);
-  const onGroupCollapseChange = jest.fn();
+  const onStartProjectConversation = vi.fn().mockResolvedValue(undefined);
+  const onGroupCollapseChange = vi.fn();
   const collapsedGroupKeys = new Set<string>();
   const render = (): void => browser.renderHistoryDropdown(container, {
-    onSelectConversation: jest.fn().mockResolvedValue(undefined),
+    onSelectConversation: vi.fn().mockResolvedValue(undefined),
     onRerender: render,
     showMetadataPopover: true,
     showPinnedSection: true,
@@ -117,7 +119,7 @@ const sectionName = (name: string, _count: number) => name;
 afterEach(() => {
   document.body.replaceChildren();
   menus().length = 0;
-  jest.mocked(confirm).mockReset();
+  vi.mocked(confirm).mockReset();
 });
 
 const projectsRegion = (container: HTMLElement) => within(container).getByRole('region', { name: t('chat.projects.header') });
@@ -190,7 +192,6 @@ it('shows the projects header without rows when there are no projects, and no se
   const region = projectsRegion(empty.container);
   expect(within(region).queryAllByRole('button')).toEqual([
     within(region).getByRole('button', { name: t('chat.projects.header') }),
-    within(region).getByRole('button', { name: t('chat.projects.options') }),
     within(region).getByRole('button', { name: t('chat.projects.newProjectAction') }),
   ]);
   expect(within(projectsRegion(empty.container)).queryByText(t('chat.projects.noSessions'))).toBeNull();
@@ -222,20 +223,6 @@ it('expands and collapses a project from its native toggle', () => {
   expect(within(projectsRegion(container)).queryByText('alpha session')).toBeNull();
 });
 
-it.each<[SessionManagerSort, string[]]>([
-  ['last-updated', ['Launch', 'Idle']],
-  // Launch was created ten days ago, Idle twelve hours ago.
-  ['created', ['Idle', 'Launch']],
-])('orders projects by the %s project sort', (projectSort, names) => {
-  const recentIdle = projectRecord({ id: 'idle', name: 'Idle', createdAt: testDate({ hours: -12 }).getTime() });
-  const { container } = setup({ records: [launch, research, recentIdle], projectSort });
-
-  expect(expandedProjectToggles(projectsRegion(container))
-    .map(toggle => toggle.textContent)).toEqual(names.map(name => (
-    sectionName(name, { Research: 1, Launch: 2, Idle: 0 }[name]!)
-  )));
-});
-
 it('starts a session in a project and manages the project from its section menu', async () => {
   const { lifecycle, onStartProjectConversation, projects, view } = setup();
 
@@ -258,7 +245,7 @@ it('starts a session in a project and manages the project from its section menu'
   // Launch has a running member, so it cannot be archived yet.
   expect(item(menu, t('chat.projects.menu.archive')).disabled).toBe(true);
   item(menu, t('chat.projects.menu.pin')).clickHandler!();
-  jest.mocked(confirm).mockResolvedValue(true);
+  vi.mocked(confirm).mockResolvedValue(true);
   item(menu, t('chat.projects.menu.delete')).clickHandler!();
   await new Promise(resolve => setTimeout(resolve, 0));
 
@@ -309,7 +296,7 @@ it('lists an archived project only in the archive, where it can be restored or d
   expect(titles(menu)).toEqual([t('chat.projects.menu.restore'), t('chat.projects.menu.delete')]);
   item(menu, t('chat.projects.menu.restore')).clickHandler!();
   expect(lifecycle.restoreProject).toHaveBeenCalledWith('shelved');
-  jest.mocked(confirm).mockResolvedValue(true);
+  vi.mocked(confirm).mockResolvedValue(true);
   item(menu, t('chat.projects.menu.delete')).clickHandler!();
   await new Promise(resolve => setTimeout(resolve, 0));
   expect(projects.delete).toHaveBeenCalledWith('shelved');
@@ -318,7 +305,7 @@ it('lists an archived project only in the archive, where it can be restored or d
 it('keeps the project when deletion is not confirmed', async () => {
   const { projects, view } = setup();
   fireEvent.click(view.getByRole('button', { name: t('chat.projects.actionsFor', { name: 'Idle' }) }));
-  jest.mocked(confirm).mockResolvedValue(false);
+  vi.mocked(confirm).mockResolvedValue(false);
   item(menus().at(-1)!, t('chat.projects.menu.delete')).clickHandler!();
   await new Promise(resolve => setTimeout(resolve, 0));
 
@@ -382,7 +369,7 @@ it('opens keyboard-invoked menus under their anchor in the window that shows the
   const popout = document.implementation.createHTMLDocument('popout');
   const { container, view } = setup({ doc: popout });
   const row = view.getByText('alpha session').closest('.claudian-history-item') as HTMLElement;
-  jest.spyOn(row, 'getBoundingClientRect').mockReturnValue({ left: 40, bottom: 120 } as DOMRect);
+  vi.spyOn(row, 'getBoundingClientRect').mockReturnValue({ left: 40, bottom: 120 } as DOMRect);
 
   // Testing Library's fireEvent needs the node's window, which a detached popout document lacks.
   row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
@@ -398,7 +385,7 @@ it('opens keyboard-invoked menus under their anchor in the window that shows the
   const actions = container.querySelector<HTMLElement>(
     `[aria-label="${t('chat.projects.actionsFor', { name: 'Launch' })}"]`,
   )!;
-  jest.spyOn(actions, 'getBoundingClientRect').mockReturnValue({ left: 10, bottom: 30 } as DOMRect);
+  vi.spyOn(actions, 'getBoundingClientRect').mockReturnValue({ left: 10, bottom: 30 } as DOMRect);
   actions.click();
   expect(menus().at(-1)!.showAtPosition).toHaveBeenCalledWith({ x: 10, y: 30 }, popout);
 });

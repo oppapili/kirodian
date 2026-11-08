@@ -1,6 +1,7 @@
 import '@/providers';
 
 import { Notice } from 'obsidian';
+import type { Mock } from 'vitest';
 
 import type { TitleGenerationService } from '@/core/providers/types';
 import {
@@ -34,6 +35,8 @@ function kiroTitleSettings(): Record<string, unknown> {
   return settings;
 }
 
+
+
 describe('fallbackConversationTitle', () => {
   it('uses the first sentence', () => {
     expect(fallbackConversationTitle('How do I set up React? I need help.')).toBe('How do I set up React');
@@ -54,12 +57,12 @@ describe('fallbackConversationTitle', () => {
 describe('ConversationTitleGeneration.regenerate', () => {
   let host: {
     settings: Record<string, unknown>;
-    getConversationById: jest.Mock;
-    renameConversation: jest.Mock;
-    completeConversationTitleGeneration: jest.Mock;
-    updateConversation: jest.Mock;
+    getConversationById: Mock;
+    renameConversation: Mock;
+    completeConversationTitleGeneration: Mock;
+    updateConversation: Mock;
   };
-  let service: { generateTitle: jest.Mock; cancel: jest.Mock };
+  let service: { generateTitle: Mock; cancel: Mock };
   let titles: ConversationTitleGeneration;
 
   function createTitles(getService: () => TitleGenerationService | null): ConversationTitleGeneration {
@@ -67,15 +70,15 @@ describe('ConversationTitleGeneration.regenerate', () => {
   }
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     host = {
       settings: kiroTitleSettings(),
-      getConversationById: jest.fn().mockResolvedValue(null),
-      renameConversation: jest.fn().mockResolvedValue(undefined),
-      completeConversationTitleGeneration: jest.fn().mockResolvedValue(undefined),
-      updateConversation: jest.fn().mockResolvedValue(undefined),
+      getConversationById: vi.fn().mockResolvedValue(null),
+      renameConversation: vi.fn().mockResolvedValue(undefined),
+      completeConversationTitleGeneration: vi.fn().mockResolvedValue(undefined),
+      updateConversation: vi.fn().mockResolvedValue(undefined),
     };
-    service = { generateTitle: jest.fn().mockResolvedValue(undefined), cancel: jest.fn() };
+    service = { generateTitle: vi.fn().mockResolvedValue(undefined), cancel: vi.fn() };
     titles = createTitles(() => service as unknown as TitleGenerationService);
   });
 

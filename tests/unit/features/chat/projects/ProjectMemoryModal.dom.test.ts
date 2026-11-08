@@ -1,11 +1,12 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 
+import { axe } from '@test/helpers/accessibility';
 import type { ModalScope } from '@test/helpers/ObsidianSettingsDOM';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, screen, waitFor, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
 import type { App } from 'obsidian';
 import { Component, MarkdownRenderer, Notice } from 'obsidian';
+import type { MockedFunction } from 'vitest';
 
 import {
   ProjectMemoryConflictError,
@@ -16,9 +17,12 @@ import {
 import { ProjectMemoryModal } from '@/features/chat/projects/ProjectMemoryModal';
 import { t } from '@/i18n/i18n';
 
-jest.mock('obsidian', () => ({
-  ...jest.requireActual('@test/__mocks__/obsidian'),
-  ...jest.requireActual('@test/helpers/ObsidianSettingsDOM'),
+
+
+vi.mock('obsidian', async () => ({
+  ...(await vi.importActual<typeof import('@test/__mocks__/obsidian')>('@test/__mocks__/obsidian')),
+  ...(await vi.importActual<typeof import('@test/helpers/ObsidianSettingsDOM')>('@test/helpers/ObsidianSettingsDOM')),
+  getFrontMatterInfo: (markdown: string) => ({ contentStart: /^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/.exec(markdown)?.[0].length ?? 0 }),
 }));
 
 const project: ProjectRecord = {
@@ -50,9 +54,9 @@ class InMemoryProjectMemory implements ProjectMemoryOperations {
     this.modifiedAt = Date.now();
   }
 
-  readMemory = jest.fn(async () => (this.content === null ? { missing: true as const } : this.snapshot()));
+  readMemory = vi.fn(async () => (this.content === null ? { missing: true as const } : this.snapshot()));
 
-  saveMemory = jest.fn(async (_id: string, content: string, expectedRevision: string, options?: { overwrite?: boolean }) => {
+  saveMemory = vi.fn(async (_id: string, content: string, expectedRevision: string, options?: { overwrite?: boolean }) => {
     if (!options?.overwrite && (this.content === null || expectedRevision !== `r${this.version}`)) {
       throw new ProjectMemoryConflictError(project.id);
     }
@@ -60,13 +64,13 @@ class InMemoryProjectMemory implements ProjectMemoryOperations {
     return this.snapshot();
   });
 
-  recreateMemory = jest.fn(async () => {
+  recreateMemory = vi.fn(async () => {
     this.writeExternally(TEMPLATE);
     return this.snapshot();
   });
 }
 
-const render = MarkdownRenderer.render as jest.MockedFunction<typeof MarkdownRenderer.render>;
+const render = MarkdownRenderer.render as MockedFunction<typeof MarkdownRenderer.render>;
 const title = t('chat.projects.memory.title', { name: 'Launch' });
 const edit = t('chat.projects.memory.edit');
 const preview = t('chat.projects.memory.preview');
@@ -126,7 +130,7 @@ let released: string[] = [];
 
 beforeEach(() => {
   document.body.replaceChildren();
-  jest.clearAllMocks();
+  vi.clearAllMocks();
   released = [];
   render.mockImplementation(async (_app, markdown, el, sourcePath, component) => {
     for (const line of markdown.split('\n')) {
@@ -141,7 +145,7 @@ beforeEach(() => {
 afterEach(() => {
   // Stops each modal's refresh timer.
   for (const modal of opened.splice(0)) modal.onClose();
-  jest.useRealTimers();
+  vi.useRealTimers();
 });
 
 it('opens to read the rendered memory with its path, last update, and only Edit', async () => {
@@ -226,43 +230,43 @@ it('asks before discarding edits on Cancel or close, and keeps them when decline
 });
 
 it('follows agent edits on disk while reading, and offers Reload or Keep my edits while editing', async () => {
-  jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick'] });
+  vi.useFakeTimers({ toNotFake: ['queueMicrotask', 'nextTick'] });
   const memory = new InMemoryProjectMemory(FILLED);
   const { dialog, controls, textarea } = await open(memory);
-  await jest.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(0);
   expect(renderedText(dialog)).toBe(`rendered:${project.memoryPath}:${FILLED}`);
 
   memory.writeExternally(`${FILLED}Agent 1\n`);
-  await jest.advanceTimersByTimeAsync(2_000);
+  await vi.advanceTimersByTimeAsync(2_000);
   expect(renderedText(dialog)).toBe(`rendered:${project.memoryPath}:${FILLED}Agent 1\n`);
   expect(controls.queryByRole('alert')).toBeNull();
 
   type(dialog, textarea, 'Mine');
   memory.writeExternally(`${FILLED}Agent 2\n`);
-  await jest.advanceTimersByTimeAsync(2_000);
+  await vi.advanceTimersByTimeAsync(2_000);
   expect(controls.getByRole('alert').textContent).toBe(t('chat.projects.memory.changedOutside'));
   expect(textarea.value).toBe('Mine');
 
   fireEvent.click(controls.getByRole('button', { name: t('chat.projects.memory.keepMine') }));
   expect(controls.queryByRole('alert')).toBeNull();
-  await jest.advanceTimersByTimeAsync(2_000);
+  await vi.advanceTimersByTimeAsync(2_000);
   // The declined version is not offered again.
   expect(controls.queryByRole('alert')).toBeNull();
   fireEvent.click(controls.getByRole('button', { name: t('common.save') }));
-  await jest.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(0);
   expect(memory.content).toBe('Mine');
   expect(screen.queryByRole('dialog')).toBeNull();
 });
 
 it('after Keep my edits, measures unsaved changes against the agent version now on disk', async () => {
-  jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick'] });
+  vi.useFakeTimers({ toNotFake: ['queueMicrotask', 'nextTick'] });
   const memory = new InMemoryProjectMemory(FILLED);
   const { dialog, controls, textarea } = await open(memory);
-  await jest.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(0);
 
   type(dialog, textarea, 'Mine');
   memory.writeExternally('Agent');
-  await jest.advanceTimersByTimeAsync(2_000);
+  await vi.advanceTimersByTimeAsync(2_000);
   fireEvent.click(controls.getByRole('button', { name: t('chat.projects.memory.keepMine') }));
 
   // Back to the opening text, which no longer matches the file: still unsaved.
@@ -277,14 +281,14 @@ it('after Keep my edits, measures unsaved changes against the agent version now 
 });
 
 it('reloads the agent version from the on-disk change notice, discarding the edits', async () => {
-  jest.useFakeTimers({ doNotFake: ['queueMicrotask', 'nextTick'] });
+  vi.useFakeTimers({ toNotFake: ['queueMicrotask', 'nextTick'] });
   const memory = new InMemoryProjectMemory(FILLED);
   const { dialog, controls, textarea } = await open(memory);
-  await jest.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(0);
 
   type(dialog, textarea, 'Mine');
   memory.writeExternally('Agent');
-  await jest.advanceTimersByTimeAsync(2_000);
+  await vi.advanceTimersByTimeAsync(2_000);
   fireEvent.click(within(controls.getByRole('alert').parentElement!).getByRole('button', {
     name: t('chat.projects.memory.reload'),
   }));
@@ -318,6 +322,34 @@ it('keeps the user text on a conflicting save and overwrites or reloads only whe
   fireEvent.click(controls.getByRole('button', { name: t('chat.projects.memory.overwrite') }));
   await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   expect(memory.content).toBe('Second edits');
+});
+
+it('keeps unsaved edits when conflict Reload fails, then replaces them after Retry succeeds', async () => {
+  const memory = new InMemoryProjectMemory(FILLED);
+  const { dialog, controls, textarea } = await open(memory);
+  await waitFor(() => expect(textarea.value).toBe(FILLED));
+  type(dialog, textarea, 'My unsaved edits');
+  memory.writeExternally('Agent edits');
+  fireEvent.click(controls.getByRole('button', { name: t('common.save') }));
+  expect((await controls.findByRole('alert')).textContent).toBe(t('chat.projects.memory.conflict'));
+  memory.readMemory.mockRejectedValueOnce(new Error('Temporary read failure'));
+
+  fireEvent.click(controls.getByRole('button', { name: t('chat.projects.memory.reload') }));
+
+  await waitFor(() => expect(controls.getByRole('alert').textContent).toBe(t('chat.projects.memory.loadFailed')));
+  expect(textarea.value).toBe('My unsaved edits');
+  expect(textarea.disabled).toBe(false);
+  expect(hasDirtyMark(dialog)).toBe(true);
+  expect(memory.content).toBe('Agent edits');
+  expect(memory.saveMemory).toHaveBeenCalledTimes(1);
+  expect((await axe(dialog)).violations).toEqual([]);
+
+  fireEvent.click(controls.getByRole('button', { name: t('common.retry') }));
+
+  await waitFor(() => expect(textarea.value).toBe('Agent edits'));
+  expect(controls.queryByRole('alert')).toBeNull();
+  expect(hasDirtyMark(dialog)).toBe(false);
+  expect(memory.saveMemory).toHaveBeenCalledTimes(1);
 });
 
 it('locks the editor while Reload after a conflict reads the file, so no new typing is overwritten', async () => {
@@ -404,4 +436,95 @@ it('opens the editor at a heading clicked in the rendered memory, skipping headi
   expect(textarea.hidden).toBe(false);
   expect(document.activeElement).toBe(textarea);
   expect(textarea.selectionStart).toBe(markdown.indexOf('## State'));
+});
+
+
+it.each([
+  { markdown: 'Launch\n======\n\nGoal\n----\nShip it\n\n## State\nDrafting\n', expected: '## State', heading: 'State' },
+  { markdown: 'Launch\n======\n\nGoal\n----\nShip it\n', expected: 'Goal', heading: 'Goal' },
+  { markdown: '> ## Quoted\n> Details\n\n## State\nDrafting\n', expected: '## State', heading: 'State' },
+])('finds clicked heading sources across supported Markdown syntax: $heading', async ({ markdown, expected, heading }) => {
+  // External Obsidian Markdown rendering supplies the headings; mapping them back to source stays real.
+  render.mockImplementation(async (_app, _markdown, el) => {
+    if (markdown.startsWith('>')) el.createEl('blockquote').createEl('h2', { text: 'Quoted' });
+    else {
+      el.createEl('h1', { text: 'Launch' });
+      el.createEl('h2', { text: 'Goal' });
+    }
+    if (markdown.includes('## State')) el.createEl('h2', { text: 'State' });
+  });
+  const { dialog, controls, textarea } = await open(new InMemoryProjectMemory(markdown));
+  const target = await controls.findByRole('heading', { name: heading });
+  fireEvent.click(target);
+  expect(controls.getByRole('textbox', { name: title })).toBe(textarea);
+  expect(document.activeElement).toBe(textarea);
+  expect(textarea.selectionStart).toBe(markdown.indexOf(expected));
+  expect(textarea.selectionEnd).toBe(textarea.selectionStart);
+  expect(await axe(dialog)).toHaveNoViolations();
+});
+
+it('preserves source offsets after host frontmatter and skips ambiguous extra rendered headings', async () => {
+  const markdown = '---\ntitle: Launch\n---\n\n## State\nDrafting\n';
+  render.mockImplementation(async (_app, _markdown, el) => { el.createEl('h2', { text: 'State' }); });
+  const { controls, textarea } = await open(new InMemoryProjectMemory(markdown));
+  fireEvent.click(await controls.findByRole('heading', { name: 'State' }));
+  expect(textarea.hidden).toBe(false);
+  expect(textarea.selectionStart).toBe(markdown.indexOf('## State'));
+  fireEvent.click(controls.getByRole('button', { name: preview }));
+  // A host extension's additional heading makes ordinal source attribution ambiguous.
+  const renderedHeading = await controls.findByRole('heading', { name: 'State' });
+  renderedHeading.parentElement!.createEl('h2', { text: 'Injected heading' });
+  fireEvent.click(controls.getByRole('heading', { name: 'Injected heading' }));
+  expect(textarea.hidden).toBe(true);
+});
+
+it.each(['edit', 'close'])('releases Markdown embed resources registered after the memory preview is retired by %s', async action => {
+  let finish!: () => void;
+  let finished!: () => void;
+  const gate = new Promise<void>(resolve => { finish = resolve; });
+  const completed = new Promise<void>(resolve => { finished = resolve; });
+  const cleanup = vi.fn();
+  const childCleanup = vi.fn();
+  const embedEvent = vi.fn();
+  const childEvent = vi.fn();
+  const eventName = 'memory-preview-embed-event';
+  render.mockImplementationOnce(async (_app, _markdown, element, _sourcePath, component) => {
+    element.createEl('p', { text: 'Loading embed' });
+    await gate;
+    window.addEventListener(eventName, embedEvent);
+    component.register(() => {
+      window.removeEventListener(eventName, embedEvent);
+      cleanup();
+    });
+    const child = new Component();
+    window.addEventListener(eventName, childEvent);
+    child.register(() => {
+      window.removeEventListener(eventName, childEvent);
+      childCleanup();
+    });
+    component.addChild(child);
+    finished();
+  });
+  const { modal, controls, textarea } = await open(new InMemoryProjectMemory(FILLED));
+  await controls.findByText('Loading embed');
+  if (action === 'edit') {
+    fireEvent.click(controls.getByRole('button', { name: edit }));
+  } else {
+    modal.close();
+  }
+  expect(textarea.hidden).toBe(action === 'close');
+  expect(textarea.value).toBe(FILLED);
+  expect(screen.queryByRole('dialog', { name: title }) !== null).toBe(action === 'edit');
+  try {
+    finish();
+    await completed;
+    window.dispatchEvent(new Event(eventName));
+    expect(embedEvent).not.toHaveBeenCalled();
+    expect(childEvent).not.toHaveBeenCalled();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    expect(childCleanup).toHaveBeenCalledTimes(1);
+  } finally {
+    window.removeEventListener(eventName, embedEvent);
+    window.removeEventListener(eventName, childEvent);
+  }
 });

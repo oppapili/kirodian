@@ -28,7 +28,8 @@ export interface ProviderModelCatalogSnapshot extends ProviderModelSelection {
 
 export type ProviderModelSelectionChange =
   | { type: 'set'; modelId: string; selected: boolean }
-  | { type: 'move'; modelId: string; target: string | -1 | 1 }
+  | { type: 'move'; modelId: string; target: string; placement: 'before' | 'after' }
+  | { type: 'move'; modelId: string; target: -1 | 1 }
   | { type: 'clear' };
 
 export interface ProviderModelCatalog {
@@ -63,6 +64,8 @@ export interface ProviderModelCatalogOptions {
   store: ProviderModelCatalogStore;
   discover(signal: AbortSignal): Promise<ProviderModelCatalogRefreshResult>;
   afterSelect?(addedIds: string[]): Promise<void>;
+  /** A successful discovery has updated the provider-owned model projection. */
+  observeChanges?(observer: () => void): () => void;
 }
 
 /** A catalog store over the provider's own configuration, decoded and updated by its configuration module. */
@@ -103,7 +106,15 @@ export class ProviderModelCatalogController implements ProviderModelCatalog {
   private generation = 0;
   private disposed = false;
 
-  constructor(private readonly options: ProviderModelCatalogOptions) {}
+  private readonly unsubscribeChanges: (() => void) | undefined;
+
+  constructor(private readonly options: ProviderModelCatalogOptions) {
+    this.unsubscribeChanges = options.observeChanges?.(() => {
+      // An older background read must not finish an in-flight explicit refresh.
+      if (this.status === 'loading') this.publish();
+      else this.publishReady();
+    });
+  }
 
   getSnapshot(): ProviderModelCatalogSnapshot {
     const state = this.options.store.read();
@@ -165,9 +176,7 @@ export class ProviderModelCatalogController implements ProviderModelCatalog {
       const result = await this.options.discover(controller.signal);
       if (controller.signal.aborted || this.disposed || generation !== this.generation) return { changed: false };
       if (result.diagnostics) throw new Error(result.diagnostics);
-      this.stale = false;
-      this.status = 'ready';
-      this.publish();
+      this.publishReady();
       return result;
     } catch (error) {
       if (controller.signal.aborted || this.disposed || generation !== this.generation) return { changed: false };
@@ -218,12 +227,18 @@ export class ProviderModelCatalogController implements ProviderModelCatalog {
         }
         case 'move': {
           const index = selectedIds.indexOf(change.modelId);
-          const target = typeof change.target === 'string'
-            ? selectedIds.indexOf(change.target)
-            : index + change.target;
-          if (index >= 0 && target >= 0 && target < selectedIds.length) {
+          if (index < 0) break;
+          if (typeof change.target === 'string') {
+            if (change.target === change.modelId || !selectedIds.includes(change.target)) break;
             selectedIds.splice(index, 1);
-            selectedIds.splice(target, 0, change.modelId);
+            const target = selectedIds.indexOf(change.target);
+            selectedIds.splice(change.placement === 'after' ? target + 1 : target, 0, change.modelId);
+          } else {
+            const target = index + change.target;
+            if (target >= 0 && target < selectedIds.length) {
+              selectedIds.splice(index, 1);
+              selectedIds.splice(target, 0, change.modelId);
+            }
           }
           break;
         }
@@ -255,6 +270,13 @@ export class ProviderModelCatalogController implements ProviderModelCatalog {
     return () => { this.observers.delete(observer); };
   }
 
+  private publishReady(): void {
+    this.stale = false;
+    this.status = 'ready';
+    this.error = undefined;
+    this.publish();
+  }
+
   private publish(): void {
     if (this.disposed) return;
     for (const observer of this.observers) observer();
@@ -264,6 +286,7 @@ export class ProviderModelCatalogController implements ProviderModelCatalog {
     this.disposed = true;
     this.transitionFence.dispose();
     this.observers.clear();
+    this.unsubscribeChanges?.();
     this.generation += 1;
     this.controller?.abort();
     await this.quiesce();

@@ -1,19 +1,24 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 import '@/providers';
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { Prec, StateEffect } from '@codemirror/state';
+import { EditorView } from '@codemirror/view';
+import { axe } from '@test/helpers/accessibility';
 import { createClaudianView } from '@test/helpers/features/chat/ClaudianViewHarness';
 import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
 import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
-import { axe } from 'jest-axe';
 import { App, Component } from 'obsidian';
 
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
+import type { ProviderCommandDiscoveryResult } from '@/core/providers/commands/ProviderCommandDiscoveryResult';
+import { ProviderCommandDiscoveryStore } from '@/core/providers/commands/ProviderCommandDiscoveryStore';
+import type { ProviderCommandEntry } from '@/core/providers/commands/ProviderCommandEntry';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { type ChatMessage, type ClaudianSettings, type Conversation, isCanonicalUserMessage } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
@@ -47,13 +52,13 @@ beforeEach(() => {
 });
 afterEach(() => {
   globalThis.ResizeObserver = originalResizeObserver;
-  jest.restoreAllMocks();
+  vi.restoreAllMocks();
   document.body.replaceChildren();
 });
 
 async function createView(provisional = false, options: { managed?: boolean; draft?: boolean } = {}) {
   const backend = new FakeSideBackend();
-  jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockReturnValue(backend);
+  vi.spyOn(ProviderRegistry, 'createExecutionBackend').mockReturnValue(backend);
   const app = new App();
   Object.assign(app.vault.adapter, { basePath: '/vault' });
   Object.assign(app.vault, { on: () => ({}), offref() {} });
@@ -130,7 +135,7 @@ async function createView(provisional = false, options: { managed?: boolean; dra
     await tab.executionCoordinator.bindConversation({ conversationId: conversation.id, providerId: 'kiro' });
     await tab.executionCoordinator.prepare();
   }
-  jest.spyOn(tab.dom.messagesEl, 'getClientRects').mockImplementation(() =>
+  vi.spyOn(tab.dom.messagesEl, 'getClientRects').mockImplementation(() =>
     (tab.dom.contentEl.classList.contains('claudian-hidden') ? [] : [{}]) as unknown as DOMRectList);
   activateTab(tab);
   tab.dom.inputEl.focus();
@@ -318,6 +323,59 @@ it.each([
     expect(view.tab.dom.inputEl.value).toBe(text);
   } finally { await view.dispose(); }
 });
+
+it.each(['loading', 'empty', 'ready', 'error'] as const)(
+  'routes Up/Down according to selectable provider suggestions (%s)', async status => {
+    const view = await createView();
+    let finish!: (result: ProviderCommandDiscoveryResult<ProviderCommandEntry>) => void;
+    const discovery = new ProviderCommandDiscoveryStore<ProviderCommandEntry>(
+      () => new Promise(resolve => { finish = resolve; }),
+    );
+    const editorKeys: string[] = [];
+    try {
+      const cm = EditorView.findFromDOM(textbox(view))!;
+      cm.dispatch({ effects: StateEffect.appendConfig.of(Prec.highest(EditorView.domEventHandlers({
+        keydown: event => { editorKeys.push(event.key); return false; },
+      }))) });
+      view.tab.ui.composerDropdown.setProviderCatalog({
+        providerId: 'claude', triggerChars: ['/'], builtInPrefix: '/', commandPrefix: '/', skillPrefix: '/',
+      }, discovery);
+      type(view, 'First paragraph\n/zxy');
+      await waitFor(() => expect(discovery.getSnapshot().status).toBe('loading'));
+      const command = (name: string): ProviderCommandEntry => ({
+        id: name, name, providerId: 'claude', kind: 'command', content: '', scope: 'runtime', source: 'sdk',
+        isEditable: false, isDeletable: false, displayPrefix: '/', insertPrefix: '/',
+      });
+      const result: ProviderCommandDiscoveryResult<ProviderCommandEntry> = status === 'ready'
+        ? { status: 'ready', items: [command('zxy-one'), command('zxy-two')] }
+        : status === 'error' ? { status: 'error', message: 'Native catalog unavailable', retryable: true }
+        : { status: 'empty' };
+      if (status !== 'loading') {
+        finish(result);
+      }
+      await waitFor(() => expect(discovery.getSnapshot().status).toBe(status));
+      const list = within(view.tab.dom.inputContainerEl).getByRole('listbox', { name: 'Input suggestions' });
+      const options = within(list).getAllByRole('option');
+      const selectable = status === 'ready' || status === 'error';
+      expect(options.map(option => option.getAttribute('aria-disabled')))
+        .toEqual(status === 'ready' ? [null, null] : status === 'error' ? ['true', null] : ['true']);
+      expect(within(list).queryByRole('option', { name: /Retry/ })).toBe(status === 'error' ? options[1] : null);
+      expect(key(view, 'ArrowDown').inputPrevented).toBe(selectable);
+      expect(textbox(view).getAttribute('aria-activedescendant')).toBe(selectable ? options[1].id : null);
+      expect(key(view, 'ArrowUp').inputPrevented).toBe(selectable);
+      expect(textbox(view).getAttribute('aria-activedescendant'))
+        .toBe(status === 'ready' ? options[0].id : status === 'error' ? options[1].id : null);
+      // This is CodeMirror's real bubble-stage handler, after the runtime's capture-stage menus.
+      expect(editorKeys).toEqual(selectable ? [] : ['ArrowDown', 'ArrowUp']);
+      expect(view.tab.dom.inputEl.value).toBe('First paragraph\n/zxy');
+      expect(await axe(list)).toHaveNoViolations();
+    } finally {
+      finish?.({ status: 'empty' });
+      await view.dispose();
+      discovery.invalidate();
+    }
+  },
+);
 
 it('leaves selection, empty history, initial Down, and inactive Escape to native behavior', async () => {
   const view = await createView();
@@ -526,8 +584,8 @@ it('treats recall like typing without admitting a provisional tab and opens a re
   try {
     view.tab.state.messages = [user('one', '/ses')];
     expect(view.tab.lifecycleState).toBe('provisional');
-    const changed = jest.spyOn(view.tab.controllers.sideChatController, 'handleComposerInput');
-    const refreshed = jest.spyOn(view.tab.ui.promptSuggestion, 'refresh');
+    const changed = vi.spyOn(view.tab.controllers.sideChatController, 'handleComposerInput');
+    const refreshed = vi.spyOn(view.tab.ui.promptSuggestion, 'refresh');
     key(view, 'ArrowUp');
     expect(view.tab.lifecycleState).toBe('provisional');
     expect(changed).toHaveBeenCalled();
@@ -591,8 +649,8 @@ it('updates the actual Side draft preview on recall and draft restoration withou
 it('removes owned history keyboard and composition listeners when the real tab is destroyed', async () => {
   const view = await createView();
   try {
-    const keydown = jest.spyOn(PromptHistoryNavigation.prototype, 'handleKeydown');
-    const reset = jest.spyOn(PromptHistoryNavigation.prototype, 'reset');
+    const keydown = vi.spyOn(PromptHistoryNavigation.prototype, 'handleKeydown');
+    const reset = vi.spyOn(PromptHistoryNavigation.prototype, 'reset');
     view.tab.state.messages = [user('one', 'Existing prompt')];
     key(view, 'ArrowUp');
     expect(keydown).toHaveBeenCalled();

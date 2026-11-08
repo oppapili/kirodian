@@ -1,4 +1,4 @@
-/** @jest-environment jsdom */
+/** @vitest-environment jsdom */
 import '@/providers';
 
 import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
@@ -36,12 +36,12 @@ beforeEach(() => {
 });
 afterEach(() => {
   globalThis.ResizeObserver = originalResizeObserver;
-  jest.restoreAllMocks();
+  vi.restoreAllMocks();
   document.body.replaceChildren();
 });
 
 async function createView(fakeBackend?: FakeSideBackend) {
-  if (fakeBackend) jest.spyOn(ProviderRegistry, 'createExecutionBackend').mockReturnValue(fakeBackend);
+  if (fakeBackend) vi.spyOn(ProviderRegistry, 'createExecutionBackend').mockReturnValue(fakeBackend);
   const app = new App();
   Object.assign(app.vault.adapter, { basePath: '/vault' });
   Object.assign(app.vault, { on: () => ({}), offref() {} });
@@ -111,6 +111,7 @@ async function createView(fakeBackend?: FakeSideBackend) {
   tab.hydrationState = 'ready';
   await tab.executionCoordinator.bindConversation({ conversationId: conversation.id, providerId: 'kiro' });
   await tab.executionCoordinator.prepare();
+  vi.spyOn(tab.dom.messagesEl, 'getClientRects').mockImplementation(() => (tab.dom.contentEl.hasClass('claudian-hidden') ? [] : [{}]) as unknown as DOMRectList);
   activateTab(tab);
   // jsdom has no layout engine; the presentation's visibility gate reads getClientRects(). A hidden
   // ancestor (deactivateTab adds `claudian-hidden`) yields no rects in a real browser, so mirror that.
@@ -149,10 +150,10 @@ async function selectToolbarModel(view: View, name: RegExp): Promise<HTMLElement
 /** Composer activity that neither starts a main turn nor changes the main tab's model. */
 const retainingActivity = {
   'rewind in progress': async (view: View) => {
-    jest.spyOn(view.tab.state, 'isRewinding', 'get').mockReturnValue(true);
+    vi.spyOn(view.tab.state, 'isRewinding', 'get').mockReturnValue(true);
     view.tab.dom.inputEl.value = 'Retry later';
     await view.tab.controllers.inputController.sendMessage();
-    jest.spyOn(view.tab.state, 'isRewinding', 'get').mockReturnValue(false);
+    vi.spyOn(view.tab.state, 'isRewinding', 'get').mockReturnValue(false);
     expect(view.tab.dom.inputEl.value).toBe('Retry later');
   },
   'rejected side command': async (view: View) => {
@@ -173,7 +174,7 @@ it('routes a native post-result suggestion to the composer without persisting it
     expect(view.tab.dom.inputEl.value).toBe('');
     expect(JSON.stringify(view.saved)).not.toContain('Add tests next');
     expect(JSON.stringify(view.tab.state.messages)).not.toContain('Add tests next');
-    const send = jest.spyOn(view.tab.controllers.inputController, 'sendMessage');
+    const send = vi.spyOn(view.tab.controllers.inputController, 'sendMessage');
     fireEvent.keyDown(within(view.tab.dom.inputEl).getByRole('textbox'), { key: 'Tab' });
     expect(view.tab.dom.inputEl.value).toBe('Add tests next');
     expect(send).not.toHaveBeenCalled();
@@ -311,7 +312,36 @@ it('hides a prediction while a toolbar dropdown is open and restores it on Escap
   } finally { await view.dispose(); }
 });
 
-it.each(['', 'Unsent draft'])('discards the prediction when an automatic turn starts (draft: %p)', async draft => {
+it('hides a prediction while the completion menu or resume picker is open and restores it when they close', async () => {
+  const backend = new FakeSideBackend();
+  const view = await createView(backend);
+  try {
+    const turnId = await finishFakeTurn(view, backend);
+    backend.latest.emitSessionEvent({ type: 'prompt_suggestion', originatingTurnId: turnId, suggestion: 'Try the tests' });
+    const input = view.tab.dom.inputEl;
+    const textbox = within(input).getByRole('textbox');
+    expect(within(input).getByText('Try the tests')).toBeDefined();
+    input.value = '@';
+    fireEvent.input(input);
+    await waitFor(() => expect(view.tab.ui.composerDropdown.isVisible()).toBe(true));
+    // A programmatic draft reset leaves the menu open.
+    input.value = '';
+    view.tab.ui.promptSuggestion.refresh();
+    expect(within(input).queryByText('Try the tests')).toBeNull();
+    fireEvent.keyDown(textbox, { key: 'Escape' });
+    expect(view.tab.ui.composerDropdown.isVisible()).toBe(false);
+    expect(within(input).getByText('Try the tests')).toBeDefined();
+    input.value = '/sessions';
+    await view.tab.controllers.inputController.sendMessage();
+    expect(within(document.body).getByRole('listbox', { name: 'Resume conversation' })).toBeDefined();
+    expect(within(input).queryByText('Try the tests')).toBeNull();
+    fireEvent.keyDown(textbox, { key: 'Escape' });
+    expect(within(document.body).queryByRole('listbox', { name: 'Resume conversation' })).toBeNull();
+    expect(within(input).getByText('Try the tests')).toBeDefined();
+  } finally { await view.dispose(); }
+});
+
+it.each(['', 'Unsent draft'])('discards the prediction when an automatic turn starts (draft: %o)', async draft => {
   const backend = new FakeSideBackend();
   const view = await createView(backend);
   try {

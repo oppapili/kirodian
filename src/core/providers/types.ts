@@ -34,7 +34,7 @@ export interface ProviderCapabilities {
   supportsEphemeralFork?: boolean;
   /** Omitted means checkpoint forking; full-session providers can fork only the latest reply. */
   forkMode?: 'checkpoint' | 'full-session';
-  /** Whether a checkpoint fork may start while the source runs a turn; defaults to true. Full-session forks never may. */
+  /** Whether a checkpoint fork may start while the source runs a turn; defaults to true. */
   supportsForkDuringTurn?: boolean;
   supportsProviderCommands: boolean;
   supportsImageAttachments: boolean;
@@ -172,6 +172,8 @@ export interface ProviderUIOption {
   providerIcon?: ProviderIconSvg;
   /** Owning provider when several providers share one dropdown, so the option can carry its brand. */
   providerId?: ProviderId;
+  /** The owning provider's display name when several providers share one dropdown. */
+  providerLabel?: string;
 }
 
 export interface ProviderPathIconSvg {
@@ -313,6 +315,8 @@ export interface ProviderModelPolicy {
 
 /** UI composition may reuse policy, but application code consumes ProviderModelPolicy. */
 export interface ProviderChatUIConfig extends Omit<ProviderModelPolicy, 'permissionModes' | 'getServiceTierPolicy'> {
+  /** Presentation-only formatting of assistant Markdown; native history remains unchanged. */
+  prepareAssistantMarkdown?(markdown: string): string;
   getPermissionModeOptions?(settings?: Record<string, unknown>): readonly ProviderPermissionModeOption[] | null;
   getServiceTierToggle?(settings: Record<string, unknown>): ProviderServiceTierToggleConfig | null;
   getModeSelector?(settings: Record<string, unknown>): ProviderModeSelectorConfig | null;
@@ -377,6 +381,8 @@ export interface ProviderCommandLoader {
   loadCommands(
     context: ProviderCommandLoaderContext,
   ): Promise<ProviderCommandDiscoveryResult<SlashCommand>>;
+  /** Notify an active picker to reread its existing command owner; the signal owns the subscription. */
+  watchCommands?(context: ProviderCommandLoaderContext, onChange: () => void): Promise<void>;
 }
 
 export interface ProviderWorkspaceServices {

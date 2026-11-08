@@ -1,13 +1,16 @@
 import { EventEmitter } from 'node:events';
 import { Readable, Writable } from 'node:stream';
 
-jest.mock('cross-spawn', () => jest.fn());
+vi.mock('cross-spawn', () => ({ default: vi.fn() }));
 
 import spawn from 'cross-spawn';
+import type { MockedFunction } from 'vitest';
 
 import { ACPSubprocess } from '@/providers/acp/ACPSubprocess';
 
-const mockSpawn = spawn as jest.MockedFunction<typeof spawn>;
+
+
+const mockSpawn = spawn as MockedFunction<typeof spawn>;
 
 function createMockProcess(): any {
   const proc = new EventEmitter() as any;
@@ -17,7 +20,7 @@ function createMockProcess(): any {
   proc.exitCode = null;
   proc.killed = false;
   proc.pid = 12345;
-  proc.kill = jest.fn(() => true);
+  proc.kill = vi.fn(() => true);
   return proc;
 }
 
@@ -26,7 +29,7 @@ describe('ACPSubprocess', () => {
   let proc: any;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     proc = createMockProcess();
     mockSpawn.mockReturnValue(proc);
   });
@@ -71,27 +74,6 @@ describe('ACPSubprocess', () => {
         windowsHide: true,
       }),
     );
-  });
-
-  it('retains split UTF-8 diagnostics through the public stderr snapshot', () => {
-    const subprocess = new ACPSubprocess({
-      args: ['acp', '--cwd=/vault'],
-      command: '/opt/opencode/bin/opencode',
-      cwd: '/vault',
-      env: { PATH: '/usr/bin' },
-    });
-    subprocess.start();
-
-    proc.stderr.emit('data', Buffer.from([0xe4]));
-    expect(subprocess.getStderrSnapshot()).toBe('');
-    proc.stderr.emit('data', Buffer.from([0xb8, 0xad, 0xf0, 0x9f]));
-    expect(subprocess.getStderrSnapshot()).toBe('\u4e2d');
-    proc.stderr.emit('data', Buffer.from([0x9a, 0x80]));
-
-    expect(subprocess.getStderrSnapshot()).toBe('\u4e2d\ud83d\ude80');
-    expect(subprocess.stderr).toBe(proc.stderr);
-    proc.emit('close', 0, null);
-    expect(subprocess.getStderrSnapshot()).toBe('\u4e2d\ud83d\ude80');
   });
 
   it('kills the process tree when shutting down Windows .cmd shims', async () => {

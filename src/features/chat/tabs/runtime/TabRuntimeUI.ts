@@ -35,13 +35,13 @@ import type {
 } from '@/features/chat/tabs/runtime/TabRuntimeConstruction';
 import { TabModelSelectionCoordinator } from '@/features/chat/tabs/TabModelSelectionCoordinator';
 import { syncTabProviderServices } from '@/features/chat/tabs/tabProviderLifecycle';
-import { getBlankTabModelOptions } from '@/features/chat/tabs/tabProviderSettings';
 import { applyProviderUIGating, refreshTabProviderUI, syncComposerDropdownForProvider, updateTabPermissionMode, updateTabServiceTier } from '@/features/chat/tabs/tabProviderUI';
 import type {
   ProviderCatalogInfo,
   TabUIComponents,
 } from '@/features/chat/tabs/types';
 import { BRAND_NAME } from '@/i18n/constants';
+import { getProviderPickerModelOptions } from '@/shared/toolbar/providerPickerModelOptions';
 
 function buildContextManagers(
   options: TabRuntimeConstructionContext,
@@ -122,7 +122,7 @@ function buildInputToolbar(
     return {
       ...baseConfig,
       getModelOptions: (settings: Record<string, unknown>) =>
-        getBlankTabModelOptions(settings),
+        getProviderPickerModelOptions(() => settings),
     };
   };
 
@@ -419,7 +419,7 @@ export function buildTabRuntimeUI(
   const navigationSidebar = new NavigationSidebar(
     dom.messagesWrapperEl,
     dom.messagesEl,
-    () => runtimeRef.current()?.renderer.revealEarlierMessages(true),
+    () => runtimeRef.current()?.renderer.getDirectoryEntries() ?? [],
   );
   options.registerCleanup('tab navigation sidebar', () => navigationSidebar.destroy());
 

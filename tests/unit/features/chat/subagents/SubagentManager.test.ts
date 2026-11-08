@@ -3,18 +3,18 @@ import '@/providers';
 import type { SubagentInfo } from '@/core/types';
 import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
 
-jest.mock('@/features/chat/subagents/SubagentRenderer', () => ({
-  createSubagentBlock: jest.fn((_parentEl: any, info: SubagentInfo) => ({ info, wrapperEl: {} })),
-  createAsyncSubagentBlock: jest.fn((_parentEl: any, info: SubagentInfo) => ({ info, wrapperEl: {}, statusTextEl: {} })),
-  updateSubagentBlock: jest.fn(),
-  updateAsyncSubagentBlock: jest.fn(),
+vi.mock('@/features/chat/subagents/SubagentRenderer', () => ({
+  createSubagentBlock: vi.fn((_parentEl: any, info: SubagentInfo) => ({ info, wrapperEl: {} })),
+  createAsyncSubagentBlock: vi.fn((_parentEl: any, info: SubagentInfo) => ({ info, wrapperEl: {}, statusTextEl: {} })),
+  updateSubagentBlock: vi.fn(),
+  updateAsyncSubagentBlock: vi.fn(),
 }));
 
-const createMockEl = () => ({ createDiv: jest.fn(), appendChild: jest.fn() } as any);
+const createMockEl = () => ({ createDiv: vi.fn(), appendChild: vi.fn() } as any);
 
 describe('SubagentManager', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('sync subagent operations', () => {

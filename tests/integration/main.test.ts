@@ -1,6 +1,7 @@
 import { DEFAULT_CLAUDIAN_SETTINGS as DEFAULT_SETTINGS } from '@test/helpers/defaultSettings';
 import { testClock } from '@test/helpers/testClock';
 import { Notice, TFile, TFolder } from 'obsidian';
+import type { Mock, MockInstance } from 'vitest';
 
 import type { ConversationRepository } from '@/app/conversations/ConversationRepository';
 import { PinnedLinkedContentPathCoordinator } from '@/app/settings/PinnedLinkedContentPathCoordinator';
@@ -48,15 +49,15 @@ function seedKiroModel(plugin: { settings: Record<string, unknown> }, rawId: str
 }
 
 // Mock fs for ClaudianService
-jest.mock('fs');
+vi.mock('fs');
 
 // Kiro is the default provider, so conversations without an explicit providerId
 // hydrate through the kiro native-history resolver, which reads the real fs sync
-// API directly. Under `jest.mock('fs')` those reads return undefined and crash
+// API directly. Under `vi.mock('fs')` those reads return undefined and crash
 // path containment during onload. Resolve no native session directory so
 // hydration is a no-op (the production path when no native history file exists).
-jest.mock('@/providers/kiro/history/KiroHistoryPathResolver', () => ({
-  ...jest.requireActual('@/providers/kiro/history/KiroHistoryPathResolver'),
+vi.mock('@/providers/kiro/history/KiroHistoryPathResolver', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/providers/kiro/history/KiroHistoryPathResolver')>()),
   resolveKiroSessionDirectory: () => null,
 }));
 
@@ -90,7 +91,7 @@ describe('ClaudianPlugin', () => {
   }
 
   function getRegisteredCommand(commandId: string) {
-    const call = (plugin.addCommand as jest.Mock).mock.calls.find(
+    const call = (plugin.addCommand as Mock).mock.calls.find(
       ([config]) => config.id === commandId,
     );
 
@@ -136,9 +137,9 @@ describe('ClaudianPlugin', () => {
       lastActivityAt: number;
       [key: string]: unknown;
     }>
-  ): jest.SpyInstance {
+  ): MockInstance {
     const metadataById = new Map(metadata.map(item => [item.id, item]));
-    return jest.spyOn(SessionStorage.prototype, 'load')
+    return vi.spyOn(SessionStorage.prototype, 'load')
       .mockImplementation(async (id) => {
         const item = metadataById.get(id);
         return item
@@ -210,45 +211,45 @@ describe('ClaudianPlugin', () => {
   beforeEach(() => {
     pluginInstances = [];
     // Reset mocks
-    jest.restoreAllMocks();
-    jest.clearAllMocks();
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
 
     mockApp = {
       vault: {
-        on: jest.fn().mockReturnValue({ id: 'vault-event' }),
+        on: vi.fn().mockReturnValue({ id: 'vault-event' }),
         adapter: {
           basePath: '/test/vault',
-          exists: jest.fn().mockResolvedValue(false),
-          read: jest.fn().mockResolvedValue(''),
-          write: jest.fn().mockResolvedValue(undefined),
-          remove: jest.fn().mockResolvedValue(undefined),
-          mkdir: jest.fn().mockResolvedValue(undefined),
-          list: jest.fn().mockResolvedValue({ files: [], folders: [] }),
-          stat: jest.fn().mockResolvedValue(null),
-          rename: jest.fn().mockResolvedValue(undefined),
+          exists: vi.fn().mockResolvedValue(false),
+          read: vi.fn().mockResolvedValue(''),
+          write: vi.fn().mockResolvedValue(undefined),
+          remove: vi.fn().mockResolvedValue(undefined),
+          mkdir: vi.fn().mockResolvedValue(undefined),
+          list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+          stat: vi.fn().mockResolvedValue(null),
+          rename: vi.fn().mockResolvedValue(undefined),
         },
       },
       workspace: {
         layoutReady: true,
-        detachLeavesOfType: jest.fn(),
-        on: jest.fn().mockReturnValue({ id: 'workspace-event' }),
-        offref: jest.fn(),
-        onLayoutReady: jest.fn(),
-        getLeavesOfType: jest.fn().mockReturnValue([]),
-        getMostRecentLeaf: jest.fn().mockReturnValue(null),
-        getActiveViewOfType: jest.fn().mockReturnValue(null),
-        getRightLeaf: jest.fn().mockReturnValue({
-          setViewState: jest.fn().mockResolvedValue(undefined),
+        detachLeavesOfType: vi.fn(),
+        on: vi.fn().mockReturnValue({ id: 'workspace-event' }),
+        offref: vi.fn(),
+        onLayoutReady: vi.fn(),
+        getLeavesOfType: vi.fn().mockReturnValue([]),
+        getMostRecentLeaf: vi.fn().mockReturnValue(null),
+        getActiveViewOfType: vi.fn().mockReturnValue(null),
+        getRightLeaf: vi.fn().mockReturnValue({
+          setViewState: vi.fn().mockResolvedValue(undefined),
         }),
-        getLeftLeaf: jest.fn().mockReturnValue({
-          setViewState: jest.fn().mockResolvedValue(undefined),
+        getLeftLeaf: vi.fn().mockReturnValue({
+          setViewState: vi.fn().mockResolvedValue(undefined),
         }),
-        getLeaf: jest.fn().mockReturnValue({
-          setViewState: jest.fn().mockResolvedValue(undefined),
+        getLeaf: vi.fn().mockReturnValue({
+          setViewState: vi.fn().mockResolvedValue(undefined),
         }),
-        setActiveLeaf: jest.fn(),
-        revealLeaf: jest.fn(),
-        trigger: jest.fn(),
+        setActiveLeaf: vi.fn(),
+        revealLeaf: vi.fn(),
+        trigger: vi.fn(),
       },
     };
 
@@ -260,18 +261,18 @@ describe('ClaudianPlugin', () => {
 
     // Create plugin instance with mocked app
     plugin = createPlugin();
-    (plugin.loadData as jest.Mock).mockResolvedValue({});
+    (plugin.loadData as Mock).mockResolvedValue({});
   });
 
   it('publishes committed presentation settings to every view after persistence', async () => {
     await plugin.onload();
     const views = createPublishedViews();
-    const viewsSpy = jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue(views as never);
-    const zenReconcile = jest.spyOn(ZenModeController.prototype, 'reconcile');
+    const viewsSpy = vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue(views as never);
+    const zenReconcile = vi.spyOn(ZenModeController.prototype, 'reconcile');
     let finish!: () => void;
     let started!: () => void;
     const writing = new Promise<void>(resolve => { started = resolve; });
-    const persist = jest.spyOn(storageOf(plugin), 'saveClaudianSettings').mockImplementationOnce(async () => {
+    const persist = vi.spyOn(storageOf(plugin), 'saveClaudianSettings').mockImplementationOnce(async () => {
       started();
       await new Promise<void>(resolve => { finish = resolve; });
     });
@@ -316,9 +317,9 @@ describe('ClaudianPlugin', () => {
 
   function createPublishedViews() {
     return [0, 1].map(() => ({
-      refreshMessageTimestamps: jest.fn(), refreshDualPaneLayout: jest.fn(),
-      updateHiddenCommands: jest.fn(), refreshModelSelector: jest.fn(),
-      notifyConversationListChanged: jest.fn(),
+      refreshMessageTimestamps: vi.fn(), refreshDualPaneLayout: vi.fn(),
+      updateHiddenCommands: vi.fn(), refreshModelSelector: vi.fn(),
+      notifyConversationListChanged: vi.fn(),
     }));
   }
 
@@ -328,8 +329,8 @@ describe('ClaudianPlugin', () => {
   ])('refreshes every view\'s session list when only session %s changes', async (_name, mutation) => {
     await plugin.onload();
     const views = createPublishedViews();
-    const viewsSpy = jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue(views as never);
-    const persist = jest.spyOn(storageOf(plugin), 'saveClaudianSettings').mockResolvedValueOnce(undefined);
+    const viewsSpy = vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue(views as never);
+    const persist = vi.spyOn(storageOf(plugin), 'saveClaudianSettings').mockResolvedValueOnce(undefined);
     try {
       await chatHostOf(plugin).mutateSettings(mutation);
       for (const view of views) {
@@ -439,7 +440,7 @@ describe('ClaudianPlugin', () => {
     it('should register the view', async () => {
       await plugin.onload();
 
-      expect((plugin.registerView as jest.Mock)).toHaveBeenCalledWith(
+      expect((plugin.registerView as Mock)).toHaveBeenCalledWith(
         VIEW_TYPE_CLAUDIAN,
         expect.any(Function)
       );
@@ -472,15 +473,15 @@ describe('ClaudianPlugin', () => {
         createdAt: 1,
         lastActivityAt: 2,
       };
-      const listSpy = jest.spyOn(SessionStorage.prototype, 'scan')
+      const listSpy = vi.spyOn(SessionStorage.prototype, 'scan')
         .mockReturnValue(historyScan);
-      const loadSourceSpy = jest.spyOn(SessionStorage.prototype, 'load')
+      const loadSourceSpy = vi.spyOn(SessionStorage.prototype, 'load')
         .mockResolvedValue({
           metadata: restoredMetadata,
           needsMigration: false,
           source: 'device',
         });
-      (plugin.loadData as jest.Mock).mockResolvedValue({
+      (plugin.loadData as Mock).mockResolvedValue({
         tabManagerState: {
           openTabs: [{ tabId: 'tab-1', conversationId: restoredMetadata.id }],
           activeTabId: 'tab-1',
@@ -533,10 +534,10 @@ describe('ClaudianPlugin', () => {
         createdAt: 1,
         lastActivityAt: 2,
       };
-      mockApp.workspace.onLayoutReady = jest.fn((callback: () => void) => {
+      mockApp.workspace.onLayoutReady = vi.fn((callback: () => void) => {
         layoutCallbacks.push(callback);
       });
-      const listSpy = jest.spyOn(SessionStorage.prototype, 'scan')
+      const listSpy = vi.spyOn(SessionStorage.prototype, 'scan')
         .mockResolvedValue({
           records: deviceMetadataRecords(backgroundMetadata),
           complete: true,
@@ -563,10 +564,10 @@ describe('ClaudianPlugin', () => {
 
     it('does not start the background metadata scan when unloaded before the scheduled load runs', async () => {
       const layoutCallbacks: Array<() => void> = [];
-      mockApp.workspace.onLayoutReady = jest.fn((callback: () => void) => {
+      mockApp.workspace.onLayoutReady = vi.fn((callback: () => void) => {
         layoutCallbacks.push(callback);
       });
-      const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan')
+      const scanSpy = vi.spyOn(SessionStorage.prototype, 'scan')
         .mockResolvedValue({ records: [], complete: true, invalidMetadataCount: 0 });
 
       await plugin.onload();
@@ -589,7 +590,7 @@ describe('ClaudianPlugin', () => {
         selectedModel: 'claude-code/retired-model',
       };
       await plugin.onload();
-      const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan')
+      const scanSpy = vi.spyOn(SessionStorage.prototype, 'scan')
         .mockImplementation(async (options) => {
           options?.onBatch?.(deviceMetadataRecords(deferredMetadata));
           return {
@@ -599,11 +600,11 @@ describe('ClaudianPlugin', () => {
           };
         });
       const loadSourceSpy = mockMetadataSources(deferredMetadata);
-      const notifyConversationListChanged = jest.fn();
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
+      const notifyConversationListChanged = vi.fn();
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
         notifyConversationListChanged,
       } as any]);
-      const saveSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata');
+      const saveSpy = vi.spyOn(getConversationPersistence(plugin), 'saveMetadata');
       await (plugin as any).sessionMetadata.loadRemaining();
       expect(chatHostOf(plugin).getCachedConversation(deferredMetadata.id)?.selectedModel).toBe('claude-code/retired-model');
       expect(saveSpy).not.toHaveBeenCalled();
@@ -615,14 +616,14 @@ describe('ClaudianPlugin', () => {
 
     it('recovers missing model metadata after the background session scan', async () => {
       await plugin.onload();
-      const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan')
+      const scanSpy = vi.spyOn(SessionStorage.prototype, 'scan')
         .mockResolvedValue({
           records: [],
           complete: true,
           invalidMetadataCount: 0,
         });
       const repository = repositoryOf(plugin);
-      const recoverySpy = jest.spyOn(repository, 'recoverMissingSelectedModels')
+      const recoverySpy = vi.spyOn(repository, 'recoverMissingSelectedModels')
         .mockResolvedValue([]);
 
       await (plugin as any).sessionMetadata.loadRemaining();
@@ -652,15 +653,15 @@ describe('ClaudianPlugin', () => {
         sessionId: 'deferred-session-id',
         providerState: { providerSessionId: 'deferred-provider-session-id' },
       };
-      (plugin.loadData as jest.Mock).mockResolvedValue({
+      (plugin.loadData as Mock).mockResolvedValue({
         tabManagerState: {
           openTabs: [{ tabId: 'tab-1', conversationId: restoredMetadata.id }],
           activeTabId: 'tab-1',
         },
       });
-      const loadSpy = jest.spyOn(SessionStorage.prototype, 'loadMetadata')
+      const loadSpy = vi.spyOn(SessionStorage.prototype, 'loadMetadata')
         .mockResolvedValue(restoredMetadata);
-      const listSpy = jest.spyOn(SessionStorage.prototype, 'scan')
+      const listSpy = vi.spyOn(SessionStorage.prototype, 'scan')
         .mockImplementation(async (options) => {
           options?.onBatch?.(deviceMetadataRecords(restoredMetadata, deferredMetadata));
           return {
@@ -676,7 +677,7 @@ describe('ClaudianPlugin', () => {
       // kiro's reconciler already declares `environmentSessionPolicy: 'reload'`,
       // so an environment change reloads sessions instead of invalidating them.
       const kiroReconciler = ProviderRegistry.getSettingsReconciler('kiro');
-      const reconcileSpy = jest.spyOn(kiroReconciler, 'reconcileModelWithEnvironment')
+      const reconcileSpy = vi.spyOn(kiroReconciler, 'reconcileModelWithEnvironment')
         .mockReturnValue({ changed: true, sessionPolicy: 'reload' });
 
       try {
@@ -718,7 +719,7 @@ describe('ClaudianPlugin', () => {
       };
 
       await plugin.onload();
-      const listSpy = jest.spyOn(SessionStorage.prototype, 'scan').mockImplementation(async (options) => {
+      const listSpy = vi.spyOn(SessionStorage.prototype, 'scan').mockImplementation(async (options) => {
         options?.onBatch?.(deviceMetadataRecords(backgroundMetadata));
         markBatchPublished();
         await scanRelease;
@@ -728,11 +729,11 @@ describe('ClaudianPlugin', () => {
           invalidMetadataCount: 0,
         };
       });
-      const invalidateSpy = jest.spyOn(
+      const invalidateSpy = vi.spyOn(
         ProviderSettingsCoordinator,
         'invalidateConversationSessions',
       ).mockImplementation((conversations) => [...conversations]);
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata');
+      const saveMetadataSpy = vi.spyOn(getConversationPersistence(plugin), 'saveMetadata');
 
       const load = (plugin as any).sessionMetadata.loadRemaining();
       await batchPublished;
@@ -761,7 +762,7 @@ describe('ClaudianPlugin', () => {
       };
 
       await plugin.onload();
-      const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan')
+      const scanSpy = vi.spyOn(SessionStorage.prototype, 'scan')
         .mockImplementation(async (options) => {
           options?.onBatch?.(deviceMetadataRecords(tombstonedMetadata));
           return {
@@ -770,7 +771,7 @@ describe('ClaudianPlugin', () => {
             invalidMetadataCount: 0,
           };
         });
-      const loadSpy = jest.spyOn(SessionStorage.prototype, 'load')
+      const loadSpy = vi.spyOn(SessionStorage.prototype, 'load')
         .mockResolvedValue(null);
 
       await (plugin as any).sessionMetadata.loadRemaining();
@@ -796,7 +797,7 @@ describe('ClaudianPlugin', () => {
         tombstonedMetadata,
       );
       repositoryOf(plugin).mergeMetadataConversations([shell]);
-      const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan')
+      const scanSpy = vi.spyOn(SessionStorage.prototype, 'scan')
         .mockImplementation(async (options) => {
           options?.onBatch?.(deviceMetadataRecords(tombstonedMetadata));
           return {
@@ -805,7 +806,7 @@ describe('ClaudianPlugin', () => {
             invalidMetadataCount: 0,
           };
         });
-      const loadSpy = jest.spyOn(SessionStorage.prototype, 'load')
+      const loadSpy = vi.spyOn(SessionStorage.prototype, 'load')
         .mockResolvedValue(null);
 
       await (plugin as any).sessionMetadata.loadRemaining();
@@ -827,7 +828,7 @@ describe('ClaudianPlugin', () => {
 
     it('disposes the application execution lifecycle registry', async () => {
       await plugin.onload();
-      const disposeSpy = jest.spyOn(
+      const disposeSpy = vi.spyOn(
         plugin.executionLifecycleRegistry,
         'dispose',
       );
@@ -844,18 +845,18 @@ describe('ClaudianPlugin', () => {
       const viewDrain = new Promise<void>((resolve) => {
         resolveViewDrain = resolve;
       });
-      const prepareForPluginUnload = jest.fn(() => viewDrain);
+      const prepareForPluginUnload = vi.fn(() => viewDrain);
       mockApp.workspace.getLeavesOfType.mockImplementation((type: string) => type === VIEW_TYPE_CLAUDIAN ? [{
         view: {
           prepareForPluginUnload,
-          getTabManager: jest.fn(),
+          getTabManager: vi.fn(),
         },
       }] : []);
-      const disposeExecution = jest.spyOn(
+      const disposeExecution = vi.spyOn(
         plugin.executionLifecycleRegistry,
         'dispose',
       ).mockResolvedValue(undefined);
-      const disposeWorkspaces = jest.spyOn(
+      const disposeWorkspaces = vi.spyOn(
         ProviderWorkspaceRegistry,
         'disposeInitialized',
       ).mockResolvedValue(undefined);
@@ -880,11 +881,11 @@ describe('ClaudianPlugin', () => {
 
   describe('activateView', () => {
     it('should reveal existing leaf if view already exists', async () => {
-      const focusActiveInput = jest.fn();
+      const focusActiveInput = vi.fn();
       const mockLeaf = {
         id: 'existing-leaf',
         view: {
-          getTabManager: jest.fn(),
+          getTabManager: vi.fn(),
           focusActiveInput,
         },
       };
@@ -898,11 +899,11 @@ describe('ClaudianPlugin', () => {
     });
 
     it('focuses a newly revealed right-sidebar chat even when the root editor stays most recent', async () => {
-      const focusActiveInput = jest.fn();
+      const focusActiveInput = vi.fn();
       const mockRightLeaf = {
-        setViewState: jest.fn().mockResolvedValue(undefined),
+        setViewState: vi.fn().mockResolvedValue(undefined),
         view: {
-          getTabManager: jest.fn(),
+          getTabManager: vi.fn(),
           focusActiveInput,
         },
       };
@@ -927,13 +928,13 @@ describe('ClaudianPlugin', () => {
 
     it('does not reclaim focus when another leaf activates during cold view setup', async () => {
       let resolveViewSetup!: () => void;
-      const focusActiveInput = jest.fn();
+      const focusActiveInput = vi.fn();
       const mockRightLeaf = {
-        setViewState: jest.fn().mockImplementation(() => new Promise<void>((resolve) => {
+        setViewState: vi.fn().mockImplementation(() => new Promise<void>((resolve) => {
           resolveViewSetup = resolve;
         })),
         view: {
-          getTabManager: jest.fn(),
+          getTabManager: vi.fn(),
           focusActiveInput,
         },
       };
@@ -947,7 +948,7 @@ describe('ClaudianPlugin', () => {
         }
         return eventRef;
       });
-      mockApp.workspace.offref = jest.fn((eventRef: object) => {
+      mockApp.workspace.offref = vi.fn((eventRef: object) => {
         activeLeafListeners.delete(eventRef);
       });
 
@@ -966,7 +967,7 @@ describe('ClaudianPlugin', () => {
 
     it('should create new leaf in left sidebar when chatViewPlacement is left-sidebar', async () => {
       const mockLeftLeaf = {
-        setViewState: jest.fn().mockResolvedValue(undefined),
+        setViewState: vi.fn().mockResolvedValue(undefined),
       };
       mockApp.workspace.getLeavesOfType.mockReturnValue([]);
       mockApp.workspace.getLeftLeaf.mockReturnValue(mockLeftLeaf);
@@ -996,7 +997,7 @@ describe('ClaudianPlugin', () => {
 
     it('should create new leaf in main editor area when chatViewPlacement is main-tab', async () => {
       const mockMainLeaf = {
-        setViewState: jest.fn().mockResolvedValue(undefined),
+        setViewState: vi.fn().mockResolvedValue(undefined),
       };
       mockApp.workspace.getLeavesOfType.mockReturnValue([]);
       mockApp.workspace.getLeaf.mockReturnValue(mockMainLeaf);
@@ -1049,7 +1050,7 @@ describe('ClaudianPlugin', () => {
     it('should use defaults when no saved data', async () => {
       // No settings file exists
       mockApp.vault.adapter.exists.mockResolvedValue(false);
-      (plugin.loadData as jest.Mock).mockResolvedValue(null);
+      (plugin.loadData as Mock).mockResolvedValue(null);
 
       await plugin.onload();
 
@@ -1062,7 +1063,7 @@ describe('ClaudianPlugin', () => {
     it('should use defaults when loadData returns empty object', async () => {
       // No settings file exists
       mockApp.vault.adapter.exists.mockResolvedValue(false);
-      (plugin.loadData as jest.Mock).mockResolvedValue({});
+      (plugin.loadData as Mock).mockResolvedValue({});
 
       await plugin.onload();
 
@@ -1112,11 +1113,11 @@ describe('ClaudianPlugin', () => {
       );
 
       // The written content should include state fields
-      const writeCall = (mockApp.vault.adapter.write as jest.Mock).mock.calls.find(
+      const writeCall = (mockApp.vault.adapter.write as Mock).mock.calls.find(
         ([path]) => path === '.claudian/claudian-settings.json'
       );
       expect(writeCall).toBeDefined();
-      const content = JSON.parse(writeCall[1]);
+      const content = JSON.parse(writeCall![1]);
       expect(content).not.toHaveProperty('activeConversationId');
       expect(content).toHaveProperty('providerConfigs.kiro.environmentHash');
       expect(content).not.toHaveProperty('enableBlocklist');
@@ -1131,12 +1132,12 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
       const events: string[] = [];
       const repository = repositoryOf(plugin);
-      jest.spyOn(repository, 'reconcileSelectedModels').mockImplementation(async () => {
+      vi.spyOn(repository, 'reconcileSelectedModels').mockImplementation(async () => {
         events.push('reconcile');
         return [];
       });
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
-        refreshModelSelector: jest.fn(() => events.push('refresh')),
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
+        refreshModelSelector: vi.fn(() => events.push('refresh')),
       } as any]);
 
       chatHostOf(plugin).notifyProviderChatOptionsChanged('kiro');
@@ -1148,10 +1149,10 @@ describe('ClaudianPlugin', () => {
     it('does not refresh model selectors when durable reconciliation fails', async () => {
       await plugin.onload();
       const repository = repositoryOf(plugin);
-      jest.spyOn(repository, 'reconcileSelectedModels')
+      vi.spyOn(repository, 'reconcileSelectedModels')
         .mockRejectedValue(new Error('disk full'));
-      const refreshModelSelector = jest.fn();
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
+      const refreshModelSelector = vi.fn();
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
         refreshModelSelector,
       } as any]);
 
@@ -1189,13 +1190,13 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
       const events: string[] = [];
       const repository = repositoryOf(plugin);
-      jest.spyOn(repository, 'reconcileSelectedModels').mockImplementation(async () => {
+      vi.spyOn(repository, 'reconcileSelectedModels').mockImplementation(async () => {
         events.push('reconcile');
         return [];
       });
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
-        invalidateProviderCommandCaches: jest.fn(() => events.push('invalidate')),
-        refreshModelSelector: jest.fn(() => events.push('refresh')),
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
+        invalidateProviderCommandCaches: vi.fn(() => events.push('invalidate')),
+        refreshModelSelector: vi.fn(() => events.push('refresh')),
       } as any]);
 
       await plugin.providerHost.applyEnvironmentVariables(
@@ -1210,8 +1211,8 @@ describe('ClaudianPlugin', () => {
     it('lets an initialized transition owner resolve CLI without reinitializing services', async () => {
       await plugin.onload();
       const cliResolver = {
-        reset: jest.fn(),
-        resolveFromSettings: jest.fn().mockReturnValue('/owned/claude'),
+        reset: vi.fn(),
+        resolveFromSettings: vi.fn().mockReturnValue('/owned/claude'),
       };
       ProviderWorkspaceRegistry.setServices('kiro', { cliResolver });
 
@@ -1227,10 +1228,10 @@ describe('ClaudianPlugin', () => {
     it('does not initialize a cold provider for transition-owner CLI resolution', async () => {
       await plugin.onload();
       ProviderWorkspaceRegistry.setServices('kiro', undefined);
-      const initialize = jest.fn(async () => ({
+      const initialize = vi.fn(async () => ({
         cliResolver: {
-          reset: jest.fn(),
-          resolveFromSettings: jest.fn().mockReturnValue('/cold/claude'),
+          reset: vi.fn(),
+          resolveFromSettings: vi.fn().mockReturnValue('/cold/claude'),
         },
       }));
       ProviderWorkspaceRegistry.register('kiro', { initialize });
@@ -1253,22 +1254,22 @@ describe('ClaudianPlugin', () => {
     it('recovers the committed environment before surfacing a post-commit publication failure', async () => {
       await plugin.onload();
       const publicationError = new Error('post-commit publication failed');
-      const invalidateSpy = jest.spyOn(
+      const invalidateSpy = vi.spyOn(
         repositoryOf(plugin),
         'invalidateProviderSessions',
       ).mockImplementationOnce(() => {
         throw publicationError;
       });
-      const markStale = jest.fn();
+      const markStale = vi.fn();
       const unregister = plugin.executionLifecycleRegistry.registerTransitionHook('kiro', {
         beforeTransition: () => markStale(),
       });
       ProviderWorkspaceRegistry.setServices('kiro', {
         modelCatalog: { markStale } as any,
       });
-      const invalidateProviderCommandCaches = jest.fn();
-      const refreshModelSelector = jest.fn();
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
+      const invalidateProviderCommandCaches = vi.fn();
+      const refreshModelSelector = vi.fn();
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
         invalidateProviderCommandCaches,
         refreshModelSelector,
       } as any]);
@@ -1326,11 +1327,11 @@ describe('ClaudianPlugin', () => {
         .getProviderGeneration('kiro');
 
       const mockView = {
-        getTabManager: jest.fn(),
-        invalidateProviderCommandCaches: jest.fn(),
-        refreshModelSelector: jest.fn(),
+        getTabManager: vi.fn(),
+        invalidateProviderCommandCaches: vi.fn(),
+        refreshModelSelector: vi.fn(),
       };
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([mockView as any]);
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([mockView as any]);
 
       // Change env but not in a way that affects model
       await plugin.providerHost.applyEnvironmentVariables('shared', 'SOME_VAR=value');
@@ -1344,19 +1345,19 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
 
       const createView = () => {
-        const getTabManager = jest.fn();
+        const getTabManager = vi.fn();
         return {
           getTabManager,
           view: {
             getTabManager,
-            invalidateProviderCommandCaches: jest.fn(),
-            refreshModelSelector: jest.fn(),
+            invalidateProviderCommandCaches: vi.fn(),
+            refreshModelSelector: vi.fn(),
           },
         };
       };
       const first = createView();
       const second = createView();
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([
         first.view as any,
         second.view as any,
       ]);
@@ -1373,11 +1374,11 @@ describe('ClaudianPlugin', () => {
         .getProviderGeneration('kiro');
 
       const mockView = {
-        getTabManager: jest.fn(),
-        invalidateProviderCommandCaches: jest.fn(),
-        refreshModelSelector: jest.fn(),
+        getTabManager: vi.fn(),
+        invalidateProviderCommandCaches: vi.fn(),
+        refreshModelSelector: vi.fn(),
       };
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([mockView as any]);
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([mockView as any]);
 
       await plugin.providerHost.applyEnvironmentVariables(
         'provider:kiro',
@@ -1395,11 +1396,11 @@ describe('ClaudianPlugin', () => {
       const initialGeneration = plugin.executionLifecycleRegistry
         .getProviderGeneration('kiro');
       const mockView = {
-        getTabManager: jest.fn(),
-        invalidateProviderCommandCaches: jest.fn(),
-        refreshModelSelector: jest.fn(),
+        getTabManager: vi.fn(),
+        invalidateProviderCommandCaches: vi.fn(),
+        refreshModelSelector: vi.fn(),
       };
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([mockView as any]);
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([mockView as any]);
 
       await plugin.providerHost.applyEnvironmentVariables(
         'provider:kiro',
@@ -1457,7 +1458,7 @@ describe('ClaudianPlugin', () => {
         'Open Kirodian',
         expect.any(Function),
       );
-      const ribbonCallback = (plugin.addRibbonIcon as jest.Mock).mock.calls[0][2];
+      const ribbonCallback = (plugin.addRibbonIcon as Mock).mock.calls[0][2];
       await ribbonCallback();
 
       expect(mockApp.workspace.revealLeaf).toHaveBeenCalledWith(mockLeaf);
@@ -1499,8 +1500,8 @@ describe('ClaudianPlugin', () => {
         const manager = {
           getActiveTab: () => ({ state: { isStreaming: false } }),
           getActiveTabId: () => id,
-          closeTab: jest.fn().mockResolvedValue(undefined),
-          createNewConversation: jest.fn().mockResolvedValue(undefined),
+          closeTab: vi.fn().mockResolvedValue(undefined),
+          createNewConversation: vi.fn().mockResolvedValue(undefined),
         };
         return {
           getTabManager: () => manager,
@@ -1526,9 +1527,9 @@ describe('ClaudianPlugin', () => {
     it('delegates New to the focused view layout', async () => {
       await plugin.onload();
 
-      const startNewConversation = jest.fn().mockResolvedValue(undefined);
-      jest.spyOn(viewsOf(plugin), 'getView').mockReturnValue({
-        getTabManager: jest.fn().mockReturnValue({}),
+      const startNewConversation = vi.fn().mockResolvedValue(undefined);
+      vi.spyOn(viewsOf(plugin), 'getView').mockReturnValue({
+        getTabManager: vi.fn().mockReturnValue({}),
         startNewConversation,
       } as any);
 
@@ -1543,10 +1544,10 @@ describe('ClaudianPlugin', () => {
     it('keeps replace and close tab commands out of dual mode', async () => {
       await plugin.onload();
 
-      jest.spyOn(viewsOf(plugin), 'getView').mockReturnValue({
+      vi.spyOn(viewsOf(plugin), 'getView').mockReturnValue({
         getCompactTabManager: () => null,
-        getTabManager: jest.fn().mockReturnValue({
-          getActiveTab: jest.fn().mockReturnValue({ state: { isStreaming: false } }),
+        getTabManager: vi.fn().mockReturnValue({
+          getActiveTab: vi.fn().mockReturnValue({ state: { isStreaming: false } }),
         }),
       } as any);
 
@@ -1560,18 +1561,18 @@ describe('ClaudianPlugin', () => {
     it('opens the view without creating a duplicate tab when no tab layout is persisted', async () => {
       await plugin.onload();
 
-      const createNewTab = jest.fn().mockResolvedValue(undefined);
-      const focusActiveInput = jest.fn();
+      const createNewTab = vi.fn().mockResolvedValue(undefined);
+      const focusActiveInput = vi.fn();
       const mockView = {
         createNewTab,
         focusActiveInput,
       };
 
       let viewOpened = false;
-      jest.spyOn(viewsOf(plugin), 'activateView').mockImplementation(async () => {
+      vi.spyOn(viewsOf(plugin), 'activateView').mockImplementation(async () => {
         viewOpened = true;
       });
-      jest.spyOn(viewsOf(plugin), 'getView').mockImplementation(() => (
+      vi.spyOn(viewsOf(plugin), 'getView').mockImplementation(() => (
         viewOpened ? mockView as any : null
       ));
 
@@ -1588,7 +1589,7 @@ describe('ClaudianPlugin', () => {
     });
 
     it('starts from the fresh runtime tab after reopening a persisted layout', async () => {
-      (plugin.loadData as jest.Mock).mockResolvedValue({
+      (plugin.loadData as Mock).mockResolvedValue({
         tabManagerState: {
           openTabs: [
             { tabId: 'tab-1', conversationId: null },
@@ -1599,18 +1600,18 @@ describe('ClaudianPlugin', () => {
 
       await plugin.onload();
 
-      const createNewTab = jest.fn().mockResolvedValue(undefined);
-      const focusActiveInput = jest.fn();
+      const createNewTab = vi.fn().mockResolvedValue(undefined);
+      const focusActiveInput = vi.fn();
       const mockView = {
         createNewTab,
         focusActiveInput,
       };
 
       let viewOpened = false;
-      jest.spyOn(viewsOf(plugin), 'activateView').mockImplementation(async () => {
+      vi.spyOn(viewsOf(plugin), 'activateView').mockImplementation(async () => {
         viewOpened = true;
       });
-      jest.spyOn(viewsOf(plugin), 'getView').mockImplementation(() => (
+      vi.spyOn(viewsOf(plugin), 'getView').mockImplementation(() => (
         viewOpened ? mockView as any : null
       ));
 
@@ -1630,12 +1631,12 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
 
       const mockView = {
-        getTabManager: jest.fn().mockReturnValue({
-          canCreateTab: jest.fn().mockReturnValue(false),
+        getTabManager: vi.fn().mockReturnValue({
+          canCreateTab: vi.fn().mockReturnValue(false),
         }),
       };
 
-      jest.spyOn(viewsOf(plugin), 'getView').mockReturnValue(mockView as any);
+      vi.spyOn(viewsOf(plugin), 'getView').mockReturnValue(mockView as any);
 
       const command = getRegisteredCommand('new-tab');
 
@@ -1656,7 +1657,7 @@ describe('ClaudianPlugin', () => {
     });
 
     it('ignores the persisted runtime layout when checking new-tab availability', async () => {
-      (plugin.loadData as jest.Mock).mockResolvedValue({
+      (plugin.loadData as Mock).mockResolvedValue({
         tabManagerState: {
           openTabs: [
             { tabId: 'tab-1', conversationId: null },
@@ -1669,7 +1670,7 @@ describe('ClaudianPlugin', () => {
 
       await plugin.onload();
 
-      jest.spyOn(viewsOf(plugin), 'getView').mockReturnValue(null);
+      vi.spyOn(viewsOf(plugin), 'getView').mockReturnValue(null);
 
       const command = getRegisteredCommand('new-tab');
 
@@ -1717,7 +1718,7 @@ describe('ClaudianPlugin', () => {
         percentage: 1,
       };
       repositoryOf(plugin).replaceAll([conv]);
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata');
+      const saveMetadataSpy = vi.spyOn(getConversationPersistence(plugin), 'saveMetadata');
       saveMetadataSpy.mockClear();
 
       const fetched = await chatHostOf(plugin).getConversationById(conv.id);
@@ -1734,7 +1735,7 @@ describe('ClaudianPlugin', () => {
       const conv = await chatHostOf(plugin).createConversation();
       delete (conv as { selectedModel?: string }).selectedModel;
       repositoryOf(plugin).replaceAll([conv]);
-      const saveMetadataSpy = jest.spyOn(getConversationPersistence(plugin), 'saveMetadata');
+      const saveMetadataSpy = vi.spyOn(getConversationPersistence(plugin), 'saveMetadata');
       saveMetadataSpy.mockClear();
 
       const fetched = await chatHostOf(plugin).getConversationById(conv.id);
@@ -1807,9 +1808,9 @@ describe('ClaudianPlugin', () => {
     it('resets each view through its tab owner when deleting a conversation', async () => {
       await plugin.onload();
       const conv = await chatHostOf(plugin).createConversation();
-      const resetConversationTabs = jest.fn().mockResolvedValue(undefined);
+      const resetConversationTabs = vi.fn().mockResolvedValue(undefined);
       mockApp.workspace.getLeavesOfType.mockReturnValue([{
-        view: { notifyConversationListChanged: jest.fn(), getTabManager: () => ({ resetConversationTabs }) },
+        view: { notifyConversationListChanged: vi.fn(), getTabManager: () => ({ resetConversationTabs }) },
       }]);
       await chatHostOf(plugin).deleteConversation(conv.id);
       expect(resetConversationTabs).toHaveBeenCalledWith(conv.id);
@@ -1818,10 +1819,10 @@ describe('ClaudianPlugin', () => {
     it('attempts every view and retries failed deletion associations', async () => {
       await plugin.onload();
       const conv = await chatHostOf(plugin).createConversation();
-      const first = jest.fn().mockRejectedValueOnce(new Error('first tab failed')).mockResolvedValue(undefined);
-      const second = jest.fn().mockResolvedValue(undefined);
+      const first = vi.fn().mockRejectedValueOnce(new Error('first tab failed')).mockResolvedValue(undefined);
+      const second = vi.fn().mockResolvedValue(undefined);
       mockApp.workspace.getLeavesOfType.mockReturnValue([first, second].map(resetConversationTabs => ({
-        view: { notifyConversationListChanged: jest.fn(), getTabManager: () => ({ resetConversationTabs }) },
+        view: { notifyConversationListChanged: vi.fn(), getTabManager: () => ({ resetConversationTabs }) },
       })));
       await expect(chatHostOf(plugin).deleteConversation(conv.id)).rejects.toThrow('first tab failed');
       expect(first).toHaveBeenCalledTimes(1);
@@ -1879,14 +1880,14 @@ describe('ClaudianPlugin', () => {
     it('notifies every open view after conversation list mutations', async () => {
       await plugin.onload();
       const firstView = {
-        getTabManager: jest.fn().mockReturnValue(null),
-        notifyConversationListChanged: jest.fn(),
+        getTabManager: vi.fn().mockReturnValue(null),
+        notifyConversationListChanged: vi.fn(),
       };
       const secondView = {
-        getTabManager: jest.fn().mockReturnValue(null),
-        notifyConversationListChanged: jest.fn(),
+        getTabManager: vi.fn().mockReturnValue(null),
+        notifyConversationListChanged: vi.fn(),
       };
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([
         firstView as any,
         secondView as any,
       ]);
@@ -1909,16 +1910,16 @@ describe('ClaudianPlugin', () => {
     it('keeps a committed Conversation when an open view projection fails', async () => {
       await plugin.onload();
       const healthyView = {
-        getTabManager: jest.fn().mockReturnValue(null),
-        notifyConversationListChanged: jest.fn(),
+        getTabManager: vi.fn().mockReturnValue(null),
+        notifyConversationListChanged: vi.fn(),
       };
       const failingView = {
-        getTabManager: jest.fn().mockReturnValue(null),
-        notifyConversationListChanged: jest.fn(() => {
+        getTabManager: vi.fn().mockReturnValue(null),
+        notifyConversationListChanged: vi.fn(() => {
           throw new Error('detached view');
         }),
       };
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([
         failingView as any,
         healthyView as any,
       ]);
@@ -1941,7 +1942,7 @@ describe('ClaudianPlugin', () => {
     // archive with no native-archive provider stays local and initializes nothing.
     it('does not initialize providers without native session archive', async () => {
       await plugin.onload();
-      const ensureInitialized = jest.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized');
+      const ensureInitialized = vi.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized');
       const conversation = await chatHostOf(plugin).createConversation({ providerId: 'kiro', sessionId: 'session-1' });
       ensureInitialized.mockClear();
 
@@ -1954,7 +1955,7 @@ describe('ClaudianPlugin', () => {
 
   describe('Linked content path events', () => {
     async function detachedLinkedContentSession() {
-      mockApp.vault.getAbstractFileByPath = jest.fn().mockReturnValue(null);
+      mockApp.vault.getAbstractFileByPath = vi.fn().mockReturnValue(null);
       const host = chatHostOf();
       const conversation = await host.createConversation({ linkedContentPath: 'Projects/Old/Plan.md' });
       const { attachment } = host.sessionRuntimes.acquire({ conversationId: conversation.id, providerId: conversation.providerId, draftModel: null }, { reveal: () => undefined });
@@ -1963,9 +1964,9 @@ describe('ClaudianPlugin', () => {
       void attachment.runtime.turns.run(signal => new Promise<void>(resolve => signal.addEventListener('abort', () => resolve())));
       host.sessionRuntimes.release(attachment);
       const linked = model.linkedContentController;
-      jest.spyOn(linked, 'handleCreated');
-      jest.spyOn(linked, 'handleDeleted');
-      jest.spyOn(linked, 'handleRenamed');
+      vi.spyOn(linked, 'handleCreated');
+      vi.spyOn(linked, 'handleDeleted');
+      vi.spyOn(linked, 'handleRenamed');
       return linked;
     }
 
@@ -1973,8 +1974,8 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
       const linked = await detachedLinkedContentSession();
       const second = await detachedLinkedContentSession();
-      const view = { notifyConversationListChanged: jest.fn() };
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([view as any]);
+      const view = { notifyConversationListChanged: vi.fn() };
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([view as any]);
       const listener = mockApp.vault.on.mock.calls.find((call: unknown[]) => call[0] === 'create')![1];
       for (let index = 0; index < 20; index++) listener(new (TFile as any)(`note-${index}.md`));
       expect(linked.handleCreated).toHaveBeenCalledTimes(20);
@@ -2048,9 +2049,9 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
       const linked = await detachedLinkedContentSession();
       const view = {
-        notifyConversationListChanged: jest.fn(),
+        notifyConversationListChanged: vi.fn(),
       };
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([view as any]);
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([view as any]);
 
       await (plugin as any).vaultContentEvents.handleDelete(
         new (TFile as any)('Notes/Unpinned.md'),
@@ -2077,9 +2078,9 @@ describe('ClaudianPlugin', () => {
     it('refreshes a committed rename even when pinned-settings cleanup fails', async () => {
       await plugin.onload();
       const conversation = await chatHostOf(plugin).createConversation({ linkedContentPath: 'Notes/Old.md' });
-      const view = { handleLinkedContentRenamed: jest.fn(), notifyConversationListChanged: jest.fn() };
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([view as any]);
-      jest.spyOn(PinnedLinkedContentPathCoordinator.prototype, 'rewritePaths')
+      const view = { handleLinkedContentRenamed: vi.fn(), notifyConversationListChanged: vi.fn() };
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([view as any]);
+      vi.spyOn(PinnedLinkedContentPathCoordinator.prototype, 'rewritePaths')
         .mockRejectedValueOnce(new Error('settings unavailable'));
       await expect((plugin as any).vaultContentEvents.handleRename(new (TFile as any)('Notes/New.md'), 'Notes/Old.md'))
         .rejects.toThrow('settings unavailable');
@@ -2092,10 +2093,10 @@ describe('ClaudianPlugin', () => {
       await plugin.onload();
       const linked = await detachedLinkedContentSession();
       const view = {
-        notifyConversationListChanged: jest.fn(),
+        notifyConversationListChanged: vi.fn(),
       };
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([view as any]);
-      jest.spyOn(PinnedLinkedContentPathCoordinator.prototype, 'removePaths')
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([view as any]);
+      vi.spyOn(PinnedLinkedContentPathCoordinator.prototype, 'removePaths')
         .mockRejectedValueOnce(new Error('settings unavailable'));
 
       await expect((plugin as any).vaultContentEvents.handleDelete(
@@ -2114,8 +2115,8 @@ describe('ClaudianPlugin', () => {
   describe('updateConversation', () => {
     it('keeps Linked content creation-only and routes Vault renames explicitly', async () => {
       await plugin.onload();
-      const notifyConversationListChanged = jest.fn();
-      jest.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
+      const notifyConversationListChanged = vi.fn();
+      vi.spyOn(viewsOf(plugin), 'getAllViews').mockReturnValue([{
         notifyConversationListChanged,
       } as any]);
 
@@ -2247,14 +2248,14 @@ describe('ClaudianPlugin', () => {
         createdAt: timestamp,
         lastActivityAt: timestamp,
       };
-      const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan').mockImplementation(async (options) => {
+      const scanSpy = vi.spyOn(SessionStorage.prototype, 'scan').mockImplementation(async (options) => {
         options?.onBatch?.(deviceMetadataRecords(saved));
         return { records: deviceMetadataRecords(saved), complete: true, invalidMetadataCount: 0 };
       });
       const loadSpy = mockMetadataSources(saved);
 
       // data.json is minimal (no state - already migrated)
-      (plugin.loadData as jest.Mock).mockResolvedValue({});
+      (plugin.loadData as Mock).mockResolvedValue({});
 
       await plugin.onload();
 
@@ -2272,7 +2273,7 @@ describe('ClaudianPlugin', () => {
       mockApp.vault.adapter.exists.mockResolvedValue(false);
       mockApp.vault.adapter.list.mockResolvedValue({ files: [], folders: [] });
 
-      (plugin.loadData as jest.Mock).mockResolvedValue({
+      (plugin.loadData as Mock).mockResolvedValue({
         activeConversationId: 'non-existent',
         migrationVersion: 2,
       });
@@ -2295,7 +2296,7 @@ describe('ClaudianPlugin', () => {
 
     async function loadAllSessions(settings: Record<string, unknown>): Promise<Map<string, string>> {
       const files = installVaultFiles({ '.claudian/claudian-settings.json': JSON.stringify(settings) });
-      jest.spyOn(SessionStorage.prototype, 'scan').mockImplementation(async (options) => {
+      vi.spyOn(SessionStorage.prototype, 'scan').mockImplementation(async (options) => {
         options?.onBatch?.(deviceMetadataRecords(...sessions));
         return { records: deviceMetadataRecords(...sessions), complete: true, invalidMetadataCount: 0 };
       });
@@ -2405,13 +2406,13 @@ describe('ClaudianPlugin', () => {
         },
       };
 
-      const scanSpy = jest.spyOn(SessionStorage.prototype, 'scan').mockImplementation(async (options) => {
+      const scanSpy = vi.spyOn(SessionStorage.prototype, 'scan').mockImplementation(async (options) => {
         options?.onBatch?.(deviceMetadataRecords(saved));
         return { records: deviceMetadataRecords(saved), complete: true, invalidMetadataCount: 0 };
       });
       const loadSpy = mockMetadataSources(saved);
 
-      (plugin.loadData as jest.Mock).mockResolvedValue({});
+      (plugin.loadData as Mock).mockResolvedValue({});
 
       await plugin.onload();
 

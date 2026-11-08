@@ -1,6 +1,7 @@
 import { type Component, Notice } from 'obsidian';
 
 import { getUserDisplayText } from '@/core/prompt/promptContext';
+import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { DEFAULT_CHAT_PROVIDER_ID, type ProviderCapabilities, type ProviderSubagentLifecycleAdapter } from '@/core/providers/types';
 import type { ChatMessage, ImageAttachment, SubagentInfo, ToolCallInfo } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
@@ -27,6 +28,8 @@ import { resolveStoredTaskSubagent } from '@/features/chat/subagents/storedTaskS
 import { resolveSubagentAdapter } from '@/features/chat/subagents/subagentAdapterResolution';
 import { renderSubagentHistory } from '@/features/chat/subagents/SubagentHistoryRenderer';
 import { renderStoredAsyncSubagent, renderStoredSubagent } from '@/features/chat/subagents/SubagentRenderer';
+import { cancelScheduledAnimationFrame, scheduleAnimationFrame, type ScheduledAnimationFrame } from '@/features/chat/utils/animationFrame';
+import { type ConversationDirectoryEntry, formatConversationDirectoryTitle, getRenderedConversationDirectory } from '@/features/chat/utils/conversationDirectoryTitle';
 import { t } from '@/i18n/i18n';
 import { ImagePreviewModal } from '@/shared/modals/ImagePreviewModal';
 import { registerFileLinkHandler } from '@/utils/fileLink';
@@ -94,6 +97,7 @@ export class MessageRenderer {
   private readonly imagePreviewModal = new ImagePreviewModal();
   private readonly contentRemovalObserver?: MutationObserver;
   #pendingLayoutScroll: ResizeObserver | null = null;
+  #pendingTailScroll: { frame?: ScheduledAnimationFrame; scrollTop: number } | null = null;
   readonly #markdown: MarkdownContentRenderer;
   readonly #actions: MessageActions;
   readonly #finalizer: ResponseFinalizer;
@@ -166,14 +170,15 @@ export class MessageRenderer {
             this.messageEls.delete(id);
             this.#actions.forget(id);
           }
-          this.#markdown.releaseRemoved(el);
         };
         for (const record of records) {
           for (const node of record.removedNodes) {
             if (node.nodeType !== 1) continue;
             const el = node as HTMLElement;
+            if (this.messagesEl.contains(el)) continue;
             releaseRemoved(el);
-            el.querySelectorAll<HTMLElement>('*').forEach(releaseRemoved);
+            el.querySelectorAll<HTMLElement>('[data-message-id]').forEach(releaseRemoved);
+            this.#markdown.releaseRemoved(el);
           }
         }
       });
@@ -183,6 +188,7 @@ export class MessageRenderer {
 
   dispose(): void {
     if (this.#markdown.isDisposed) return;
+    this.#cancelTailScroll();
     this.contentRemovalObserver?.disconnect();
     this.#cancelLayoutScroll();
     this.#markdown.dispose();
@@ -235,7 +241,6 @@ export class MessageRenderer {
     if (msg.role === 'user' && msg.displayContent === '' && !msg.images?.length) {
       return this.messagesEl;
     }
-    this.#actions.retireFullSessionForks();
     if (afterMessageId !== undefined) this.#revealThrough(afterMessageId);
     const previous = this.messagesEl.lastChild;
     let element: HTMLElement;
@@ -311,6 +316,24 @@ export class MessageRenderer {
   revealEarlierMessages(all = false): void {
     const earlier = this.#earlier;
     if (earlier) this.#revealFrom(all ? 0 : findWindowStart(earlier.messages, earlier.start - RENDER_WINDOW));
+  }
+
+  /** Lists the transcript's prompts without materializing the earlier message bodies. */
+  getDirectoryEntries(): ConversationDirectoryEntry[] {
+    const entries: ConversationDirectoryEntry[] = [];
+    const earlier = this.#earlier;
+    if (earlier) {
+      for (let index = 0; index < earlier.start; index += 1) {
+        const message = earlier.messages[index];
+        if (message.role !== 'user' || message.isRebuiltContext || isInterruptMarker(message)) continue;
+        const title = formatConversationDirectoryTitle(getUserDisplayText(message));
+        if (title) entries.push({ title, reveal: () => {
+          this.#revealThrough(message.id);
+          return this.findMessageEl(message.id);
+        } });
+      }
+    }
+    return entries.concat(getRenderedConversationDirectory(this.messagesEl));
   }
 
   #revealFrom(start: number): void {
@@ -502,7 +525,7 @@ export class MessageRenderer {
     if (!msgEl || !contentEl) return;
     const finalized = this.#finalizer.finalize(msgEl, contentEl, msg, messages, collapse, index);
     if (finalized === null) return;
-    this.#actions.decorateResponse(msgEl, contentEl, msg, messages, finalized.answer);
+    this.#actions.decorateResponse(msgEl, contentEl, msg, finalized.answer);
   }
 
   #hasVisibleContent(msg: ChatMessage): boolean {
@@ -559,7 +582,7 @@ export class MessageRenderer {
             continue;
           }
           const textEl = createResponseTextBlock(contentEl);
-          void this.renderContent(textEl, block.content);
+          void this.renderContent(textEl, ProviderRegistry.prepareAssistantMarkdown(this.getCapabilities().providerId, block.content));
           this.addTextCopyButton(textEl, block.content);
         } else if (block.type === 'citations') {
           renderCitationGroup(contentEl, block.citations);
@@ -600,7 +623,7 @@ export class MessageRenderer {
       // Fallback for old conversations without contentBlocks
       if (msg.content.trim() && !live?.options.isResponseOpen(msg.id)) {
         const textEl = createResponseTextBlock(contentEl);
-        void this.renderContent(textEl, msg.content);
+        void this.renderContent(textEl, ProviderRegistry.prepareAssistantMarkdown(this.getCapabilities().providerId, msg.content));
         this.addTextCopyButton(textEl, msg.content);
       }
       if (msg.toolCalls) {
@@ -803,7 +826,14 @@ export class MessageRenderer {
 
   /** Scrolls messages container to bottom. */
   scrollToBottom(): void {
+    this.#cancelTailScroll();
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  #cancelTailScroll(): void {
+    const pending = this.#pendingTailScroll;
+    this.#pendingTailScroll = null;
+    if (pending?.frame) cancelScheduledAnimationFrame(pending.frame);
   }
 
   /** A transcript rendered into a hidden presentation ignores scroll writes until it gets a box. */
@@ -829,12 +859,20 @@ export class MessageRenderer {
 
   /** Scrolls to bottom if already near bottom (within threshold). */
   scrollToBottomIfNeeded(threshold = 100): void {
+    this.#cancelTailScroll();
+    if (this.#markdown.isDisposed) return;
     const { scrollTop, scrollHeight, clientHeight } = this.messagesEl;
     const isNearBottom = scrollHeight - scrollTop - clientHeight < threshold;
     if (isNearBottom) {
-      window.requestAnimationFrame(() => {
-        this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
-      });
+      const pending = { scrollTop } as { frame?: ScheduledAnimationFrame; scrollTop: number };
+      this.#pendingTailScroll = pending;
+      pending.frame = scheduleAnimationFrame(() => {
+        if (this.#pendingTailScroll !== pending) return;
+        this.#pendingTailScroll = null;
+        if (this.messagesEl.scrollTop === pending.scrollTop) {
+          this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+        }
+      }, this.messagesEl.ownerDocument.defaultView);
     }
   }
 }

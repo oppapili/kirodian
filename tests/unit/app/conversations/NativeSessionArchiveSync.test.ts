@@ -17,7 +17,7 @@ describe('NativeSessionArchiveSync', () => {
   it('mirrors committed archive and restore state for one session', async () => {
     const store = new Map<string, Conversation>();
     store.set('thread-1', conversation('thread-1', 'claude', true));
-    const setSessionsArchived = jest.fn<Promise<void>, [readonly ProviderSessionArchiveChange[]]>()
+    const setSessionsArchived = vi.fn<(changes: readonly ProviderSessionArchiveChange[]) => Promise<void>>()
       .mockResolvedValue(undefined);
     const archive: ProviderSessionArchive = { setSessionsArchived };
     const sync = new NativeSessionArchiveSync({
@@ -64,7 +64,7 @@ describe('NativeSessionArchiveSync', () => {
     const store = new Map<string, Conversation>([['t', conversation('t', 'claude', true)]]);
     const order: string[] = [];
     let releaseFirst!: () => void;
-    const setSessionsArchived = jest.fn<Promise<void>, [readonly ProviderSessionArchiveChange[]]>()
+    const setSessionsArchived = vi.fn<(changes: readonly ProviderSessionArchiveChange[]) => Promise<void>>()
       .mockImplementationOnce(() => new Promise<void>(resolve => {
         order.push('archive:start');
         releaseFirst = () => { order.push('archive:end'); resolve(); };
@@ -92,7 +92,7 @@ describe('NativeSessionArchiveSync', () => {
   it('finishes admitted work after dispose stops further admission', async () => {
     const store = new Map<string, Conversation>([['t', conversation('t', 'claude', true)]]);
     let releaseArchive!: () => void;
-    const setSessionsArchived = jest.fn<Promise<void>, [readonly ProviderSessionArchiveChange[]]>()
+    const setSessionsArchived = vi.fn<(changes: readonly ProviderSessionArchiveChange[]) => Promise<void>>()
       .mockImplementation(() => new Promise<void>(resolve => { releaseArchive = resolve; }));
     const archive: ProviderSessionArchive = { setSessionsArchived };
     const sync = new NativeSessionArchiveSync({
@@ -119,7 +119,7 @@ describe('NativeSessionArchiveSync', () => {
     const archive: ProviderSessionArchive = {
       setSessionsArchived: async () => { throw failure; },
     };
-    const onFailure = jest.fn<void, [ProviderId, unknown]>();
+    const onFailure = vi.fn<(providerId: ProviderId, error: unknown) => void>();
     const sync = new NativeSessionArchiveSync({
       getConversation: id => store.get(id) ?? null,
       getSessionArchive: async () => archive,
@@ -133,9 +133,9 @@ describe('NativeSessionArchiveSync', () => {
 
   it('skips providers that own no native archive', async () => {
     const store = new Map<string, Conversation>([['t', conversation('t', 'kiro', true)]]);
-    const getSessionArchive = jest.fn<Promise<ProviderSessionArchive | null>, [ProviderId]>()
+    const getSessionArchive = vi.fn<(providerId: ProviderId) => Promise<ProviderSessionArchive | null>>()
       .mockResolvedValue(null);
-    const onFailure = jest.fn();
+    const onFailure = vi.fn();
     const sync = new NativeSessionArchiveSync({
       getConversation: id => store.get(id) ?? null,
       getSessionArchive,

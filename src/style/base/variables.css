@@ -21,15 +21,22 @@ body.theme-light .claudian-container {
   --claudian-selection-check: #16a34a;
 }
 
-/* Active-provider alias for single-provider surfaces; a model row that names its provider takes that provider's. */
+/* Active-provider aliases (chat, zen, and the inline edit composer and its menu layer): `--claudian-provider-logo` colours provider icons, `--claudian-brand` the other accents.
+   A provider tab in the model menu takes its own provider's. */
 .claudian-container[data-provider="claude"],
-.claudian-container .claudian-model-option[data-provider="claude"] {
+.claudian-inline-input-container[data-provider="claude"],
+.claudian-inline-menu-layer[data-provider="claude"],
+.claudian-model-provider-tab[data-provider="claude"] {
   --claudian-brand: var(--claudian-brand-claude);
   --claudian-brand-rgb: var(--claudian-brand-claude-rgb);
+  --claudian-provider-logo: var(--claudian-brand-claude);
 }
 
 .claudian-container[data-provider="kiro"],
-.claudian-container .claudian-model-option[data-provider="kiro"] {
+.claudian-inline-input-container[data-provider="kiro"],
+.claudian-inline-menu-layer[data-provider="kiro"],
+.claudian-model-provider-tab[data-provider="kiro"] {
   --claudian-brand: var(--claudian-brand-kiro);
   --claudian-brand-rgb: var(--claudian-brand-kiro-rgb);
+  --claudian-provider-logo: var(--claudian-brand-kiro);
 }
