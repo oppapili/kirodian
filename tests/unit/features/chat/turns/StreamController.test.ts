@@ -302,7 +302,7 @@ describe('StreamController - Text Content', () => {
       expect(deps.renderer.renderContent).toHaveBeenCalledTimes(1);
       expect(deps.renderer.renderContent).toHaveBeenCalledWith(
         deps.state.currentTextEl,
-        'Hello World'
+        'Hello World', { deferMath: true, deferDiagrams: true }
       );
     });
 
@@ -324,7 +324,7 @@ describe('StreamController - Text Content', () => {
       expect(deps.renderer.renderContent).toHaveBeenCalledTimes(2);
       expect(deps.renderer.renderContent).toHaveBeenLastCalledWith(
         deps.state.currentTextEl,
-        'First second'
+        'First second', { deferMath: true, deferDiagrams: true }
       );
     });
 
@@ -349,7 +349,7 @@ describe('StreamController - Text Content', () => {
         await Promise.resolve();
         expect(deps.renderer.renderContent).toHaveBeenCalledTimes(1);
         expect(deps.renderer.renderContent).toHaveBeenLastCalledWith(
-          deps.state.currentTextEl, '$x$ '.repeat(20), { deferMath: true }
+          deps.state.currentTextEl, '$x$ '.repeat(20), { deferMath: true, deferDiagrams: true }
         );
         const scansAfterFirstRender = mathSpy.mock.calls.length;
         expect(mermaidSpy).toHaveBeenCalledTimes(scansAfterFirstRender);
@@ -367,7 +367,7 @@ describe('StreamController - Text Content', () => {
         await Promise.resolve();
         expect(deps.renderer.renderContent).toHaveBeenCalledTimes(2);
         expect(deps.renderer.renderContent).toHaveBeenLastCalledWith(
-          deps.state.currentTextEl, '$x$ '.repeat(20) + '$y$ '.repeat(20), { deferMath: true }
+          deps.state.currentTextEl, '$x$ '.repeat(20) + '$y$ '.repeat(20), { deferMath: true, deferDiagrams: true }
         );
         expect(mathSpy).toHaveBeenCalledTimes(2 * scansAfterFirstRender);
       } finally {
@@ -394,7 +394,7 @@ describe('StreamController - Text Content', () => {
       expect(deps.renderer.renderContent).toHaveBeenCalledTimes(1);
       expect(deps.renderer.renderContent).toHaveBeenCalledWith(
         deps.state.currentTextEl,
-        'Hidden content'
+        'Hidden content', { deferMath: true, deferDiagrams: true }
       );
     });
 
@@ -409,7 +409,7 @@ describe('StreamController - Text Content', () => {
       expect(deps.renderer.renderContent).toHaveBeenCalledTimes(1);
       expect(deps.renderer.renderContent).toHaveBeenCalledWith(
         expect.anything(),
-        'Final hidden content'
+        'Final hidden content', { deferMath: true, deferDiagrams: true }
       );
     });
 
@@ -420,7 +420,7 @@ describe('StreamController - Text Content', () => {
       vi.advanceTimersByTime(16);
       await Promise.resolve();
       expect(deps.renderer.renderContent).toHaveBeenLastCalledWith(
-        deps.state.currentTextEl, content, { deferDiagrams: true }
+        deps.state.currentTextEl, content, { deferMath: true, deferDiagrams: true }
       );
       const target = deps.state.currentTextEl;
       await controller.finalizeCurrentTextBlock(createTestMessage());
@@ -438,7 +438,7 @@ describe('StreamController - Text Content', () => {
       expect(deps.renderer.renderContent).toHaveBeenCalledWith(
         deps.state.currentTextEl,
         'Euler: $e^{i\\pi} + 1 = 0$',
-        { deferMath: true }
+        { deferMath: true, deferDiagrams: true }
       );
     });
 
@@ -453,7 +453,7 @@ describe('StreamController - Text Content', () => {
       expect(deps.renderer.renderContent).toHaveBeenCalledWith(
         deps.state.currentTextEl,
         'Euler: \\(e^{i\\pi} + 1 = 0\\)',
-        { deferMath: true }
+        { deferMath: true, deferDiagrams: true }
       );
     });
 
@@ -468,7 +468,7 @@ describe('StreamController - Text Content', () => {
 
       expect(deps.renderer.renderContent).toHaveBeenCalledWith(
         deps.state.currentTextEl,
-        'Euler: $e^{i\\pi} + 1 = 0$'
+        'Euler: $e^{i\\pi} + 1 = 0$', { deferMath: false, deferDiagrams: true }
       );
     });
 
@@ -483,7 +483,7 @@ describe('StreamController - Text Content', () => {
 
       expect(deps.renderer.renderContent).toHaveBeenCalledWith(
         expect.anything(),
-        'Hello'
+        'Hello', { deferMath: true, deferDiagrams: true }
       );
       expect(deps.renderer.addTextCopyButton).toHaveBeenCalledWith(
         expect.anything(),
@@ -1021,7 +1021,7 @@ describe('StreamController - Text Content', () => {
 
       await controller.handleStreamChunk({ type: 'notice', content: 'Command blocked', level: 'warning' }, msg);
 
-      expect(deps.state.currentTextContent).toContain('Blocked');
+      expect(deps.state.currentTextContent).toContain('Warning');
 
       expect(deps.state.pendingTools.size).toBe(0);
       expect(renderToolCall).toHaveBeenCalled();
@@ -1429,7 +1429,7 @@ describe('StreamController - Text Content', () => {
       await Promise.resolve();
 
       expect(deps.renderer.renderContent).toHaveBeenCalledTimes(1);
-      expect(deps.renderer.renderContent).toHaveBeenCalledWith(contentEl, 'Let me think');
+      expect(deps.renderer.renderContent).toHaveBeenCalledWith(contentEl, 'Let me think', { deferMath: true, deferDiagrams: true });
     });
 
     it('defers Mermaid in thinking and renders it at finalization', async () => {
@@ -1443,7 +1443,7 @@ describe('StreamController - Text Content', () => {
       await controller.appendThinking(content);
       vi.advanceTimersByTime(16);
       await Promise.resolve();
-      expect(deps.renderer.renderContent).toHaveBeenLastCalledWith(contentEl, content, { deferDiagrams: true });
+      expect(deps.renderer.renderContent).toHaveBeenLastCalledWith(contentEl, content, { deferMath: true, deferDiagrams: true });
       await controller.finalizeCurrentThinkingBlock(createTestMessage());
       expect(deps.renderer.renderContent).toHaveBeenLastCalledWith(contentEl, content);
     });
@@ -1464,12 +1464,7 @@ describe('StreamController - Text Content', () => {
       await controller.handleStreamChunk({ type: 'thinking', content: 'Reasoning $x^2$' }, msg);
       await controller.finalizeCurrentThinkingBlock(msg);
 
-      expect(deps.renderer.renderContent).toHaveBeenNthCalledWith(
-        1,
-        contentEl,
-        'Reasoning $x^2$'
-      );
-      expect(deps.renderer.renderContent).toHaveBeenCalledTimes(1);
+      expect(deps.renderer.renderContent).not.toHaveBeenCalled();
       expect(msg.contentBlocks).toContainEqual(
         expect.objectContaining({ type: 'thinking', content: 'Reasoning $x^2$' })
       );
@@ -1495,7 +1490,7 @@ describe('StreamController - Text Content', () => {
       expect(deps.renderer.renderContent).toHaveBeenCalledWith(
         contentEl,
         'Reasoning $x^2$',
-        { deferMath: true }
+        { deferMath: true, deferDiagrams: true }
       );
 
       await controller.finalizeCurrentThinkingBlock(msg);
@@ -1504,7 +1499,7 @@ describe('StreamController - Text Content', () => {
         1,
         contentEl,
         'Reasoning $x^2$',
-        { deferMath: true }
+        { deferMath: true, deferDiagrams: true }
       );
       expect(deps.renderer.renderContent).toHaveBeenNthCalledWith(
         2,
@@ -1535,8 +1530,7 @@ describe('StreamController - Text Content', () => {
 
       await controller.finalizeCurrentThinkingBlock(msg);
 
-      expect(deps.renderer.renderContent).toHaveBeenCalledTimes(1);
-      expect(deps.renderer.renderContent).toHaveBeenCalledWith(contentEl, 'Hidden reasoning');
+      expect(deps.renderer.renderContent).not.toHaveBeenCalled();
     });
 
     it('does not scan collapsed thinking deltas for deferred math or diagrams', async () => {
@@ -1590,7 +1584,7 @@ describe('StreamController - Text Content', () => {
       expect(deps.renderer.renderContent).toHaveBeenCalledTimes(1);
       expect(deps.renderer.renderContent).toHaveBeenCalledWith(
         contentEl,
-        'Deferred reasoning'
+        'Deferred reasoning', { deferMath: true, deferDiagrams: true }
       );
     });
 
@@ -1600,10 +1594,7 @@ describe('StreamController - Text Content', () => {
       await controller.handleStreamChunk({ type: 'thinking', content: 'Reasoning' }, msg);
       await controller.finalizeCurrentThinkingBlock(msg);
 
-      expect(deps.renderer.renderContent).toHaveBeenCalledWith(
-        expect.anything(),
-        'Reasoning'
-      );
+      expect(deps.renderer.renderContent).not.toHaveBeenCalled();
       expect(msg.contentBlocks).toContainEqual(
         expect.objectContaining({ type: 'thinking', content: 'Reasoning' })
       );

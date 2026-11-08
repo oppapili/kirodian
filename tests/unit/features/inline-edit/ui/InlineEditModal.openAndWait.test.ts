@@ -1,7 +1,7 @@
 import '@/providers';
 
 import { createMockEl } from '@test/helpers/MockElement';
-import { MarkdownRenderer, Notice } from 'obsidian';
+import { Component, MarkdownRenderer, Notice } from 'obsidian';
 import type { Mock } from 'vitest';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
@@ -21,15 +21,19 @@ function createDeferred(): { promise: Promise<void>; resolve: () => void } {
 
 function createInertInlineEditService() {
   return {
-    send: vi.fn(),
+    send: vi.fn().mockResolvedValue({ success: true }),
     end: vi.fn(),
+    isConversing: false,
   };
 }
 
 describe('InlineEditModal - openAndWait', () => {
   let owner: InlineEditSessionOwner;
+  let component: Component;
   beforeEach(() => {
     owner = new InlineEditSessionOwner();
+    component = new Component();
+    component.load();
     vi.clearAllMocks();
     vi.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized').mockResolvedValue(undefined);
     vi
@@ -38,6 +42,7 @@ describe('InlineEditModal - openAndWait', () => {
   });
 
   afterEach(() => {
+    component.unload();
     owner.dispose();
     vi.restoreAllMocks();
   });
@@ -70,7 +75,7 @@ describe('InlineEditModal - openAndWait', () => {
       .mockReturnValueOnce(undefined)
       .mockReturnValueOnce(undefined);
 
-    const modal = new InlineEditModal(app, plugin, plugin, callbackEditor, view, editContext, 'note.md', owner);
+    const modal = new InlineEditModal(app, plugin, component, callbackEditor, view, editContext, 'note.md', owner);
     const result = await modal.openAndWait();
 
     expect(result).toEqual({ decision: 'reject' });
@@ -110,11 +115,11 @@ describe('InlineEditModal - openAndWait', () => {
       },
     };
 
-    vi.spyOn(obsidianCompat, 'getEditorView').mockReturnValue({ dispatch: vi.fn() } as any);
+    vi.spyOn(obsidianCompat, 'getEditorView').mockReturnValue({ state: { doc: {} }, dispatch: vi.fn() } as any);
     vi.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized')
       .mockRejectedValue(new Error('stop after provider resolution'));
 
-    const modal = new InlineEditModal(app, plugin, plugin, editor, view, editContext, 'note.md', owner);
+    const modal = new InlineEditModal(app, plugin, component, editor, view, editContext, 'note.md', owner);
 
     await expect(modal.openAndWait()).resolves.toEqual({ decision: 'reject' });
     expect(ProviderWorkspaceRegistry.ensureInitialized).toHaveBeenCalledWith(
@@ -161,11 +166,11 @@ describe('InlineEditModal - openAndWait', () => {
       },
     };
 
-    vi.spyOn(obsidianCompat, 'getEditorView').mockReturnValue({ dispatch: vi.fn() } as any);
+    vi.spyOn(obsidianCompat, 'getEditorView').mockReturnValue({ state: { doc: {} }, dispatch: vi.fn() } as any);
     vi.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized')
       .mockRejectedValue(new Error('stop after provider resolution'));
 
-    const modal = new InlineEditModal(app, plugin, plugin, editor, view, editContext, 'note.md', owner);
+    const modal = new InlineEditModal(app, plugin, component, editor, view, editContext, 'note.md', owner);
 
     await expect(modal.openAndWait()).resolves.toEqual({ decision: 'reject' });
     expect(ProviderWorkspaceRegistry.ensureInitialized).toHaveBeenCalledWith(
@@ -261,7 +266,7 @@ describe('InlineEditModal - openAndWait', () => {
         },
       };
 
-      const modal = new InlineEditModal(app, plugin, plugin, editor, view, editContext, 'note.md', owner);
+      const modal = new InlineEditModal(app, plugin, component, editor, view, editContext, 'note.md', owner);
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
@@ -396,7 +401,7 @@ describe('InlineEditModal - openAndWait', () => {
         },
       };
 
-      const modal = new InlineEditModal(app, plugin, plugin, editor, view, editContext, 'note.md', owner);
+      const modal = new InlineEditModal(app, plugin, component, editor, view, editContext, 'note.md', owner);
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
@@ -524,7 +529,7 @@ describe('InlineEditModal - openAndWait', () => {
         },
       };
 
-      const modal = new InlineEditModal(app, plugin, plugin, editor, view, editContext, 'note.md', owner);
+      const modal = new InlineEditModal(app, plugin, component, editor, view, editContext, 'note.md', owner);
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
@@ -633,18 +638,17 @@ describe('InlineEditModal - openAndWait', () => {
         },
       };
 
-      const modal = new InlineEditModal(app, plugin, plugin, editor, view, editContext, 'note.md', owner);
-      const resultPromise = modal.openAndWait();
-      await Promise.resolve();
-
       const sendMock = vi.fn().mockResolvedValue({
         success: true,
         clarification: 'Need more detail',
       });
-      widgetRef.inlineEditService = {
-        send: sendMock,
-        end: vi.fn(),
-      };
+      vi
+        .spyOn(ProviderRegistry, 'createInlineEditService')
+        .mockReturnValue({ send: sendMock, end: vi.fn(), isConversing: false } as any);
+
+      const modal = new InlineEditModal(app, plugin, component, editor, view, editContext, 'note.md', owner);
+      const resultPromise = modal.openAndWait();
+      await Promise.resolve();
 
       widgetRef.inputEl.value = 'Please check @notes/a.md and @notes/a.md.';
       await widgetRef.generate();
@@ -745,18 +749,17 @@ describe('InlineEditModal - openAndWait', () => {
         },
       };
 
-      const modal = new InlineEditModal(app, plugin, plugin, editor, view, editContext, 'note.md', owner);
-      const resultPromise = modal.openAndWait();
-      await Promise.resolve();
-
       const sendMock = vi.fn().mockResolvedValue({
         success: true,
         clarification: 'Need more detail',
       });
-      widgetRef.inlineEditService = {
-        send: sendMock,
-        end: vi.fn(),
-      };
+      vi
+        .spyOn(ProviderRegistry, 'createInlineEditService')
+        .mockReturnValue({ send: sendMock, end: vi.fn(), isConversing: false } as any);
+
+      const modal = new InlineEditModal(app, plugin, component, editor, view, editContext, 'note.md', owner);
+      const resultPromise = modal.openAndWait();
+      await Promise.resolve();
 
       widgetRef.inputEl.value = 'Please check @notes/my note.md.';
       await widgetRef.generate();
@@ -867,7 +870,7 @@ describe('InlineEditModal - openAndWait', () => {
         },
       };
 
-      const modal = new InlineEditModal(app, plugin, plugin, editor, view, editContext, 'math/note.md', owner);
+      const modal = new InlineEditModal(app, plugin, component, editor, view, editContext, 'math/note.md', owner);
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
@@ -877,7 +880,7 @@ describe('InlineEditModal - openAndWait', () => {
         'Should this use $Z(f)$?',
         expect.anything(),
         'math/note.md',
-        plugin,
+        expect.any(Component),
       );
       widgetRef.showAgentReply('Second clarification');
 
@@ -988,7 +991,7 @@ describe('InlineEditModal - openAndWait', () => {
         },
       };
 
-      const modal = new InlineEditModal(app, plugin, plugin, editor, view, editContext, 'math/note.md', owner);
+      const modal = new InlineEditModal(app, plugin, component, editor, view, editContext, 'math/note.md', owner);
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
@@ -1205,16 +1208,17 @@ describe('InlineEditModal - openAndWait', () => {
         selectedText: oldMarkdown,
       };
 
-      const modal = new InlineEditModal(app, plugin, plugin, editor, view, editContext, 'math/note.md', owner);
+      vi
+        .spyOn(ProviderRegistry, 'createInlineEditService')
+        .mockReturnValue({
+          send: vi.fn().mockResolvedValue({ success: true, editedText: newMarkdown }),
+          end: vi.fn(),
+          isConversing: false,
+        } as any);
+
+      const modal = new InlineEditModal(app, plugin, component, editor, view, editContext, 'math/note.md', owner);
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
-      widgetRef.inlineEditService = {
-        send: vi.fn().mockResolvedValue({
-          success: true,
-          editedText: newMarkdown,
-        }),
-        end: vi.fn(),
-      };
 
       widgetRef.inputEl.value = 'Improve the statement';
       await widgetRef.generate();
@@ -1237,7 +1241,7 @@ describe('InlineEditModal - openAndWait', () => {
           kind === 'del' ? oldMarkdown : newMarkdown,
           expect.anything(),
           'math/note.md',
-          plugin
+          expect.any(Component)
         );
         expect(diffBlocks[index].hasClass(`claudian-diff-${kind}`)).toBe(true);
       });

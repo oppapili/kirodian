@@ -2,7 +2,7 @@
 
 import { axe } from '@test/helpers/accessibility';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
-import { type App, type Component, MarkdownRenderer, Platform, TFile } from 'obsidian';
+import { type App, Component, MarkdownRenderer, Platform, TFile } from 'obsidian';
 
 import type { ProviderCommandDiscoveryResult } from '@/core/providers/commands/ProviderCommandDiscoveryResult';
 import type { ProviderCommandEntry } from '@/core/providers/commands/ProviderCommandEntry';
@@ -42,7 +42,7 @@ function createApp(): App {
 }
 
 function createEditor(parent: HTMLElement): ComposerEditor {
-  return new ComposerEditor(parent, createApp(), {} as Component);
+  return new ComposerEditor(parent, createApp(), new Component());
 }
 
 beforeEach(() => {
@@ -66,7 +66,7 @@ it('renders a wikilink through Obsidian and opens it without changing the source
   const openLinkText = vi.fn().mockResolvedValue(undefined);
   const app = createApp();
   app.workspace.openLinkText = openLinkText;
-  const component = {} as Component;
+  const component = new Component();
   vi.mocked(MarkdownRenderer.render).mockImplementationOnce(async (_app, markdown, container) => {
     expect(markdown).toBe('[[Notes/A note.md]]');
     (container as HTMLElement).createEl('a', {
@@ -91,7 +91,7 @@ it('renders a wikilink through Obsidian and opens it without changing the source
 it.each(['click', 'Enter', 'Tab'])('inserts and renders a picker wikilink using %s', async method => {
   const parent = document.body.createDiv();
   const app = createApp();
-  const editor = new ComposerEditor(parent, app, {} as Component);
+  const editor = new ComposerEditor(parent, app, new Component());
   const files = new FileContextManager(new VaultMentionDataProvider(app));
   const dropdown = new ComposerDropdownController(parent, editor.element, [files.getMentionSource()]);
   try {
@@ -119,7 +119,7 @@ it.each(['click', 'Enter', 'Tab'])('inserts and renders a picker wikilink using 
 it('renders identical labels while keeping each aliased link target distinct', async () => {
   const parent = document.body.createDiv();
   const app = createApp();
-  const editor = new ComposerEditor(parent, app, {} as Component);
+  const editor = new ComposerEditor(parent, app, new Component());
   try {
     const source = 'Compare [[DEMO.md|DEMO]] and [[- Bases/DEMO.md|DEMO]]';
     editor.element.value = source;
@@ -317,7 +317,7 @@ it('focuses an already open note when its composer link is clicked', async () =>
   };
   vi.mocked(app.workspace.iterateAllLeaves).mockImplementation(visit => visit(leaf as never));
   app.workspace.revealLeaf = vi.fn().mockResolvedValue(undefined);
-  const editor = new ComposerEditor(parent, app, {} as Component);
+  const editor = new ComposerEditor(parent, app, new Component());
   try {
     editor.element.value = 'Read [[Notes/A note.md|A note]] today';
     editor.element.focus();
