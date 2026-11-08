@@ -1,16 +1,18 @@
 import '@/providers';
 
+import { partialMock } from '@test/helpers/partialMock';
+
 import type { SubagentInfo } from '@/core/types';
 import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
 
 vi.mock('@/features/chat/subagents/SubagentRenderer', () => ({
-  createSubagentBlock: vi.fn((_parentEl: any, info: SubagentInfo) => ({ info, wrapperEl: {} })),
-  createAsyncSubagentBlock: vi.fn((_parentEl: any, info: SubagentInfo) => ({ info, wrapperEl: {}, statusTextEl: {} })),
+  createSubagentBlock: vi.fn((_parentEl: HTMLElement, info: SubagentInfo) => ({ info, wrapperEl: {} })),
+  createAsyncSubagentBlock: vi.fn((_parentEl: HTMLElement, info: SubagentInfo) => ({ info, wrapperEl: {}, statusTextEl: {} })),
   updateSubagentBlock: vi.fn(),
   updateAsyncSubagentBlock: vi.fn(),
 }));
 
-const createMockEl = () => ({ createDiv: vi.fn(), appendChild: vi.fn() } as any);
+const createMockEl = () => partialMock<HTMLElement>({ createDiv: vi.fn(), appendChild: vi.fn() });
 
 describe('SubagentManager', () => {
   beforeEach(() => {

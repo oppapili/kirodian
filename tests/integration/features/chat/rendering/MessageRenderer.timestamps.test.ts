@@ -2,11 +2,13 @@
 
 import '@/providers';
 
+import { partialMock } from '@test/helpers/partialMock';
 import { Component } from 'obsidian';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ProviderId } from '@/core/providers/types';
 import type { ChatMessage } from '@/core/types';
+import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 
 // Obsidian extends native DOM elements with these helpers.
@@ -22,8 +24,8 @@ function createRenderer(providerId: ProviderId, enabled = true) {
   const settings = { mediaFolder: '', showMessageTimestamps: enabled };
   const component = new Component();
   const renderer = new MessageRenderer(
-    { app: {}, settings } as any,
-    component as any,
+    partialMock<ChatFeatureHost>({ app: {}, settings }),
+    component,
     messagesEl,
     undefined,
     undefined,

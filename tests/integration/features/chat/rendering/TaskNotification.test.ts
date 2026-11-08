@@ -3,15 +3,19 @@ import '@/providers';
 
 import { axe } from '@test/helpers/accessibility';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
+import { partialMock } from '@test/helpers/partialMock';
 import { fireEvent, within } from '@testing-library/dom';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import type { ProviderBackgroundEventScope } from '@/core/execution';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ChatMessage } from '@/core/types';
+import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
+import type { ChatExecutionCoordinatorDeps as ChatExecutionDeps } from '@/features/chat/execution/ChatExecutionCoordinator';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 import { ChatState } from '@/features/chat/state/ChatState';
 import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
+import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 import { StreamController } from '@/features/chat/turns/StreamController';
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
@@ -38,7 +42,7 @@ it.each([false, true])('shows a session notification immediately with streaming=
   const { createSessionModelStub } = await import('@test/helpers/ConversationPorts');
   const { enqueueTabSessionEvent } = await import('@test/helpers/features/chat/SessionEventsHarness');
   const messagesEl = document.body.createDiv();
-  const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
+  const plugin = partialMock<ChatFeatureHost>({ app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } });
   const renderer = new MessageRenderer(plugin,
     new Component(), messagesEl);
   const state = new ChatState();
@@ -50,8 +54,8 @@ it.each([false, true])('shows a session notification immediately with streaming=
   const backend = new FakeSideBackend();
   const coordinator = new ChatExecutionCoordinator({
     lifecycleRegistry, resolveBackend: () => backend,
-    persistence: { persistExecutionSnapshot: async () => true, registerExecutionBinding: () => undefined, releaseExecutionBinding: () => undefined } as any,
-    interactionPort: {} as any, workingDirectory: '/vault', createId: () => 'binding',
+    persistence: partialMock<ChatExecutionDeps['persistence']>({ persistExecutionSnapshot: async () => true, registerExecutionBinding: () => undefined, releaseExecutionBinding: () => undefined }),
+    interactionPort: partialMock<ChatExecutionDeps['interactionPort']>({}), workingDirectory: '/vault', createId: () => 'binding',
     resolveMissingProviderSession: async () => 'not_found',
     onSessionEvent: (event, context) => enqueueTabSessionEvent(tab, plugin, event, context),
   });
@@ -61,11 +65,11 @@ it.each([false, true])('shows a session notification immediately with streaming=
     session => createSessionModelStub(session, { getState: () => state }),
   );
   const session = new TabSession({ id: 'tab', lifecycleState: 'open' }, runtime);
-  const tab = { state, renderer, session, executionCoordinator: coordinator, lifecycleState: 'open',
+  const tab: AssembledTabRuntime = partialMock<AssembledTabRuntime>({ state, renderer, session, executionCoordinator: coordinator, lifecycleState: 'open',
     ui: { promptSuggestion: { receive() {}, discard() {} } },
     dom: { contentEl: messagesEl }, services: { subagentManager: subagents },
     controllers: { streamController: stream, inputController: undefined,
-      conversationController: { save: async () => undefined, scheduleProgressSave: () => undefined } } } as any;
+      conversationController: { save: async () => undefined, scheduleProgressSave: () => undefined } } });
   try {
     await coordinator.bindConversation({ conversationId: 'conversation', providerId: 'kiro' });
     await coordinator.prepare();
@@ -114,7 +118,7 @@ it.each([false, true])('shows a session notification immediately with streaming=
 it.each(['text', 'image', 'image-only'])('keeps preceding output before a %s prompt and isolates concurrent rendering', async kind => {
   const { renderAutoTriggeredTurn, reserveBackgroundTurn } = await import('@/features/chat/turns/BackgroundTurnRenderer');
   const messagesEl = document.body.createDiv();
-  const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
+  const plugin = partialMock<ChatFeatureHost>({ app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } });
   const renderer = new MessageRenderer(plugin,
     new Component(), messagesEl);
   const state = new ChatState();
@@ -125,7 +129,7 @@ it.each(['text', 'image', 'image-only'])('keeps preceding output before a %s pro
   const target = reserveBackgroundTurn({ state, renderer, createMessageId: () => 'automatic' });
   const user: ChatMessage = { id: 'followup', role: 'user', timestamp: 2,
     content: kind === 'image-only' ? '' : 'Follow up',
-    images: kind === 'text' ? undefined : [{ id: 'image', name: 'example.png', mediaType: 'image/png', data: 'aW1hZ2U=', size: 5, source: 'file' } as any],
+    images: kind === 'text' ? undefined : [{ id: 'image', name: 'example.png', mediaType: 'image/png', data: 'aW1hZ2U=', size: 5, source: 'file' }],
   };
   const response: ChatMessage = { id: 'response', role: 'assistant', timestamp: 3, content: '', contentBlocks: [] };
   state.addMessage(user); renderer.addMessage(user);
@@ -167,7 +171,7 @@ it.each(['text', 'image', 'image-only'])('keeps preceding output before a %s pro
 it.each([false, true])('flushes an automatic tool card before stream disposal with result=%s', async completed => {
   const { renderAutoTriggeredTurn } = await import('@/features/chat/turns/BackgroundTurnRenderer');
   const messagesEl = document.body.createDiv();
-  const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
+  const plugin = partialMock<ChatFeatureHost>({ app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } });
   const renderer = new MessageRenderer(plugin,
     new Component(), messagesEl);
   const state = new ChatState();
@@ -196,7 +200,7 @@ it.each([false, true])('flushes an automatic tool card before stream disposal wi
 it.each([false, true])('keeps automatic Agent results across requested settlement with pending=%s', async pendingAgent => {
   const { renderAutoTriggeredTurn } = await import('@/features/chat/turns/BackgroundTurnRenderer');
   const messagesEl = document.body.createDiv();
-  const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
+  const plugin = partialMock<ChatFeatureHost>({ app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } });
   const renderer = new MessageRenderer(plugin,
     new Component(), messagesEl);
   const state = new ChatState();
@@ -240,7 +244,7 @@ it.each([false, true])('keeps automatic Agent results across requested settlemen
 it.each([false, true])('matches task-notification grouping before and after replay with intervening input=%s', async interveningInput => {
   const { renderAutoTriggeredTurn, renderSessionTaskNotification } = await import('@/features/chat/turns/BackgroundTurnRenderer');
   const messagesEl = document.body.createDiv();
-  const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
+  const plugin = partialMock<ChatFeatureHost>({ app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } });
   const renderer = new MessageRenderer(plugin,
     new Component(), messagesEl);
   const state = new ChatState();

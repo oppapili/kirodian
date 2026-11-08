@@ -2,12 +2,14 @@
 import '@/providers';
 
 import { axe } from '@test/helpers/accessibility';
+import { partialMock } from '@test/helpers/partialMock';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
 import { Component, MarkdownRenderer, Notice } from 'obsidian';
 
 import { encodeSessionMessage } from '@/core/session-tools/sessionMessageEnvelope';
 import type { ChatMessage, Conversation } from '@/core/types';
+import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
@@ -17,12 +19,12 @@ it.each(['live', 'history'])('shows the sender safely in %s and keeps the envelo
   const host = document.body.createDiv();
   const records = new Map([['source-session', { id: 'source-session', providerId: 'kiro' } as Conversation]]);
   const openConversation = vi.fn(async (_id: string) => undefined);
-  const renderer = new MessageRenderer({
+  const renderer = new MessageRenderer(partialMock<ChatFeatureHost>({
     app: {}, settings: { mediaFolder: '' },
     ensureConversationMetadataLoaded: async () => undefined,
     getCachedConversation: (id: string) => records.get(id) ?? null,
     getConversationSummary: (id: string) => records.get(id) ?? null,
-  } as any, new Component(), host, undefined, undefined, undefined, undefined, openConversation);
+  }), new Component(), host, undefined, undefined, undefined, undefined, openConversation);
   vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, el) => {
     el.textContent = markdown;
   });

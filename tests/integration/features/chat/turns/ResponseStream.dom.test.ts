@@ -2,11 +2,13 @@
 import '@/providers';
 
 import { axe } from '@test/helpers/accessibility';
+import { partialMock } from '@test/helpers/partialMock';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import type { ChatMessage } from '@/core/types';
+import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 import { ChatState } from '@/features/chat/state/ChatState';
 import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
@@ -34,7 +36,7 @@ afterEach(() => {
 
 function createSession() {
   const messagesEl = document.body.createDiv();
-  const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
+  const plugin = partialMock<ChatFeatureHost>({ app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } });
   const renderer = new MessageRenderer(plugin, new Component(), messagesEl);
   const turns = new TurnCoordinator();
   const state = new ChatState({}, undefined, turns);

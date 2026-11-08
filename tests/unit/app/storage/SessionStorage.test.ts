@@ -636,7 +636,7 @@ describe('SessionStorage', () => {
       expect(metadata.createdAt).toBe(1700000000);
       expect(metadata.lastActivityAt).toBe(1700000900);
       expect(metadata.sessionId).toBe('sdk-session');
-      expect((metadata.providerState as any)?.providerSessionId).toBe('current-sdk-session');
+      expect(metadata.providerState?.providerSessionId).toBe('current-sdk-session');
       expect(metadata.linkedContentPath).toBe('notes/test.md');
       expect(metadata.usage).toEqual(usage);
       expect(metadata.titleGenerationStatus).toBe('success');
@@ -659,7 +659,7 @@ describe('SessionStorage', () => {
 
       const metadata = toSessionMetadata(conversation);
 
-      expect((metadata.providerState as any)?.forkSource).toEqual({
+      expect(metadata.providerState?.forkSource).toEqual({
         sessionId: 'source-session-abc',
         resumeAt: 'asst-uuid-xyz',
       });
@@ -678,7 +678,7 @@ describe('SessionStorage', () => {
 
       const metadata = toSessionMetadata(conversation);
 
-      expect((metadata.providerState as any)?.forkSource).toBeUndefined();
+      expect(metadata.providerState?.forkSource).toBeUndefined();
     });
   });
 });

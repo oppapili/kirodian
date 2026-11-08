@@ -1,12 +1,17 @@
 import '@/providers';
 
+import { partialMock } from '@test/helpers/partialMock';
+
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import type {
   ProviderId,
+  ProviderWorkspaceServices,
   TitleGenerationService,
 } from '@/core/providers/types';
 import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
+
+type TitleHost = Parameters<typeof ProviderRegistry.createTitleGenerationService>[0];
 
 /** Build settings whose kiro catalog advertises the given raw model ids. */
 function kiroSettingsWithModels(
@@ -33,8 +38,8 @@ function kiroSettingsWithModels(
 describe('ProviderRegistry', () => {
   beforeEach(() => {
     ProviderWorkspaceRegistry.clear();
-    ProviderWorkspaceRegistry.setServices('kiro', {
-    } as any);
+    ProviderWorkspaceRegistry.setServices('kiro', partialMock<ProviderWorkspaceServices>({
+    }));
     vi.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized')
       .mockResolvedValue(undefined);
   });
@@ -51,7 +56,7 @@ describe('ProviderRegistry', () => {
 
   it('throws when an unknown provider is requested', () => {
     expect(() => ProviderRegistry.getCapabilities(
-      'nonexistent' as any,
+      'nonexistent',
     )).toThrow('Provider "nonexistent" is not registered.');
   });
 
@@ -153,7 +158,7 @@ describe('ProviderRegistry', () => {
     const providerCalls: ProviderId[] = [];
     const originalCreate = ProviderRegistry.createTitleGenerationService.bind(ProviderRegistry);
     vi.spyOn(ProviderRegistry, 'createTitleGenerationService')
-      .mockImplementation((plugin: any, providerId?: ProviderId) => {
+      .mockImplementation((plugin, providerId?: ProviderId) => {
         if (!providerId) {
           return originalCreate(plugin);
         }
@@ -161,14 +166,14 @@ describe('ProviderRegistry', () => {
         return createMockTitleService(providerId);
       });
 
-    const service = ProviderRegistry.createTitleGenerationService({
+    const service = ProviderRegistry.createTitleGenerationService(partialMock<TitleHost>({
       settings: {
         titleGenerationModel: '',
         providerConfigs: {
           kiro: { enabled: true },
         },
       },
-    } as any);
+    }));
     const callback = vi.fn();
 
     await service.generateTitle('conv-1', 'hello', callback);
@@ -194,7 +199,7 @@ describe('ProviderRegistry', () => {
     expect(ProviderRegistry.resolveTitleGenerationSelection(settings))
       .toEqual({ providerId: 'kiro', model: 'kiro/sonnet' });
 
-    const service = ProviderRegistry.createTitleGenerationService({ settings } as any);
+    const service = ProviderRegistry.createTitleGenerationService(partialMock<TitleHost>({ settings }));
     const callback = vi.fn();
     await service.generateTitle('conv-1', 'hello', callback);
 
@@ -214,7 +219,7 @@ describe('ProviderRegistry', () => {
       updateKiroProviderSettings(settings, { enabled: false });
     });
     const createService = vi.spyOn(ProviderRegistry, 'createTitleGenerationService');
-    const service = ProviderRegistry.createTitleGenerationService({ settings } as any);
+    const service = ProviderRegistry.createTitleGenerationService(partialMock<TitleHost>({ settings }));
     const callback = vi.fn();
     await service.generateTitle('conversation', 'hello', callback);
     expect(createService).toHaveBeenCalledTimes(1);

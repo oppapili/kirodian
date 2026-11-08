@@ -6,6 +6,7 @@ import { createFixture, deferred, waitForCall } from '@test/helpers/ChatInputHar
 import { testDate } from '@test/helpers/testClock';
 import { Notice } from 'obsidian';
 
+import type { Conversation } from '@/core/types';
 import { cancelSelectedDestinationTurn } from '@/features/chat/tabs/TabInputEvents';
 
 const id = 'conv-1-source';
@@ -116,7 +117,7 @@ it('restores a plain follow-up queued during failed snapshot preparation', async
 it('cancels and drains queued snapshot preparation before tab shutdown finishes', async () => {
   const fixture = await setup();
   const session = fixture.session;
-  const gate = deferred<any>();
+  const gate = deferred<Conversation | null>();
   const source = await fixture.plugin.getConversationById(id);
   fixture.plugin.getConversationById.mockClear().mockReturnValue(gate.promise);
   await fixture.holdResponse();
@@ -138,7 +139,7 @@ it('cancels and drains queued snapshot preparation before tab shutdown finishes'
 
 it.each([false, true])('restores prepared drafts when rewind begins during hydration (plain follow-up: %s)', async followUp => {
   const fixture = await setup();
-  const hydration = deferred<any>();
+  const hydration = deferred<Conversation | null>();
   const initialization = deferred<boolean>();
   const source = await fixture.plugin.getConversationById(id);
   fixture.plugin.getConversationById.mockClear().mockReturnValue(hydration.promise);
@@ -269,7 +270,7 @@ it('cancels a still-hydrating queued mention after the active turn completes', a
   const execute = holdNativeTurns();
   const fixture = await setup();
   const source = await fixture.plugin.getConversationById(id);
-  const hydration = deferred<any>();
+  const hydration = deferred<Conversation | null>();
   fixture.plugin.getConversationById.mockClear().mockReturnValue(hydration.promise);
   await fixture.native.coordinator.bindConversation({ conversationId: 'conversation-1', providerId: 'kiro' });
   fixture.input.value = 'active turn';

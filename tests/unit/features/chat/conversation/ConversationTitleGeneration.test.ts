@@ -1,14 +1,18 @@
 import '@/providers';
 
+import { partialMock } from '@test/helpers/partialMock';
 import { Notice } from 'obsidian';
 import type { Mock } from 'vitest';
 
-import type { TitleGenerationService } from '@/core/providers/types';
+import type { TitleGenerationCallback, TitleGenerationService } from '@/core/providers/types';
 import {
   ConversationTitleGeneration,
+  type ConversationTitleGenerationDeps,
   fallbackConversationTitle,
 } from '@/features/chat/conversation/ConversationTitleGeneration';
 import { updateCurrentKiroCatalog, updateKiroProviderSettings } from '@/providers/kiro/settings';
+
+type ConversationTitleHost = ConversationTitleGenerationDeps['host'];
 
 // Kiro resolves the title model through its own catalog: the selection carries
 // the `kiro/` prefix and availability comes from the host catalog plus the
@@ -66,7 +70,7 @@ describe('ConversationTitleGeneration.regenerate', () => {
   let titles: ConversationTitleGeneration;
 
   function createTitles(getService: () => TitleGenerationService | null): ConversationTitleGeneration {
-    return new ConversationTitleGeneration({ host: host as any, getService });
+    return new ConversationTitleGeneration({ host: partialMock<ConversationTitleHost>(host), getService });
   }
 
   beforeEach(() => {
@@ -202,7 +206,7 @@ describe('ConversationTitleGeneration.regenerate', () => {
       ],
     });
     service.generateTitle.mockImplementation(
-      async (convId: string, _user: string, callback: any) => {
+      async (convId: string, _user: string, callback: TitleGenerationCallback) => {
         await callback(convId, { success: true, title: 'New Generated Title' });
       },
     );
@@ -227,7 +231,7 @@ describe('ConversationTitleGeneration.regenerate', () => {
 
     it('commits a failed generation against the captured title', async () => {
       service.generateTitle.mockImplementation(
-        async (_convId: string, _user: string, callback: any) => {
+        async (_convId: string, _user: string, callback: TitleGenerationCallback) => {
           await callback('conv-1', { success: false, error: 'Unavailable' });
         },
       );

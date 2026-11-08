@@ -5,6 +5,11 @@ import {
   registerFileMenu,
 } from '@/features/chat/workspace/fileMenu';
 
+/** Reads the items the Obsidian fake's Menu collected; the real Menu type does not expose them. */
+function menuItems(menu: Menu): Array<{ title: string }> {
+  return Reflect.get(menu, 'items');
+}
+
 describe('Claudian file menu', () => {
   function createFile(path: string): TFile {
     const file = new TFile();
@@ -54,8 +59,8 @@ describe('Claudian file menu', () => {
     getFileMenuHandler()?.(menu, createFile('projects/plan.md'));
 
     expect(host.registerEvent).toHaveBeenCalledWith(eventRef);
-    expect((menu as any).items).toHaveLength(1);
-    expect((menu as any).items[0].title).toBe('Add to Kirodian');
+    expect(menuItems(menu)).toHaveLength(1);
+    expect(menuItems(menu)[0].title).toBe('Add to Kirodian');
   });
 
   it('does not add the action for folders', () => {
@@ -65,7 +70,7 @@ describe('Claudian file menu', () => {
     const menu = new Menu();
     getFileMenuHandler()?.(menu, new TFolder());
 
-    expect((menu as any).items).toHaveLength(0);
+    expect(menuItems(menu)).toHaveLength(0);
   });
 
   it('reveals Claudian and appends the vault-relative mention', async () => {

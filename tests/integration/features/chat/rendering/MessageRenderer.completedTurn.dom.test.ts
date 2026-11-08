@@ -3,12 +3,14 @@
 import '@/providers';
 
 import { axe } from '@test/helpers/accessibility';
+import { partialMock } from '@test/helpers/partialMock';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ChatMessage } from '@/core/types';
+import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 import { createResponseTextBlock } from '@/features/chat/rendering/ResponseLayout';
 import { createThinkingBlock, finalizeThinkingBlock } from '@/features/chat/rendering/ThinkingBlockRenderer';
@@ -23,8 +25,8 @@ function setup(providerId = 'kiro', capabilityOverride: Record<string, unknown> 
   const fork = vi.fn().mockResolvedValue(undefined);
   const settings = { mediaFolder: '', showMessageTimestamps: true };
   const renderer = new MessageRenderer(
-    { app: {}, settings } as any,
-    new Component() as any,
+    partialMock<ChatFeatureHost>({ app: {}, settings }),
+    new Component(),
     messagesEl, undefined, fork,
     () => ({ ...ProviderRegistry.getCapabilities(providerId), ...capabilityOverride }),
   );

@@ -126,10 +126,11 @@ export function createHarness(options: {
 
   const app = { vault: { adapter: { basePath: '/vault' }, getFiles: () => [] } };
   const settings = options.settings ?? {};
+  const getConversationSync = () => options.providerState ? { id: 'conversation-1', providerId: 'kiro', providerState: options.providerState } : null;
   const plugin = {
     app,
-    getConversationSummary(id: string) { return (this as unknown as { getConversationSync: (id: string) => any }).getConversationSync(id); },
-    getConversationSync: () => options.providerState ? { id: 'conversation-1', providerId: 'kiro', providerState: options.providerState } : null,
+    getConversationSummary: getConversationSync,
+    getConversationSync,
     projects: createProjectsFake(),
     providerHost: { app, settings, executionLifecycleRegistry: lifecycleRegistry },
     settings,

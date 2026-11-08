@@ -3,9 +3,14 @@ import type { Mock } from 'vitest';
 
 // Mock for @anthropic-ai/claude-agent-sdk
 
+/** A message the mocked stream yields; tests supply SDK-shaped objects keyed by `type`. */
+export type MockSdkMessage = { type?: string; subtype?: string };
+/** A pending entry acts as a barrier; one that resolves to null emits nothing. */
+type MockSdkMessageEntry = MockSdkMessage | null | Promise<MockSdkMessage | null>;
+
 export interface HookCallbackMatcher {
   matcher?: string;
-  hooks: Array<(hookInput: any, toolUseID: string, options: any) => Promise<{ continue: boolean; hookSpecificOutput?: any }>>;
+  hooks: Array<(hookInput: unknown, toolUseID: string, options: unknown) => Promise<{ continue: boolean; hookSpecificOutput?: unknown }>>;
 }
 
 export interface SpawnOptions {
@@ -25,9 +30,9 @@ export interface SpawnedProcess {
   killed: boolean;
   exitCode: number | null;
   kill: (signal?: NodeJS.Signals) => void;
-  on: (event: 'exit' | 'error', listener: (...args: any[]) => void) => void;
-  once: (event: 'exit' | 'error', listener: (...args: any[]) => void) => void;
-  off: (event: 'exit' | 'error', listener: (...args: any[]) => void) => void;
+  on: (event: 'exit' | 'error', listener: (...args: never[]) => void) => void;
+  once: (event: 'exit' | 'error', listener: (...args: never[]) => void) => void;
+  off: (event: 'exit' | 'error', listener: (...args: never[]) => void) => void;
 }
 
 export interface Options {
@@ -122,7 +127,7 @@ const mockMessages = [
   { type: 'result', subtype: 'success', result: 'completed' },
 ];
 
-let customMockMessages: any[] | null = null;
+let customMockMessages: MockSdkMessageEntry[] | null = null;
 let appendResultMessage = true;
 let lastOptions: Options | undefined;
 let mockSupportedCommands: Array<{ name: string; description: string; argumentHint?: string }> = [];
@@ -134,7 +139,7 @@ let mockSupportedCommandsImplementation: (() => Promise<Array<{
 let mockSupportedModels: ModelInfo[] = [];
 let mockOutputStyles: string[] = [];
 let mockContextUsage: { rawMaxTokens: number } | null = null;
-let lastResponse: (AsyncGenerator<any> & {
+let lastResponse: (AsyncGenerator<MockSdkMessage> & {
   interrupt: Mock;
   setModel: Mock;
   setMaxThinkingTokens: Mock;
@@ -149,7 +154,7 @@ let lastResponse: (AsyncGenerator<any> & {
 let queryCallCount = 0;
 
 // Allow tests to set custom mock messages
-export function setMockMessages(messages: any[], options?: { appendResult?: boolean }) {
+export function setMockMessages(messages: MockSdkMessageEntry[], options?: { appendResult?: boolean }) {
   customMockMessages = messages;
   appendResultMessage = options?.appendResult ?? true;
 }
@@ -211,28 +216,28 @@ export function getLastResponse(): typeof lastResponse {
 }
 
 // Mock query function that returns an async generator
-function isAsyncIterable(value: any): value is AsyncIterable<any> {
-  return !!value && typeof value[Symbol.asyncIterator] === 'function';
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return !!value && typeof (value as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] === 'function';
 }
 
-function getMessagesForPrompt(): any[] {
+function getMessagesForPrompt(): MockSdkMessageEntry[] {
   const baseMessages = customMockMessages || mockMessages;
   const messages = [...baseMessages];
-  if (appendResultMessage && !messages.some((msg) => msg.type === 'result')) {
+  if (appendResultMessage && !messages.some((msg) => msg !== null && !(msg instanceof Promise) && msg.type === 'result')) {
     messages.push({ type: 'result', subtype: 'success' });
   }
   return messages;
 }
 
 // Pending entries act as barriers; one that resolves to null emits nothing.
-async function* emitMessages(messages: any[]) {
+async function* emitMessages(messages: MockSdkMessageEntry[]) {
   for (const pendingMessage of messages) {
     const message = await pendingMessage;
     if (message != null) yield message;
   }
 }
 
-export function query({ prompt, options }: { prompt: any; options: Options }): AsyncGenerator<any> & { interrupt: () => Promise<void> } {
+export function query({ prompt, options }: { prompt: string | AsyncIterable<unknown>; options: Options }): AsyncGenerator<MockSdkMessage> & { interrupt: () => Promise<void> } {
   lastOptions = options;
   queryCallCount++;
 
@@ -250,7 +255,7 @@ export function query({ prompt, options }: { prompt: any; options: Options }): A
     yield* emitMessages(messages);
   };
 
-  const gen = generator() as AsyncGenerator<any> & {
+  const gen = generator() as AsyncGenerator<MockSdkMessage> & {
     interrupt: Mock;
     setModel: Mock;
     setMaxThinkingTokens: Mock;

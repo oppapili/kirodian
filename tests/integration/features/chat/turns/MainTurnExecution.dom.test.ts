@@ -3,10 +3,12 @@ import '@/providers';
 
 import { createFixture } from '@test/helpers/ChatInputHarness';
 import { createTestSession } from '@test/helpers/ConversationPorts';
+import { partialMock } from '@test/helpers/partialMock';
 import { fireEvent, within } from '@testing-library/dom';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import type { ProviderExecutionEvent } from '@/core/execution';
+import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 import { ChatState } from '@/features/chat/state/ChatState';
 import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
@@ -62,7 +64,7 @@ async function stopTurn(events: readonly unknown[]) {
   const messagesEl = document.body.createDiv();
   const session = createTestSession();
   const state = new ChatState({}, undefined, session.turns);
-  const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
+  const plugin = partialMock<ChatFeatureHost>({ app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } });
   const renderer = new MessageRenderer(plugin, new Component(), messagesEl);
   const subagents = new SubagentManager(() => undefined);
   const streamController = new StreamController({ plugin, state, renderer, subagentManager: subagents,

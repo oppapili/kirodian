@@ -5,12 +5,14 @@ import '@/providers';
 import { axe } from '@test/helpers/accessibility';
 import { createConversationPorts } from '@test/helpers/ConversationPorts';
 import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
+import { partialMock } from '@test/helpers/partialMock';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import type { ProviderCapabilities } from '@/core/providers/types';
 import type { ChatMessage } from '@/core/types';
+import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { ConversationController } from '@/features/chat/conversation/ConversationController';
 import { NavigationSidebar } from '@/features/chat/navigation/NavigationSidebar';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
@@ -61,7 +63,7 @@ function setup(
     return { top, bottom: top + 100 } as DOMRect;
   });
   const renderer = new MessageRenderer(
-    { app: {}, settings: { mediaFolder: '' } } as any, new Component() as any, messagesEl, undefined, undefined,
+    partialMock<ChatFeatureHost>({ app: {}, settings: { mediaFolder: '' } }), new Component(), messagesEl, undefined, undefined,
     capabilities ? () => capabilities as ProviderCapabilities : undefined,
     { navigate, isBusy: () => false },
   );
@@ -191,7 +193,7 @@ it('returns to the reading position after cancelling a branch preview of a revea
     getConversationSummary: vi.fn().mockReturnValue(null), projects: createProjectsFake() };
   const { renderer, messagesEl } = setup({ supportsConversationBranches: true }, (id, target) => controller.navigateBranch(id, target));
   let welcomeEl: HTMLElement | null = null;
-  const controller: ConversationController = new ConversationController({ plugin, state, renderer,
+  const controller: ConversationController = new ConversationController(partialMock<ConstructorParameters<typeof ConversationController>[0]>({ plugin, state, renderer,
     ...createConversationPorts({ state, getInputEl: () => inputEl, getImageContextManager: () => null }),
     subagentManager: { clear: vi.fn() },
     getInputEl: () => inputEl, getMessagesEl: () => messagesEl,
@@ -199,7 +201,7 @@ it('returns to the reading position after cancelling a branch preview of a revea
     getLinkedContentController: () => ({ lock: vi.fn() }),
     getImageContextManager: () => null, clearQueuedMessage: vi.fn(),
     getExecutionCoordinator: () => ({ supportsConversationBranches: true }),
-  } as any);
+  }));
   state.currentConversationId = 'kiro-chat';
   await controller.loadActive();
   fireEvent.click(within(messagesEl).getByRole('button', { name: 'Show earlier messages' }));

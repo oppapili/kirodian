@@ -9,8 +9,9 @@ import {
   submitInstruction,
   typeInstruction,
 } from '@test/helpers/features/inline-edit/InlineEditDOMHarness';
+import { partialMock } from '@test/helpers/partialMock';
 import { fireEvent, screen, waitFor, within } from '@testing-library/dom';
-import { Component, type Editor, MarkdownRenderer, Notice, TFile, TFolder, WorkspaceLeaf } from 'obsidian';
+import { Component, type Editor, MarkdownRenderer, type MetadataCache, Notice, TFile, TFolder, type Workspace, WorkspaceLeaf } from 'obsidian';
 
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import { InlineEditSession } from '@/features/inline-edit/ui/InlineEditModal';
@@ -216,7 +217,7 @@ it('shows a model or effort pick on the chip without waiting for it to save as t
   const h = await createHarness();
   const saves: Array<() => void> = [];
   const mutateSettings = h.plugin.mutateSettings;
-  h.plugin.mutateSettings = (mutation: (settings: Record<string, unknown>) => void | Promise<void>) => new Promise<void>((resolve) => {
+  h.plugin.mutateSettings = (mutation: Parameters<typeof mutateSettings>[0]) => new Promise<void>((resolve) => {
     saves.push(() => { void mutateSettings(mutation).then(resolve); });
   });
   h.createSession().show();
@@ -503,9 +504,10 @@ it.each([false, true].flatMap(alreadyOpen => [
   const leaf = Object.assign(new WorkspaceLeaf(), { getViewState: () => ({ type: 'markdown', state: { file: file.path } }), setEphemeralState: vi.fn() });
   const unrelated = Object.assign(new WorkspaceLeaf(), { getViewState: () => ({ type: 'markdown', state: { file: 'Elsewhere/target.md' } }), setEphemeralState: vi.fn() });
   // The kiro inline-edit harness app exposes only `vault`; link resolution needs these.
-  h.app.metadataCache = {};
-  h.app.workspace = {};
-  h.app.metadataCache.getFirstLinkpathDest = vi.fn((_path: string, source: string) => source === sourcePath ? file : Object.assign(new TFile(), { path: 'Elsewhere/target.md' }));
+  h.app.metadataCache = partialMock<MetadataCache>({
+    getFirstLinkpathDest: vi.fn((_path: string, source: string) => source === sourcePath ? file : Object.assign(new TFile(), { path: 'Elsewhere/target.md' })),
+  });
+  h.app.workspace = partialMock<Workspace>({});
   Object.assign(h.app.workspace, {
     iterateAllLeaves: (visit: (entry: typeof leaf) => void) => [unrelated, ...(alreadyOpen ? [leaf] : [])].forEach(visit),
     revealLeaf: vi.fn().mockResolvedValue(undefined),

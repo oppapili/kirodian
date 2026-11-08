@@ -5,17 +5,21 @@ import { axe } from '@test/helpers/accessibility';
 import { createSessionModelStub } from '@test/helpers/ConversationPorts';
 import { enqueueTabSessionEvent } from '@test/helpers/features/chat/SessionEventsHarness';
 import { FakeSideBackend } from '@test/helpers/features/chat/SideChatSessionHarness';
+import { partialMock } from '@test/helpers/partialMock';
 import { within } from '@testing-library/dom';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 import type { ChatMessage } from '@/core/types';
+import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
+import type { ChatExecutionCoordinatorDeps as ChatExecutionDeps } from '@/features/chat/execution/ChatExecutionCoordinator';
 import { ChatExecutionCoordinator } from '@/features/chat/execution/ChatExecutionCoordinator';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 import { ChatSessionRuntime } from '@/features/chat/sessions/ChatSessionRuntime';
 import { ChatState } from '@/features/chat/state/ChatState';
 import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
 import { TabSession } from '@/features/chat/tabs/TabSession';
+import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 import { StreamController } from '@/features/chat/turns/StreamController';
 
 HTMLElement.prototype.empty = function () { this.replaceChildren(); };
@@ -31,7 +35,7 @@ beforeEach(() => {
 
 it.each([false, true])('keeps main-chat automatic work and later output on either side of a notification (compaction: %s)', async (compaction) => {
   const messagesEl = document.body.createDiv();
-  const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
+  const plugin = partialMock<ChatFeatureHost>({ app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } });
   const renderer = new MessageRenderer(plugin,
     new Component(), messagesEl);
   const state = new ChatState();
@@ -42,8 +46,8 @@ it.each([false, true])('keeps main-chat automatic work and later output on eithe
   const backend = new FakeSideBackend();
   const coordinator = new ChatExecutionCoordinator({
     lifecycleRegistry, resolveBackend: () => backend,
-    persistence: { persistExecutionSnapshot: async () => true, registerExecutionBinding: () => undefined, releaseExecutionBinding: () => undefined } as any,
-    interactionPort: {} as any, workingDirectory: '/vault', createId: () => 'binding',
+    persistence: partialMock<ChatExecutionDeps['persistence']>({ persistExecutionSnapshot: async () => true, registerExecutionBinding: () => undefined, releaseExecutionBinding: () => undefined }),
+    interactionPort: partialMock<ChatExecutionDeps['interactionPort']>({}), workingDirectory: '/vault', createId: () => 'binding',
     resolveMissingProviderSession: async () => 'not_found',
     onSessionEvent: (event, context) => enqueueTabSessionEvent(tab, plugin, event, context),
   });
@@ -53,12 +57,12 @@ it.each([false, true])('keeps main-chat automatic work and later output on eithe
     session => createSessionModelStub(session, { getState: () => state }),
   );
   const session = new TabSession({ id: 'tab', lifecycleState: 'open' }, runtime);
-  const tab = { state, renderer, session, executionCoordinator: coordinator, lifecycleState: 'open',
+  const tab: AssembledTabRuntime = partialMock<AssembledTabRuntime>({ state, renderer, session, executionCoordinator: coordinator, lifecycleState: 'open',
     ui: { promptSuggestion: { receive() {}, discard() {} } },
     dom: { contentEl: messagesEl },
     services: { subagentManager: subagents },
     controllers: { streamController: stream, inputController: undefined,
-      conversationController: { save: async () => undefined, scheduleProgressSave: () => undefined } } } as any;
+      conversationController: { save: async () => undefined, scheduleProgressSave: () => undefined } } });
   try {
     await coordinator.bindConversation({ conversationId: 'conversation', providerId: 'kiro' });
     await coordinator.prepare();
