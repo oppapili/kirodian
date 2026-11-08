@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import {
   loadKiroHistory,
   loadKiroPromptIndexAfterAssistant,
+  readKiroHistoryRevision,
 } from '@/providers/kiro/history/KiroHistoryStore';
 
 function readFixture(name: string): string {
@@ -67,5 +68,26 @@ describe('KiroHistoryStore layout detection', () => {
     fs.writeFileSync(path.join(tempRoot, 'updates.jsonl'), readFixture('v1-updates.jsonl'));
 
     expect(await loadKiroPromptIndexAfterAssistant(tempRoot, 'session-v1', 'assistant-v1')).toBe(1);
+  });
+
+  it('reads the revision of the v2 file, then the v1 file, and null when neither exists', async () => {
+    expect(await readKiroHistoryRevision(tempRoot, 'session-v2')).toBeNull();
+
+    fs.writeFileSync(path.join(tempRoot, 'updates.jsonl'), readFixture('v1-updates.jsonl'));
+    const v1 = await readKiroHistoryRevision(tempRoot, 'session-v2');
+    expect(v1).not.toBeNull();
+
+    fs.writeFileSync(path.join(tempRoot, 'session-v2.jsonl'), readFixture('v2-multi-turn.jsonl'));
+    expect(await readKiroHistoryRevision(tempRoot, 'session-v2')).not.toBe(v1);
+  });
+
+  it('changes the revision when the history file grows', async () => {
+    const file = path.join(tempRoot, 'session-v2.jsonl');
+    fs.writeFileSync(file, readFixture('v2-multi-turn.jsonl'));
+    const before = await readKiroHistoryRevision(tempRoot, 'session-v2');
+
+    fs.appendFileSync(file, '\n');
+
+    expect(await readKiroHistoryRevision(tempRoot, 'session-v2')).not.toBe(before);
   });
 });
