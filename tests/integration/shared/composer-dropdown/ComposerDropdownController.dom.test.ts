@@ -1,5 +1,4 @@
 /** @vitest-environment jsdom */
-import '@test/helpers/ObsidianSettingsDOM';
 
 import { axe } from '@test/helpers/accessibility';
 import { testDate } from '@test/helpers/testClock';
@@ -12,9 +11,6 @@ import { MentionSource } from '@/shared/composer-dropdown/MentionSource';
 
 // jsdom has no layout or scrolling.
 Element.prototype.scrollIntoView = vi.fn();
-HTMLElement.prototype.setCssProps = function (props) {
-  for (const [name, value] of Object.entries(props)) this.style.setProperty(name, value);
-};
 
 function file(path: string, minutesAgo: number): TFile {
   const mtime = testDate({ minutes: -minutesAgo }).getTime();

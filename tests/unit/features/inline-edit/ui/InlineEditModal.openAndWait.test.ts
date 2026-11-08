@@ -1,15 +1,49 @@
 import '@/providers';
 
-import { createMockEl } from '@test/helpers/MockElement';
-import { Component, MarkdownRenderer, Notice } from 'obsidian';
+import type { EditorView } from '@codemirror/view';
+import { createMockEl, type MockEl } from '@test/helpers/MockElement';
+import { partialMock } from '@test/helpers/partialMock';
+import { type App, Component, type Editor, MarkdownRenderer, type MarkdownView, Notice, type TFolder } from 'obsidian';
 import type { Mock } from 'vitest';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
+import type { FeatureHost } from '@/features/FeatureHost';
 import { InlineEditSessionOwner } from '@/features/inline-edit/InlineEditSessionOwner';
 import { type InlineEditContext, InlineEditModal } from '@/features/inline-edit/ui/InlineEditModal';
 import { VaultFolderCache } from '@/shared/mention/VaultMentionCache';
 import * as obsidianCompat from '@/utils/obsidianCompat';
+
+type InlineEditService = ReturnType<typeof ProviderRegistry.createInlineEditService>;
+
+/** The session members these tests reach into; they are private in production. */
+interface SessionProbe {
+  inputEl: MockEl;
+  agentReplyEl: MockEl;
+  createInputDOM(): void;
+  createDiffPreviewDOM(diffOps: Array<{ type: string; text: string }>): MockEl;
+  generate(): Promise<void>;
+  reject(): void;
+  accept(): void;
+  showAgentReply(message: string): void;
+}
+
+interface DispatchedEffect {
+  value?: {
+    widget?: SessionProbe;
+    diffOps?: Array<{ type: string; text: string }>;
+    previewText?: string;
+  };
+}
+
+interface DispatchedTransaction {
+  effects?: DispatchedEffect | DispatchedEffect[];
+}
+
+function requireWidget(widget: SessionProbe | null): SessionProbe {
+  if (!widget) throw new Error('Expected the inline edit widget to have been dispatched');
+  return widget;
+}
 
 function createDeferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
@@ -38,7 +72,7 @@ describe('InlineEditModal - openAndWait', () => {
     vi.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized').mockResolvedValue(undefined);
     vi
       .spyOn(ProviderRegistry, 'createInlineEditService')
-      .mockReturnValue(createInertInlineEditService() as any);
+      .mockReturnValue(partialMock<InlineEditService>(createInertInlineEditService()));
   });
 
   afterEach(() => {
@@ -48,16 +82,16 @@ describe('InlineEditModal - openAndWait', () => {
   });
 
   it('uses editorCallback references first and falls back to view.editor before rejecting', async () => {
-    const callbackEditor = {} as any;
-    const fallbackEditor = {} as any;
+    const callbackEditor = {} as Editor;
+    const fallbackEditor = {} as Editor;
 
-    const app = {
+    const app = partialMock<App>({
       workspace: {
         getActiveViewOfType: vi.fn(),
       },
-    } as any;
-    const plugin = {} as any;
-    const view = { editor: fallbackEditor } as any;
+    });
+    const plugin = partialMock<FeatureHost>({});
+    const view = partialMock<MarkdownView>({ editor: fallbackEditor });
 
     const editContext: InlineEditContext = {
       mode: 'cursor',
@@ -90,9 +124,9 @@ describe('InlineEditModal - openAndWait', () => {
   });
 
   it('uses an enabled settings provider when no chat tab is open', async () => {
-    const editor = {} as any;
-    const app = {} as any;
-    const plugin = {
+    const editor = {} as Editor;
+    const app = partialMock<App>({});
+    const plugin = partialMock<FeatureHost>({
       settings: {
         settingsProvider: 'claude',
         providerConfigs: {
@@ -101,9 +135,9 @@ describe('InlineEditModal - openAndWait', () => {
         },
       },
       getView: vi.fn().mockReturnValue(null),
-    } as any;
-    plugin.providerHost = plugin;
-    const view = { editor } as any;
+    });
+    Object.assign(plugin, { providerHost: plugin });
+    const view = partialMock<MarkdownView>({ editor });
     const editContext: InlineEditContext = {
       mode: 'cursor',
       cursorContext: {
@@ -115,7 +149,7 @@ describe('InlineEditModal - openAndWait', () => {
       },
     };
 
-    vi.spyOn(obsidianCompat, 'getEditorView').mockReturnValue({ state: { doc: {} }, dispatch: vi.fn() } as any);
+    vi.spyOn(obsidianCompat, 'getEditorView').mockReturnValue(partialMock<EditorView>({ state: { doc: {} }, dispatch: vi.fn() }));
     vi.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized')
       .mockRejectedValue(new Error('stop after provider resolution'));
 
@@ -130,9 +164,9 @@ describe('InlineEditModal - openAndWait', () => {
   });
 
   it('uses an enabled settings provider when the active conversation provider is disabled', async () => {
-    const editor = {} as any;
-    const app = {} as any;
-    const plugin = {
+    const editor = {} as Editor;
+    const app = partialMock<App>({});
+    const plugin = partialMock<FeatureHost>({
       settings: {
         settingsProvider: 'kiro',
         providerConfigs: {
@@ -152,9 +186,9 @@ describe('InlineEditModal - openAndWait', () => {
           selectedModel: 'sonnet',
         }),
       }),
-    } as any;
-    plugin.providerHost = plugin;
-    const view = { editor } as any;
+    });
+    Object.assign(plugin, { providerHost: plugin });
+    const view = partialMock<MarkdownView>({ editor });
     const editContext: InlineEditContext = {
       mode: 'cursor',
       cursorContext: {
@@ -166,7 +200,7 @@ describe('InlineEditModal - openAndWait', () => {
       },
     };
 
-    vi.spyOn(obsidianCompat, 'getEditorView').mockReturnValue({ state: { doc: {} }, dispatch: vi.fn() } as any);
+    vi.spyOn(obsidianCompat, 'getEditorView').mockReturnValue(partialMock<EditorView>({ state: { doc: {} }, dispatch: vi.fn() }));
     vi.spyOn(ProviderWorkspaceRegistry, 'ensureInitialized')
       .mockRejectedValue(new Error('stop after provider resolution'));
 
@@ -182,8 +216,7 @@ describe('InlineEditModal - openAndWait', () => {
 
   it('debounces Inline Edit Vault mention loading through the shared dropdown', async () => {
     vi.useFakeTimers();
-    const originalDocument = (global as any).document;
-    (global as any).document = {
+    vi.stubGlobal('document', {
       body: createMockEl('body'),
       createElement: (tagName: string) => createMockEl(tagName),
       addEventListener: vi.fn(),
@@ -194,10 +227,10 @@ describe('InlineEditModal - openAndWait', () => {
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
       },
-    };
+    });
 
     try {
-      const app = {
+      const app = partialMock<App>({
         vault: {
           getFiles: vi.fn().mockReturnValue([]),
           getAllLoadedFiles: vi.fn().mockReturnValue([]),
@@ -205,19 +238,19 @@ describe('InlineEditModal - openAndWait', () => {
         workspace: {
           getActiveViewOfType: vi.fn(),
         },
-      } as any;
-      const plugin = {
+      });
+      const plugin = partialMock<FeatureHost>({
         settings: {
           hiddenCommands: [],
         },
         getActiveEnvironmentVariables: () => ({}),
-      } as any;
-      plugin.providerHost = plugin;
-      const editor = {} as any;
-      const view = { editor } as any;
+      });
+      Object.assign(plugin, { providerHost: plugin });
+      const editor = {} as Editor;
+      const view = partialMock<MarkdownView>({ editor });
 
-      let widgetRef: any = null;
-      const dispatch = vi.fn((transaction: any) => {
+      let widgetRef = null as SessionProbe | null;
+      const dispatch = vi.fn((transaction: DispatchedTransaction) => {
         const effects = Array.isArray(transaction?.effects)
           ? transaction.effects
           : transaction?.effects
@@ -231,7 +264,7 @@ describe('InlineEditModal - openAndWait', () => {
           }
         }
       });
-      const editorView = {
+      const editorView = partialMock<EditorView>({
         state: {
           field: vi.fn(() => undefined),
           doc: {
@@ -242,18 +275,18 @@ describe('InlineEditModal - openAndWait', () => {
         dispatch,
         focus: vi.fn(),
         dom: {
-          ownerDocument: (global as any).document,
+          ownerDocument: document,
           addEventListener: vi.fn(),
           removeEventListener: vi.fn(),
         },
-      } as any;
+      });
 
       const getEditorViewSpy = vi
         .spyOn(obsidianCompat, 'getEditorView')
         .mockReturnValue(editorView);
       const getFoldersSpy = vi
         .spyOn(VaultFolderCache.prototype, 'getFolders')
-        .mockReturnValue([{ name: 'src', path: 'src' } as any]);
+        .mockReturnValue([partialMock<TFolder>({ name: 'src', path: 'src' })]);
 
       const editContext: InlineEditContext = {
         mode: 'cursor',
@@ -270,7 +303,7 @@ describe('InlineEditModal - openAndWait', () => {
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
-      const inputEl = widgetRef?.inputEl;
+      const inputEl = requireWidget(widgetRef).inputEl;
       inputEl.value = '@s';
       inputEl.selectionStart = inputEl.selectionEnd = 2;
       // Upstream #1815 removed the mention-load debounce (reduce lookup latency),
@@ -280,9 +313,10 @@ describe('InlineEditModal - openAndWait', () => {
       await Promise.resolve();
 
       expect(getFoldersSpy).toHaveBeenCalled();
-      const labels = (global as any).document.body
-        .querySelectorAll('.claudian-composer-dropdown-label')
-        .map((element: { textContent: string }) => element.textContent);
+      const labels = Array.from(
+        document.body.querySelectorAll('.claudian-composer-dropdown-label'),
+        element => element.textContent,
+      );
       expect(labels).toEqual(['@src/']);
 
       widgetRef?.reject();
@@ -291,15 +325,14 @@ describe('InlineEditModal - openAndWait', () => {
       getEditorViewSpy.mockRestore();
       getFoldersSpy.mockRestore();
     } finally {
-      (global as any).document = originalDocument;
+      vi.unstubAllGlobals();
       vi.useRealTimers();
     }
   });
 
 
   it('passes the active blank tab draft model into inline edit services', async () => {
-    const originalDocument = (global as any).document;
-    (global as any).document = {
+    vi.stubGlobal('document', {
       body: createMockEl('body'),
       createElement: (tagName: string) => createMockEl(tagName),
       addEventListener: vi.fn(),
@@ -310,10 +343,10 @@ describe('InlineEditModal - openAndWait', () => {
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
       },
-    };
+    });
 
     try {
-      const app = {
+      const app = partialMock<App>({
         vault: {
           getFiles: vi.fn().mockReturnValue([]),
           getAllLoadedFiles: vi.fn().mockReturnValue([]),
@@ -321,15 +354,15 @@ describe('InlineEditModal - openAndWait', () => {
         workspace: {
           getActiveViewOfType: vi.fn(),
         },
-      } as any;
-      const inlineEditService = {
+      });
+      const inlineEditService = partialMock<InlineEditService>({
         send: vi.fn().mockResolvedValue({ success: true, editedText: 'done' }),
         end: vi.fn(),
-      };
+      });
       const providerSpy = vi
         .spyOn(ProviderRegistry, 'createInlineEditService')
-        .mockReturnValue(inlineEditService as any);
-      const plugin = {
+        .mockReturnValue(inlineEditService);
+      const plugin = partialMock<FeatureHost>({
         settings: {
           hiddenCommands: [],
           providerConfigs: {
@@ -349,13 +382,13 @@ describe('InlineEditModal - openAndWait', () => {
             providerId: 'kiro',
           }),
         }),
-      } as any;
-      plugin.providerHost = plugin;
-      const editor = {} as any;
-      const view = { editor } as any;
+      });
+      Object.assign(plugin, { providerHost: plugin });
+      const editor = {} as Editor;
+      const view = partialMock<MarkdownView>({ editor });
 
-      let widgetRef: any = null;
-      const dispatch = vi.fn((transaction: any) => {
+      let widgetRef = null as SessionProbe | null;
+      const dispatch = vi.fn((transaction: DispatchedTransaction) => {
         const effects = Array.isArray(transaction?.effects)
           ? transaction.effects
           : transaction?.effects
@@ -369,7 +402,7 @@ describe('InlineEditModal - openAndWait', () => {
           }
         }
       });
-      const editorView = {
+      const editorView = partialMock<EditorView>({
         state: {
           field: vi.fn(() => undefined),
           doc: {
@@ -380,11 +413,11 @@ describe('InlineEditModal - openAndWait', () => {
         dispatch,
         focus: vi.fn(),
         dom: {
-          ownerDocument: (global as any).document,
+          ownerDocument: document,
           addEventListener: vi.fn(),
           removeEventListener: vi.fn(),
         },
-      } as any;
+      });
 
       const getEditorViewSpy = vi
         .spyOn(obsidianCompat, 'getEditorView')
@@ -409,23 +442,22 @@ describe('InlineEditModal - openAndWait', () => {
 
       // The merged service applies the model per request via send(request, { model }),
       // so the active blank-tab draft model reaches it when the edit runs.
-      widgetRef.inputEl.value = 'Improve the statement';
-      await widgetRef.generate();
+      requireWidget(widgetRef).inputEl.value = 'Improve the statement';
+      await requireWidget(widgetRef).generate();
       expect(inlineEditService.send).toHaveBeenCalledTimes(1);
-      expect(inlineEditService.send.mock.calls[0][1].model).toBe('kiro:claude-sonnet-4');
+      expect(vi.mocked(inlineEditService.send).mock.calls[0][1]?.model).toBe('kiro:claude-sonnet-4');
 
-      widgetRef.reject();
+      requireWidget(widgetRef).reject();
       await expect(resultPromise).resolves.toEqual({ decision: 'reject' });
       getEditorViewSpy.mockRestore();
       providerSpy.mockRestore();
     } finally {
-      (global as any).document = originalDocument;
+      vi.unstubAllGlobals();
     }
   });
 
   it('passes the bound conversation model into inline edit services before runtime initialization', async () => {
-    const originalDocument = (global as any).document;
-    (global as any).document = {
+    vi.stubGlobal('document', {
       body: createMockEl('body'),
       createElement: (tagName: string) => createMockEl(tagName),
       addEventListener: vi.fn(),
@@ -436,10 +468,10 @@ describe('InlineEditModal - openAndWait', () => {
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
       },
-    };
+    });
 
     try {
-      const app = {
+      const app = partialMock<App>({
         vault: {
           getFiles: vi.fn().mockReturnValue([]),
           getAllLoadedFiles: vi.fn().mockReturnValue([]),
@@ -447,20 +479,20 @@ describe('InlineEditModal - openAndWait', () => {
         workspace: {
           getActiveViewOfType: vi.fn(),
         },
-      } as any;
-      const inlineEditService = {
+      });
+      const inlineEditService = partialMock<InlineEditService>({
         send: vi.fn().mockResolvedValue({ success: true, editedText: 'done' }),
         end: vi.fn(),
-      };
+      });
       const providerSpy = vi
         .spyOn(ProviderRegistry, 'createInlineEditService')
-        .mockReturnValue(inlineEditService as any);
+        .mockReturnValue(inlineEditService);
       const conversation = {
         id: 'conv-1',
         providerId: 'kiro',
         selectedModel: 'kiro:claude-sonnet-4',
       };
-      const plugin = {
+      const plugin = partialMock<FeatureHost>({
         settings: {
           hiddenCommands: [],
           providerConfigs: {
@@ -477,13 +509,13 @@ describe('InlineEditModal - openAndWait', () => {
             providerId: 'kiro',
           }),
         }),
-      } as any;
-      plugin.providerHost = plugin;
-      const editor = {} as any;
-      const view = { editor } as any;
+      });
+      Object.assign(plugin, { providerHost: plugin });
+      const editor = {} as Editor;
+      const view = partialMock<MarkdownView>({ editor });
 
-      let widgetRef: any = null;
-      const dispatch = vi.fn((transaction: any) => {
+      let widgetRef = null as SessionProbe | null;
+      const dispatch = vi.fn((transaction: DispatchedTransaction) => {
         const effects = Array.isArray(transaction?.effects)
           ? transaction.effects
           : transaction?.effects
@@ -497,7 +529,7 @@ describe('InlineEditModal - openAndWait', () => {
           }
         }
       });
-      const editorView = {
+      const editorView = partialMock<EditorView>({
         state: {
           field: vi.fn(() => undefined),
           doc: {
@@ -508,11 +540,11 @@ describe('InlineEditModal - openAndWait', () => {
         dispatch,
         focus: vi.fn(),
         dom: {
-          ownerDocument: (global as any).document,
+          ownerDocument: document,
           addEventListener: vi.fn(),
           removeEventListener: vi.fn(),
         },
-      } as any;
+      });
 
       const getEditorViewSpy = vi
         .spyOn(obsidianCompat, 'getEditorView')
@@ -537,24 +569,23 @@ describe('InlineEditModal - openAndWait', () => {
 
       // The merged service applies the model per request via send(request, { model }),
       // so the bound conversation model reaches it when the edit runs.
-      widgetRef.inputEl.value = 'Improve the statement';
-      await widgetRef.generate();
+      requireWidget(widgetRef).inputEl.value = 'Improve the statement';
+      await requireWidget(widgetRef).generate();
       expect(inlineEditService.send).toHaveBeenCalledTimes(1);
-      expect(inlineEditService.send.mock.calls[0][1].model).toBe('kiro:claude-sonnet-4');
+      expect(vi.mocked(inlineEditService.send).mock.calls[0][1]?.model).toBe('kiro:claude-sonnet-4');
 
-      widgetRef.reject();
+      requireWidget(widgetRef).reject();
       await expect(resultPromise).resolves.toEqual({ decision: 'reject' });
       getEditorViewSpy.mockRestore();
       providerSpy.mockRestore();
     } finally {
-      (global as any).document = originalDocument;
+      vi.unstubAllGlobals();
     }
   });
 
 
   it('parses @mentions into contextFiles at send time without dropdown attachment state', async () => {
-    const originalDocument = (global as any).document;
-    (global as any).document = {
+    vi.stubGlobal('document', {
       body: createMockEl('body'),
       createElement: (tagName: string) => createMockEl(tagName),
       addEventListener: vi.fn(),
@@ -565,10 +596,10 @@ describe('InlineEditModal - openAndWait', () => {
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
       },
-    };
+    });
 
     try {
-      const app = {
+      const app = partialMock<App>({
         vault: {
           adapter: { basePath: '/vault' },
           getFiles: vi.fn().mockReturnValue([
@@ -580,19 +611,19 @@ describe('InlineEditModal - openAndWait', () => {
         workspace: {
           getActiveViewOfType: vi.fn(),
         },
-      } as any;
-      const plugin = {
+      });
+      const plugin = partialMock<FeatureHost>({
         settings: {
           hiddenCommands: [],
         },
         getActiveEnvironmentVariables: () => ({}),
-      } as any;
-      plugin.providerHost = plugin;
-      const editor = {} as any;
-      const view = { editor } as any;
+      });
+      Object.assign(plugin, { providerHost: plugin });
+      const editor = {} as Editor;
+      const view = partialMock<MarkdownView>({ editor });
 
-      let widgetRef: any = null;
-      const dispatch = vi.fn((transaction: any) => {
+      let widgetRef = null as SessionProbe | null;
+      const dispatch = vi.fn((transaction: DispatchedTransaction) => {
         const effects = Array.isArray(transaction?.effects)
           ? transaction.effects
           : transaction?.effects
@@ -606,7 +637,7 @@ describe('InlineEditModal - openAndWait', () => {
           }
         }
       });
-      const editorView = {
+      const editorView = partialMock<EditorView>({
         state: {
           field: vi.fn(() => undefined),
           doc: {
@@ -617,11 +648,11 @@ describe('InlineEditModal - openAndWait', () => {
         dispatch,
         focus: vi.fn(),
         dom: {
-          ownerDocument: (global as any).document,
+          ownerDocument: document,
           addEventListener: vi.fn(),
           removeEventListener: vi.fn(),
         },
-      } as any;
+      });
 
       const getEditorViewSpy = vi
         .spyOn(obsidianCompat, 'getEditorView')
@@ -644,29 +675,28 @@ describe('InlineEditModal - openAndWait', () => {
       });
       vi
         .spyOn(ProviderRegistry, 'createInlineEditService')
-        .mockReturnValue({ send: sendMock, end: vi.fn(), isConversing: false } as any);
+        .mockReturnValue(partialMock<InlineEditService>({ send: sendMock, end: vi.fn(), isConversing: false }));
 
       const modal = new InlineEditModal(app, plugin, component, editor, view, editContext, 'note.md', owner);
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
-      widgetRef.inputEl.value = 'Please check @notes/a.md and @notes/a.md.';
-      await widgetRef.generate();
+      requireWidget(widgetRef).inputEl.value = 'Please check @notes/a.md and @notes/a.md.';
+      await requireWidget(widgetRef).generate();
 
       expect(sendMock).toHaveBeenCalledTimes(1);
       expect(sendMock.mock.calls[0][0].contextFiles).toEqual(['notes/a.md']);
 
-      widgetRef.reject();
+      requireWidget(widgetRef).reject();
       await expect(resultPromise).resolves.toEqual({ decision: 'reject' });
       getEditorViewSpy.mockRestore();
     } finally {
-      (global as any).document = originalDocument;
+      vi.unstubAllGlobals();
     }
   });
 
   it('parses vault @mentions with spaces into contextFiles at send time', async () => {
-    const originalDocument = (global as any).document;
-    (global as any).document = {
+    vi.stubGlobal('document', {
       body: createMockEl('body'),
       createElement: (tagName: string) => createMockEl(tagName),
       addEventListener: vi.fn(),
@@ -677,10 +707,10 @@ describe('InlineEditModal - openAndWait', () => {
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
       },
-    };
+    });
 
     try {
-      const app = {
+      const app = partialMock<App>({
         vault: {
           adapter: { basePath: '/vault' },
           getFiles: vi.fn().mockReturnValue([
@@ -691,19 +721,19 @@ describe('InlineEditModal - openAndWait', () => {
         workspace: {
           getActiveViewOfType: vi.fn(),
         },
-      } as any;
-      const plugin = {
+      });
+      const plugin = partialMock<FeatureHost>({
         settings: {
           hiddenCommands: [],
         },
         getActiveEnvironmentVariables: () => ({}),
-      } as any;
-      plugin.providerHost = plugin;
-      const editor = {} as any;
-      const view = { editor } as any;
+      });
+      Object.assign(plugin, { providerHost: plugin });
+      const editor = {} as Editor;
+      const view = partialMock<MarkdownView>({ editor });
 
-      let widgetRef: any = null;
-      const dispatch = vi.fn((transaction: any) => {
+      let widgetRef = null as SessionProbe | null;
+      const dispatch = vi.fn((transaction: DispatchedTransaction) => {
         const effects = Array.isArray(transaction?.effects)
           ? transaction.effects
           : transaction?.effects
@@ -717,7 +747,7 @@ describe('InlineEditModal - openAndWait', () => {
           }
         }
       });
-      const editorView = {
+      const editorView = partialMock<EditorView>({
         state: {
           field: vi.fn(() => undefined),
           doc: {
@@ -728,11 +758,11 @@ describe('InlineEditModal - openAndWait', () => {
         dispatch,
         focus: vi.fn(),
         dom: {
-          ownerDocument: (global as any).document,
+          ownerDocument: document,
           addEventListener: vi.fn(),
           removeEventListener: vi.fn(),
         },
-      } as any;
+      });
 
       const getEditorViewSpy = vi
         .spyOn(obsidianCompat, 'getEditorView')
@@ -755,29 +785,28 @@ describe('InlineEditModal - openAndWait', () => {
       });
       vi
         .spyOn(ProviderRegistry, 'createInlineEditService')
-        .mockReturnValue({ send: sendMock, end: vi.fn(), isConversing: false } as any);
+        .mockReturnValue(partialMock<InlineEditService>({ send: sendMock, end: vi.fn(), isConversing: false }));
 
       const modal = new InlineEditModal(app, plugin, component, editor, view, editContext, 'note.md', owner);
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
-      widgetRef.inputEl.value = 'Please check @notes/my note.md.';
-      await widgetRef.generate();
+      requireWidget(widgetRef).inputEl.value = 'Please check @notes/my note.md.';
+      await requireWidget(widgetRef).generate();
 
       expect(sendMock).toHaveBeenCalledTimes(1);
       expect(sendMock.mock.calls[0][0].contextFiles).toEqual(['notes/my note.md']);
 
-      widgetRef.reject();
+      requireWidget(widgetRef).reject();
       await expect(resultPromise).resolves.toEqual({ decision: 'reject' });
       getEditorViewSpy.mockRestore();
     } finally {
-      (global as any).document = originalDocument;
+      vi.unstubAllGlobals();
     }
   });
 
   it('does not let stale clarification markdown renders overwrite newer replies', async () => {
-    const originalDocument = (global as any).document;
-    (global as any).document = {
+    vi.stubGlobal('document', {
       body: createMockEl('body'),
       createElement: (tagName: string) => createMockEl(tagName),
       addEventListener: vi.fn(),
@@ -788,10 +817,10 @@ describe('InlineEditModal - openAndWait', () => {
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
       },
-    };
+    });
 
     try {
-      const app = {
+      const app = partialMock<App>({
         vault: {
           getFiles: vi.fn().mockReturnValue([]),
           getAllLoadedFiles: vi.fn().mockReturnValue([]),
@@ -799,20 +828,20 @@ describe('InlineEditModal - openAndWait', () => {
         workspace: {
           getActiveViewOfType: vi.fn(),
         },
-      } as any;
-      const plugin = {
+      });
+      const plugin = partialMock<FeatureHost>({
         settings: {
           hiddenCommands: [],
           mediaFolder: '',
         },
         getActiveEnvironmentVariables: () => ({}),
-      } as any;
-      plugin.providerHost = plugin;
-      const editor = {} as any;
-      const view = { editor } as any;
+      });
+      Object.assign(plugin, { providerHost: plugin });
+      const editor = {} as Editor;
+      const view = partialMock<MarkdownView>({ editor });
 
-      let widgetRef: any = null;
-      const dispatch = vi.fn((transaction: any) => {
+      let widgetRef = null as SessionProbe | null;
+      const dispatch = vi.fn((transaction: DispatchedTransaction) => {
         const effects = Array.isArray(transaction?.effects)
           ? transaction.effects
           : transaction?.effects
@@ -826,7 +855,7 @@ describe('InlineEditModal - openAndWait', () => {
           }
         }
       });
-      const editorView = {
+      const editorView = partialMock<EditorView>({
         state: {
           field: vi.fn(() => undefined),
           doc: {
@@ -837,11 +866,11 @@ describe('InlineEditModal - openAndWait', () => {
         dispatch,
         focus: vi.fn(),
         dom: {
-          ownerDocument: (global as any).document,
+          ownerDocument: document,
           addEventListener: vi.fn(),
           removeEventListener: vi.fn(),
         },
-      } as any;
+      });
 
       const getEditorViewSpy = vi
         .spyOn(obsidianCompat, 'getEditorView')
@@ -850,11 +879,11 @@ describe('InlineEditModal - openAndWait', () => {
       const firstRender = createDeferred();
       const secondRender = createDeferred();
       (MarkdownRenderer.renderMarkdown as Mock)
-        .mockImplementationOnce((markdown: string, container: any) => {
+        .mockImplementationOnce((markdown: string, container: MockEl) => {
           container.createDiv({ text: markdown });
           return firstRender.promise;
         })
-        .mockImplementationOnce((markdown: string, container: any) => {
+        .mockImplementationOnce((markdown: string, container: MockEl) => {
           container.createDiv({ text: markdown });
           return secondRender.promise;
         });
@@ -875,42 +904,41 @@ describe('InlineEditModal - openAndWait', () => {
       await Promise.resolve();
 
       (MarkdownRenderer.renderMarkdown as Mock).mockClear();
-      widgetRef.showAgentReply('Should this use $Z(f)$?');
+      requireWidget(widgetRef).showAgentReply('Should this use $Z(f)$?');
       expect(MarkdownRenderer.renderMarkdown).toHaveBeenCalledWith(
         'Should this use $Z(f)$?',
         expect.anything(),
         'math/note.md',
         expect.any(Component),
       );
-      widgetRef.showAgentReply('Second clarification');
+      requireWidget(widgetRef).showAgentReply('Second clarification');
 
       secondRender.resolve();
       await secondRender.promise;
       await Promise.resolve();
       await Promise.resolve();
 
-      expect(widgetRef.agentReplyEl.children).toHaveLength(1);
-      expect(widgetRef.agentReplyEl.children[0].textContent).toBe('Second clarification');
+      expect(requireWidget(widgetRef).agentReplyEl.children).toHaveLength(1);
+      expect(requireWidget(widgetRef).agentReplyEl.children[0].textContent).toBe('Second clarification');
 
       firstRender.resolve();
       await firstRender.promise;
       await Promise.resolve();
       await Promise.resolve();
 
-      expect(widgetRef.agentReplyEl.children).toHaveLength(1);
-      expect(widgetRef.agentReplyEl.children[0].textContent).toBe('Second clarification');
+      expect(requireWidget(widgetRef).agentReplyEl.children).toHaveLength(1);
+      expect(requireWidget(widgetRef).agentReplyEl.children[0].textContent).toBe('Second clarification');
 
-      widgetRef.reject();
+      requireWidget(widgetRef).reject();
       await expect(resultPromise).resolves.toEqual({ decision: 'reject' });
       getEditorViewSpy.mockRestore();
     } finally {
-      (global as any).document = originalDocument;
+      vi.unstubAllGlobals();
     }
   });
 
   it('renders accept and reject controls in the block preview', async () => {
-    const originalDocument = (global as any).document;
-    (global as any).document = {
+    vi.stubGlobal('document', {
       body: createMockEl('body'),
       createElement: (tagName: string) => createMockEl(tagName),
       addEventListener: vi.fn(),
@@ -921,10 +949,10 @@ describe('InlineEditModal - openAndWait', () => {
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
       },
-    };
+    });
 
     try {
-      const app = {
+      const app = partialMock<App>({
         vault: {
           getFiles: vi.fn().mockReturnValue([]),
           getAllLoadedFiles: vi.fn().mockReturnValue([]),
@@ -932,20 +960,20 @@ describe('InlineEditModal - openAndWait', () => {
         workspace: {
           getActiveViewOfType: vi.fn(),
         },
-      } as any;
-      const plugin = {
+      });
+      const plugin = partialMock<FeatureHost>({
         settings: {
           hiddenCommands: [],
           mediaFolder: '',
         },
         getActiveEnvironmentVariables: () => ({}),
-      } as any;
-      plugin.providerHost = plugin;
-      const editor = {} as any;
-      const view = { editor } as any;
+      });
+      Object.assign(plugin, { providerHost: plugin });
+      const editor = {} as Editor;
+      const view = partialMock<MarkdownView>({ editor });
 
-      let widgetRef: any = null;
-      const dispatch = vi.fn((transaction: any) => {
+      let widgetRef = null as SessionProbe | null;
+      const dispatch = vi.fn((transaction: DispatchedTransaction) => {
         const effects = Array.isArray(transaction?.effects)
           ? transaction.effects
           : transaction?.effects
@@ -959,7 +987,7 @@ describe('InlineEditModal - openAndWait', () => {
           }
         }
       });
-      const editorView = {
+      const editorView = partialMock<EditorView>({
         state: {
           field: vi.fn(() => undefined),
           doc: {
@@ -970,11 +998,11 @@ describe('InlineEditModal - openAndWait', () => {
         dispatch,
         focus: vi.fn(),
         dom: {
-          ownerDocument: (global as any).document,
+          ownerDocument: document,
           addEventListener: vi.fn(),
           removeEventListener: vi.fn(),
         },
-      } as any;
+      });
 
       const getEditorViewSpy = vi
         .spyOn(obsidianCompat, 'getEditorView')
@@ -995,10 +1023,10 @@ describe('InlineEditModal - openAndWait', () => {
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
-      const rejectSpy = vi.spyOn(widgetRef, 'reject').mockImplementation(() => {});
-      const acceptSpy = vi.spyOn(widgetRef, 'accept').mockImplementation(() => {});
+      const rejectSpy = vi.spyOn(requireWidget(widgetRef), 'reject').mockImplementation(() => {});
+      const acceptSpy = vi.spyOn(requireWidget(widgetRef), 'accept').mockImplementation(() => {});
 
-      const previewEl = widgetRef.createDiffPreviewDOM([
+      const previewEl = requireWidget(widgetRef).createDiffPreviewDOM([
         { type: 'insert', text: 'Updated text' },
       ]);
       const actionBar = previewEl.querySelector('.claudian-inline-preview-actions');
@@ -1017,11 +1045,11 @@ describe('InlineEditModal - openAndWait', () => {
 
       rejectSpy.mockRestore();
       acceptSpy.mockRestore();
-      widgetRef.reject();
+      requireWidget(widgetRef).reject();
       await expect(resultPromise).resolves.toEqual({ decision: 'reject' });
       getEditorViewSpy.mockRestore();
     } finally {
-      (global as any).document = originalDocument;
+      vi.unstubAllGlobals();
     }
   });
 
@@ -1118,8 +1146,7 @@ describe('InlineEditModal - openAndWait', () => {
       expectedKinds: ['del', 'ins'],
     },
   ])('renders markdown diff documents for $name', async ({ oldMarkdown, newMarkdown, expectedKinds, expectedDiffOps }) => {
-    const originalDocument = (global as any).document;
-    (global as any).document = {
+    vi.stubGlobal('document', {
       body: createMockEl('body'),
       createElement: (tagName: string) => createMockEl(tagName),
       addEventListener: vi.fn(),
@@ -1130,10 +1157,10 @@ describe('InlineEditModal - openAndWait', () => {
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
       },
-    };
+    });
 
     try {
-      const app = {
+      const app = partialMock<App>({
         vault: {
           getFiles: vi.fn().mockReturnValue([]),
           getAllLoadedFiles: vi.fn().mockReturnValue([]),
@@ -1141,27 +1168,27 @@ describe('InlineEditModal - openAndWait', () => {
         workspace: {
           getActiveViewOfType: vi.fn(),
         },
-      } as any;
-      const plugin = {
+      });
+      const plugin = partialMock<FeatureHost>({
         settings: {
           hiddenCommands: [],
           mediaFolder: '',
         },
         getActiveEnvironmentVariables: () => ({}),
-      } as any;
-      plugin.providerHost = plugin;
-      const editor = {
+      });
+      Object.assign(plugin, { providerHost: plugin });
+      const editor = partialMock<Editor>({
         getCursor: vi.fn((which: string) => which === 'from'
           ? { line: 0, ch: 0 }
           : { line: 0, ch: 3 }),
         getSelection: vi.fn().mockReturnValue(oldMarkdown),
-      } as any;
-      const view = { editor } as any;
+      });
+      const view = partialMock<MarkdownView>({ editor });
 
-      let widgetRef: any = null;
+      let widgetRef = null as SessionProbe | null;
       let diffOps: Array<{ type: string; text: string }> | undefined;
       let hasPreviewText = false;
-      const dispatch = vi.fn((transaction: any) => {
+      const dispatch = vi.fn((transaction: DispatchedTransaction) => {
         const effects = Array.isArray(transaction?.effects)
           ? transaction.effects
           : transaction?.effects
@@ -1182,7 +1209,7 @@ describe('InlineEditModal - openAndWait', () => {
           }
         }
       });
-      const editorView = {
+      const editorView = partialMock<EditorView>({
         state: {
           field: vi.fn(() => undefined),
           doc: {
@@ -1193,11 +1220,11 @@ describe('InlineEditModal - openAndWait', () => {
         dispatch,
         focus: vi.fn(),
         dom: {
-          ownerDocument: (global as any).document,
+          ownerDocument: document,
           addEventListener: vi.fn(),
           removeEventListener: vi.fn(),
         },
-      } as any;
+      });
 
       const getEditorViewSpy = vi
         .spyOn(obsidianCompat, 'getEditorView')
@@ -1210,24 +1237,25 @@ describe('InlineEditModal - openAndWait', () => {
 
       vi
         .spyOn(ProviderRegistry, 'createInlineEditService')
-        .mockReturnValue({
+        .mockReturnValue(partialMock<InlineEditService>({
           send: vi.fn().mockResolvedValue({ success: true, editedText: newMarkdown }),
           end: vi.fn(),
           isConversing: false,
-        } as any);
+        }));
 
       const modal = new InlineEditModal(app, plugin, component, editor, view, editContext, 'math/note.md', owner);
       const resultPromise = modal.openAndWait();
       await Promise.resolve();
 
-      widgetRef.inputEl.value = 'Improve the statement';
-      await widgetRef.generate();
+      requireWidget(widgetRef).inputEl.value = 'Improve the statement';
+      await requireWidget(widgetRef).generate();
 
       expect(diffOps).toEqual(expectedDiffOps);
       expect(hasPreviewText).toBe(false);
 
       (MarkdownRenderer.renderMarkdown as Mock).mockClear();
-      const previewEl = widgetRef.createDiffPreviewDOM(diffOps);
+      if (!diffOps) throw new Error('Expected diff ops to have been dispatched');
+      const previewEl = requireWidget(widgetRef).createDiffPreviewDOM(diffOps);
       for (let i = 0; i < 5 && (MarkdownRenderer.renderMarkdown as Mock).mock.calls.length < expectedKinds.length; i++) {
         await Promise.resolve();
       }
@@ -1246,11 +1274,11 @@ describe('InlineEditModal - openAndWait', () => {
         expect(diffBlocks[index].hasClass(`claudian-diff-${kind}`)).toBe(true);
       });
 
-      widgetRef.reject();
+      requireWidget(widgetRef).reject();
       await expect(resultPromise).resolves.toEqual({ decision: 'reject' });
       getEditorViewSpy.mockRestore();
     } finally {
-      (global as any).document = originalDocument;
+      vi.unstubAllGlobals();
     }
   });
 });

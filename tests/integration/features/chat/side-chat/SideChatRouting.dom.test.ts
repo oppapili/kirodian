@@ -10,6 +10,7 @@ import {
   type SideChatDOMHarness,
   startSideChat,
 } from '@test/helpers/features/chat/SideChatDOMHarness';
+import { partialMock } from '@test/helpers/partialMock';
 import { testDate } from '@test/helpers/testClock';
 import { waitFor } from '@testing-library/dom';
 
@@ -601,14 +602,14 @@ it('protects parked main drafts and cancels branch previews when switching to si
   const prompt: ChatMessage = { id: 'second', role: 'user', content: 'Old prompt', timestamp: Date.now(), userMessageId: 'native-second' };
   const history: ChatMessage[] = [{ id: 'first', role: 'user', content: 'First', timestamp: Date.now() }, prompt];
   routing.state.messages = history;
-  const conversation = new ConversationController({
+  const conversation = new ConversationController(partialMock<ConstructorParameters<typeof ConversationController>[0]>({
     state: routing.state, drafts: harness.drafts, session: routing.session, plugin: harness.plugin,
     renderer: { renderMessages: vi.fn(), refreshBranchButtonState: vi.fn(), captureReadingAnchor: () => null, restoreReadingAnchor: vi.fn() },
     getInputEl: () => harness.inputEl, getMessagesEl: () => document.body,
     getImageContextManager: () => harness.imageContextManager,
     getWelcomeEl: () => null, setWelcomeEl: vi.fn(),
     isMainComposerActive: () => harness.controller.destination === 'main',
-  } as any);
+  }));
   const { started } = await startSideChat(harness);
   harness.backend.latest.establishChild('child-session');
   harness.backend.latest.complete();
@@ -639,11 +640,11 @@ it.each([false, true])('keeps side drafts separate while a branch submission set
   const coordinator = { navigateConversationBranch: vi.fn().mockReturnValue(navigation.promise) };
   let conversation!: ConversationController;
   const routing = createRouting(harness, {}, undefined, deps => {
-    conversation = new ConversationController({
-      ...deps, plugin: { settings: {}, updateConversation: vi.fn(), getConversationSummary: () => null, projects: createProjectsFake(), providerHost: { workingDirectory: '/vault' } },
+    conversation = new ConversationController(partialMock<ConstructorParameters<typeof ConversationController>[0]>({
+      ...deps, plugin: { settings: {}, updateConversation: vi.fn(), getConversationSummary: (id: string) => ({ id, providerId: 'kiro' }), projects: createProjectsFake(), providerHost: { workingDirectory: '/vault' } },
       renderer: { renderMessages: vi.fn(), refreshBranchButtonState: vi.fn(), captureReadingAnchor: () => null, restoreReadingAnchor: vi.fn() },
       setWelcomeEl: vi.fn(), getExecutionCoordinator: () => coordinator,
-    } as any);
+    }));
     deps.conversationController = conversation;
   });
   const { started } = await startSideChat(harness);
@@ -681,7 +682,7 @@ it.each([false, true])('keeps the captured side mention after collapse (cancel m
   harness.backend.latest.establishChild('child-session');
   harness.backend.latest.complete();
   await started;
-  const hydration = deferred<any>();
+  const hydration = deferred<unknown>();
   const entered = deferred<void>();
   Object.assign(routing.deps.plugin, {
     getConversationById: () => { entered.resolve(); return hydration.promise; },
@@ -719,7 +720,7 @@ it('shows side preparation as working and cancels it through the selected destin
   harness.backend.latest.establishChild('child-session');
   harness.backend.latest.complete();
   await started;
-  const hydration = deferred<any>();
+  const hydration = deferred<unknown>();
   const entered = deferred<void>();
   Object.assign(routing.deps.plugin, { getConversationById: () => { entered.resolve(); return hydration.promise; } });
   const token = '@[Old](claudian-session:conv-1-source)';
@@ -741,7 +742,7 @@ it('runs a queued side command after mention preparation fails', async () => {
   harness.backend.latest.establishChild('child-session');
   harness.backend.latest.complete();
   await started;
-  const hydration = deferred<any>();
+  const hydration = deferred<unknown>();
   const entered = deferred<void>();
   Object.assign(routing.deps.plugin, { getConversationById: () => { entered.resolve(); return hydration.promise; } });
   const token = '@[Old](claudian-session:conv-1-source)';
@@ -805,7 +806,7 @@ it('reserves command order and resolves queued mentions before the child becomes
   const native = harness.backend.latest;
   native.establishChild('child-session');
   harness.controller.collapse();
-  const hydration = deferred<any>();
+  const hydration = deferred<unknown>();
   const entered = vi.fn();
   Object.assign(harness.plugin, {
     getConversationById: () => { entered(); return hydration.promise; },
@@ -842,7 +843,7 @@ it.each(['failure', 'cancel', 'dispose'])('restores a queued command and attachm
   const native = harness.backend.latest;
   native.establishChild('child-session');
   harness.controller.collapse();
-  const hydration = deferred<any>();
+  const hydration = deferred<unknown>();
   const entered = vi.fn();
   Object.assign(harness.plugin, { getConversationById: () => { entered(); return hydration.promise; } });
   const command = '/btw Use @[Old](claudian-session:conv-1-source)';
@@ -875,7 +876,7 @@ it('joins a starting command on disposal before fork capture or hydration settle
   const harness = createHarness();
   const routing = createRouting(harness);
   const capture = deferred<{ resumeAt: string; sessionId: string }>();
-  const hydration = deferred<any>();
+  const hydration = deferred<unknown>();
   harness.tab.executionCoordinator.resolveForkSource = () => capture.promise;
   Object.assign(harness.plugin, { getConversationById: () => hydration.promise });
   const command = '/side Use @[Old](claudian-session:conv-1-source)';

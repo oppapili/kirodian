@@ -1,5 +1,6 @@
 import { DesktopVault } from '@test/helpers/core/DesktopVault';
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@test/helpers/defaultSettings';
+import type { App } from 'obsidian';
 import type { Mock } from 'vitest';
 
 import { SettingsCoordinator } from '@/app/settings/SettingsCoordinator';
@@ -47,9 +48,27 @@ function expectedDefaultStartupSettings(): Record<string, unknown> {
   };
 }
 
+/** The App surface startup touches, as the mocks the tests configure. */
+interface MockApp {
+  vault: {
+    adapter: {
+      basePath: string;
+      exists: Mock;
+      read: Mock;
+      write: Mock;
+      remove: Mock;
+      mkdir: Mock;
+      list: Mock;
+      stat: Mock;
+      rename: Mock;
+    };
+  };
+  workspace: { layoutReady: boolean; onLayoutReady: Mock };
+}
+
 describe('startApplication', () => {
-  let mockApp: any;
-  let plugin: { app: any; loadData: Mock; saveData: Mock };
+  let mockApp: MockApp;
+  let plugin: { app: MockApp | App; loadData: Mock; saveData: Mock };
   const disposals: Array<() => Promise<void>> = [];
 
   async function loadApplication(
@@ -328,8 +347,8 @@ describe('startApplication', () => {
       const domains = await loadApplication();
 
       const loaded = await domains.conversations.getConversationById('conv-multi-session');
-      expect((loaded?.providerState as any)?.previousProviderSessionIds).toEqual(['session-A']);
-      expect((loaded?.providerState as any)?.providerSessionId).toBe('session-B');
+      expect(loaded?.providerState?.previousProviderSessionIds).toEqual(['session-A']);
+      expect(loaded?.providerState?.providerSessionId).toBe('session-B');
     });
   });
   describe('projects', () => {

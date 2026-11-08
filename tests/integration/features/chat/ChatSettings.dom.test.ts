@@ -3,7 +3,7 @@ import '@/providers';
 
 import { deserialize, serialize } from 'node:v8';
 
-import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
+import { createSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { createHarness, releaseSideChatHarnesses } from '@test/helpers/features/chat/SideChatDOMHarness';
 import { FakeSideSession } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { modelCatalogCases } from '@test/helpers/providerModelCatalogs';
@@ -110,7 +110,7 @@ function createChatHarness(settings: ClaudianSettings, id: ProviderId, selected:
       recordConversationActivity: async () => undefined,
     },
     getActiveEnvironmentVariables: () => '',
-    getConversationSummary(id: string) { return (this as unknown as { getConversationSync: (id: string) => any }).getConversationSync(id); },
+    getConversationSummary(id: string) { return plugin.getConversationSync(id); },
     getConversationSync: (conversationId: string) => conversations.find(entry => entry.id === conversationId),
     getConversationById: async (conversationId: string) => conversations.find(entry => entry.id === conversationId),
     getConversationList: () => conversations,
@@ -127,7 +127,8 @@ function createChatHarness(settings: ClaudianSettings, id: ProviderId, selected:
       messages: [...harness.tab.state.messages], sessionId: `session-${conversations.length}`,
     } as unknown as Conversation;
     if (!blank && !existingId) conversations.push(conversation);
-    if (!plugin.sessionRuntimes) installSessionRuntimePool(plugin);
+    // createSessionRuntimePool no longer assigns the pool onto the host, so wire it in here.
+    if (!plugin.sessionRuntimes) Object.assign(plugin, { sessionRuntimes: createSessionRuntimePool(() => plugin) });
     const tab = await createTabRuntime({
       plugin,
       component: Object.assign(new Component(), { registerDomEvent: () => undefined, registerEvent: () => undefined }) as never,

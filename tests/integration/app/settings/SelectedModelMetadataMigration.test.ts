@@ -1,6 +1,7 @@
 import '@/providers';
 
 import { DEFAULT_CLAUDIAN_SETTINGS } from '@test/helpers/defaultSettings';
+import { partialMock } from '@test/helpers/partialMock';
 import { modelCatalogCases as cases } from '@test/helpers/providerModelCatalogs';
 
 import { ClaudianSettingsStorage } from '@/app/settings/ClaudianSettingsStorage';
@@ -9,6 +10,7 @@ import { SettingsCoordinator } from '@/app/settings/SettingsCoordinator';
 import type { ProviderHost } from '@/core/providers/ProviderHost';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
+import type { ProviderWorkspaceServices } from '@/core/providers/types';
 import type { VaultFileAdapter } from '@/core/storage/VaultFileAdapter';
 import { updateKiroProviderSettings } from '@/providers/kiro/settings';
 
@@ -60,7 +62,7 @@ it('completes without error for a fully populated provider catalog', async () =>
   const { host } = makeHost();
   cases[0].populate(host.settings);
   const refresh = vi.fn();
-  ProviderWorkspaceRegistry.setServices('kiro', { modelCatalog: { refresh } as any });
+  ProviderWorkspaceRegistry.setServices('kiro', { modelCatalog: partialMock<NonNullable<ProviderWorkspaceServices['modelCatalog']>>({ refresh }) });
 
   await migrateSelectedModelMetadata(host, new AbortController().signal);
 

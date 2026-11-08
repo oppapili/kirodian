@@ -2,12 +2,60 @@ import { TextDecoder, TextEncoder } from 'node:util';
 import { deserialize, serialize } from 'node:v8';
 
 import type * as AxeAdapter from '@test/helpers/accessibility';
+import { ControlledResizeObserver, resetResizeObservers } from '@test/helpers/dom/ResizeObserver';
+import { resetObsidianKeymaps } from '@test/helpers/ObsidianKeymap';
+import { resetWorkspaceTimers } from '@test/helpers/ObsidianWorkspace';
 
+// Setup modules reload per VM file; the native process object lives for the worker.
+const originalEnvKey = Symbol.for('claudian.tests.originalProcessEnv');
+const workerProcess = process as NodeJS.Process & { [originalEnvKey]?: NodeJS.ProcessEnv };
+const originalEnv = workerProcess[originalEnvKey] ??= process.env;
+
+function reportProcessEnvReplacement(): void {
+  const message = `process.env replacement is forbidden in ${expect.getState().testPath}. `
+    + 'Restore environment keys in place or use vi.stubEnv()/vi.unstubAllEnvs().';
+  try {
+    // Record the failure without interrupting the test's remaining cleanup.
+    // eslint-disable-next-line vitest/valid-expect -- Vitest accepts a custom assertion message.
+    expect.soft(false, message).toBe(true);
+  } catch {
+    // Collection and suite hooks have no current test for a soft assertion.
+    throw new Error(message);
+  }
+}
+
+// Reject even temporary replacements, nested suite teardown, and skipped-file collection.
+// Reinstall per file so diagnostics use the current VM's Vitest context.
+Object.defineProperty(workerProcess, 'env', {
+  configurable: true,
+  enumerable: true,
+  get: () => originalEnv,
+  set: (value: NodeJS.ProcessEnv) => {
+    if (value !== originalEnv) reportProcessEnvReplacement();
+  },
+});
+
+// Platform-only process stubs retain env identity. Check others after all test cleanup.
+// eslint-disable-next-line vitest/no-done-callback -- aroundEach supplies an awaitable test runner.
+aroundEach(async (runTest) => {
+  try {
+    await runTest();
+  } finally {
+    if (process.env !== originalEnv) {
+      process.env = originalEnv;
+      reportProcessEnvReplacement();
+    }
+  }
+});
 
 // Node-only suites do not need to load the accessibility engine.
 if (typeof document !== 'undefined') {
   const { toHaveNoViolations } = await vi.importActual<typeof AxeAdapter>('@test/helpers/accessibility');
   expect.extend(toHaveNoViolations);
+  if (typeof globalThis.ResizeObserver === 'undefined') {
+    globalThis.ResizeObserver = ControlledResizeObserver;
+  }
+  afterEach(resetResizeObservers);
 }
 
 type TestWindow = typeof globalThis & {
@@ -17,6 +65,8 @@ type TestWindow = typeof globalThis & {
 };
 
 const testWindow = globalThis as TestWindow;
+afterEach(resetWorkspaceTimers);
+afterEach(resetObsidianKeymaps);
 
 if (!globalThis.TextEncoder) {
   Object.assign(globalThis, { TextDecoder, TextEncoder });
@@ -48,6 +98,12 @@ if (globalThis.Range && !Reflect.has(globalThis.Range.prototype, 'getClientRects
   });
 }
 
+// jsdom has no layout/scrolling engine. Callers can spy on this native boundary;
+// a successful call does not establish any rendered geometry or scroll position.
+if (globalThis.HTMLElement && !Reflect.has(globalThis.HTMLElement.prototype, 'scrollIntoView')) {
+  globalThis.HTMLElement.prototype.scrollIntoView = function () {};
+}
+
 if (!('window' in globalThis)) {
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
@@ -56,7 +112,8 @@ if (!('window' in globalThis)) {
   });
 }
 
-if (!testWindow.localStorage) {
+// Node's native localStorage is shared across VM workers; use per-file storage instead.
+if (typeof document === 'undefined' || !testWindow.localStorage) {
   const values = new Map<string, string>();
   Object.defineProperty(testWindow, 'localStorage', {
     configurable: true,
@@ -72,6 +129,9 @@ if (!testWindow.localStorage) {
     } satisfies Storage,
   });
 }
+
+// Keep the real identity hashing/cache; tests may replace storage before importing it.
+testWindow.localStorage!.setItem('claudian.deviceSettingsKey', 'claudian-test-installation');
 
 // Polyfill Obsidian DOM helpers for jsdom-based tests.
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -96,6 +156,8 @@ function applyDOMElementInfo(el: Element, info: unknown): void {
       el.setAttribute(key, String(value));
     }
   }
+  if (opts.type !== undefined) el.setAttribute('type', String(opts.type));
+  if (opts.value !== undefined && 'value' in el) (el as HTMLInputElement).value = String(opts.value);
   if (opts.title && 'setAttribute' in el) {
     el.setAttribute('title', String(opts.title));
   }
@@ -192,10 +254,29 @@ if (globalThis.HTMLElement && !Reflect.has(globalThis.HTMLElement.prototype, 'se
   };
 }
 
+if (globalThis.HTMLElement && !Reflect.has(globalThis.HTMLElement.prototype, 'setCssProps')) {
+  globalThis.HTMLElement.prototype.setCssProps = function (props) {
+    for (const [name, value] of Object.entries(props)) this.style.setProperty(name, value);
+  };
+}
+
 if (globalThis.SVGElement && !Reflect.has(globalThis.SVGElement.prototype, 'createSvg')) {
   globalThis.SVGElement.prototype.createSvg = function (this: SVGElement, tag, info?, callback?) {
     const el = createSvg(tag, info, callback);
     this.appendChild(el);
     return el;
   };
+}
+
+// Install host DOM methods without importing settings controls or a second DOM model.
+if (typeof document !== 'undefined' && globalThis.HTMLElement) {
+  const prototype = globalThis.HTMLElement.prototype;
+  prototype.empty = function () { this.replaceChildren(); };
+  prototype.addClass = function (...classes) { this.classList.add(...classes); };
+  prototype.removeClass = function (...classes) { this.classList.remove(...classes); };
+  prototype.hasClass = function (name) { return this.classList.contains(name); };
+  prototype.toggleClass = function (classes, value) {
+    for (const name of [classes].flat()) this.classList.toggle(name, value);
+  };
+  prototype.appendText = function (value) { this.append(value); };
 }

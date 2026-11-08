@@ -4,7 +4,7 @@ import '@/providers';
 import { axe } from '@test/helpers/accessibility';
 import { createClaudianView } from '@test/helpers/features/chat/ClaudianViewHarness';
 import { createProjectsFake } from '@test/helpers/features/chat/ProjectsFake';
-import { installSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
+import { createSessionRuntimePool } from '@test/helpers/features/chat/SessionRuntimePoolHarness';
 import { FakeSideBackend, type FakeSideSession } from '@test/helpers/features/chat/SideChatSessionHarness';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, waitFor, within } from '@testing-library/dom';
@@ -62,9 +62,7 @@ async function createView() {
     },
   } });
   Object.assign(app.vault.adapter, { basePath: '/vault' });
-  Object.assign(app.vault, { on: () => ({}), offref() {} });
-  Object.assign(app.workspace, { getActiveViewOfType: () => null, getActiveFile: () => null, on: () => ({}), offref() {} });
-  Object.assign(app, { metadataCache: { on: () => ({}), offref() {} } });
+  Object.assign(app.workspace, { getActiveViewOfType: () => null, getActiveFile: () => null });
   const lifecycle = new ProviderExecutionLifecycleRegistry();
   const settings = {
     model: 'kiro/sonnet', effortLevel: 'high', permissionMode: 'manual',
@@ -108,7 +106,8 @@ async function createView() {
     mutateSettings: async (mutate: (value: ClaudianSettings) => void) => mutate(settings),
     chatModelSelection: { beginIntent: () => 1, commitIntent: async () => true },
   } as unknown as ChatFeatureHost;
-  const pool = installSessionRuntimePool(plugin);
+  const pool = createSessionRuntimePool(() => plugin);
+  Object.assign(plugin, { sessionRuntimes: pool });
   const component = new Component();
   const containerEl = document.body.createDiv();
   const tab = await createTabRuntime({
@@ -125,9 +124,9 @@ async function createView() {
   activateTab(tab);
   tab.dom.inputEl.focus();
   // The real view Scope is the host keymap's destination; only its delivery is external.
-  const root = createClaudianView({ host: plugin, containerEl: tab.dom.contentEl,
+  const root = await createClaudianView({ host: plugin, containerEl: tab.dom.contentEl,
     contentEl: tab.dom.contentEl, tabManager: { getActiveTab: () => tab } });
-  root.wireEventHandlers();
+  root['wireEventHandlers']();
   return { get tab() { return tab; }, backend, saved, conversation, plugin, root, scopes,
     dispose: async () => { await destroyTab(tab); await pool.dispose(); await lifecycle.dispose(); } };
 }

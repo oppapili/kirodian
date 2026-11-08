@@ -14,6 +14,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/dom';
 import { renderProjectMemberInstructions } from '@/core/prompt/projectPrompt';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 import { buildTabRuntimePorts } from '@/features/chat/tabs/runtime/TabRuntimePorts';
+import type { AssembledTabRuntime } from '@/features/chat/tabs/types';
 
 afterEach(releaseSideChatHarnesses);
 
@@ -200,7 +201,7 @@ it('refreshes side completion timestamps when the view timestamp setting changes
     harness.plugin,
     () => { throw new Error('Timestamp refresh must not read the runtime'); },
   );
-  const view = createClaudianView({ tabManager: { getAllTabs: () => [tab] } });
+  const view = await createClaudianView({ tabManager: { getAllTabs: () => [tab] as unknown as AssembledTabRuntime[] } });
   const clock = vi.spyOn(Date, 'now').mockReturnValue(testDate().getTime());
   try {
     const { started } = await startSideChat(harness);

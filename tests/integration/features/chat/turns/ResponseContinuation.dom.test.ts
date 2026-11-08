@@ -2,12 +2,14 @@
 import '@/providers';
 
 import { axe } from '@test/helpers/accessibility';
+import { partialMock } from '@test/helpers/partialMock';
 import { testDate } from '@test/helpers/testClock';
 import { fireEvent, within } from '@testing-library/dom';
 import { Component, MarkdownRenderer } from 'obsidian';
 
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import type { ChatMessage } from '@/core/types';
+import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';
 import { MessageRenderer } from '@/features/chat/rendering/MessageRenderer';
 import { ChatState } from '@/features/chat/state/ChatState';
 import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
@@ -35,7 +37,7 @@ beforeEach(() => {
 it.each([false, true])('collapses work across compaction on completion and reload (notification split: %s)', async notification => {
   const { renderSessionTaskNotification } = await import('@/features/chat/turns/BackgroundTurnRenderer');
   const messagesEl = document.body.createDiv();
-  const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
+  const plugin = partialMock<ChatFeatureHost>({ app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } });
   const renderer = new MessageRenderer(plugin, new Component(), messagesEl);
   const state = new ChatState();
   const subagents = new SubagentManager(() => undefined, ProviderRegistry.getTaskResultInterpreter('kiro'));
@@ -95,7 +97,7 @@ it.each([false, true])('collapses work across compaction on completion and reloa
 it('does not recreate a response after its conversation is cleared during finalization', async () => {
   const { renderSessionTaskNotification } = await import('@/features/chat/turns/BackgroundTurnRenderer');
   const messagesEl = document.body.createDiv();
-  const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
+  const plugin = partialMock<ChatFeatureHost>({ app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } });
   const renderer = new MessageRenderer(plugin,
     new Component(), messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('kiro'));
   const state = new ChatState();
@@ -122,7 +124,7 @@ it('does not recreate a response after its conversation is cleared during finali
 it.each(['background', 'user'] as const)('groups only the requested response across notifications with intervening %s output', async intervening => {
   const { renderSessionTaskNotification } = await import('@/features/chat/turns/BackgroundTurnRenderer');
   const messagesEl = document.body.createDiv();
-  const plugin = { app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } } as any;
+  const plugin = partialMock<ChatFeatureHost>({ app: {}, settings: { mediaFolder: '', showMessageTimestamps: false } });
   const renderer = new MessageRenderer(plugin,
     new Component(), messagesEl, undefined, undefined, () => ProviderRegistry.getCapabilities('kiro'));
   const state = new ChatState();

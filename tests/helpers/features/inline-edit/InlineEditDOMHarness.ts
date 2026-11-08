@@ -1,13 +1,15 @@
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { FakeAuxiliaryBackend } from '@test/helpers/core/auxiliary/AuxiliaryExecutionTestHarness';
+import { partialMock } from '@test/helpers/partialMock';
 import { fireEvent, screen, waitFor } from '@testing-library/dom';
-import { Component } from 'obsidian';
+import { type App, Component, type Editor, type MarkdownView } from 'obsidian';
 
 import { ProviderExecutionLifecycleRegistry } from '@/core/execution';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import type { ProviderChatUIConfig, ProviderId, ProviderModelPolicy, ProviderRegistration } from '@/core/providers/types';
+import type { FeatureHost } from '@/features/FeatureHost';
 import { InlineEditSessionOwner } from '@/features/inline-edit/InlineEditSessionOwner';
 import { InlineEditModal, InlineEditSession } from '@/features/inline-edit/ui/InlineEditModal';
 import { KIRO_PROVIDER_ICON } from '@/shared/icons';
@@ -24,6 +26,8 @@ Object.assign(HTMLElement.prototype, {
   },
   scrollIntoView() {},
 });
+
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 const cleanups: Array<() => Promise<void>> = [];
 /** The registry cannot unregister, so fake providers stay enabled only in the test that registered them. */
@@ -91,11 +95,11 @@ export function createInlineEditHarness() {
   const lifecycle = new ProviderExecutionLifecycleRegistry();
   const owner = new InlineEditSessionOwner();
   ProviderWorkspaceRegistry.clear();
-  const backend = registerFakeInlineEditProvider('claude');
-  const app: any = {
+  const backend = registerFakeInlineEditProvider('kiro');
+  const app = partialMock<Mutable<App>>({
     vault: { adapter: { basePath: '/vault' }, getFiles: () => [], getAllLoadedFiles: () => [] },
-  };
-  const plugin: any = Object.assign(new Component(), {
+  });
+  const plugin = partialMock<Mutable<FeatureHost> & Component>(Object.assign(new Component(), {
     settings: { model: 'sonnet', effortLevel: 'high' },
     getActiveEnvironmentVariables: () => '',
     getActiveModelSelection: () => null,
@@ -108,7 +112,7 @@ export function createInlineEditHarness() {
       executionLifecycleRegistry: lifecycle,
       runProviderExecutionTransition: lifecycle.runTransition.bind(lifecycle),
     },
-  });
+  }));
   plugin.load();
   const editorView = new EditorView({
     state: EditorState.create({ doc: 'hello world' }),
@@ -116,21 +120,21 @@ export function createInlineEditHarness() {
     extensions: EditorView.contentAttributes.of({ 'aria-label': 'Note editor' }),
   });
   let end = 5;
-  const editor: any = {
+  const editor = partialMock<Editor & { cm: EditorView }>({
     cm: editorView,
     getCursor: (which: string) => ({ line: 0, ch: which === 'from' ? 0 : end }),
     getSelection: () => 'hello world'.slice(0, end),
     replaceRange: (text: string) => editorView.dispatch({ changes: { from: 0, to: end, insert: text } }),
-  };
+  });
   const context = { mode: 'selection' as const, selectedText: 'hello' };
   const settled = vi.fn();
   const notePath = 'note.md';
   const createSession = () => new InlineEditSession(
-    app, plugin, plugin, editorView, editor, context, notePath, settled, { providerId: 'claude' },
+    app, plugin, plugin, editorView, editor, context, notePath, settled, { providerId: 'kiro' },
   );
   /** Mirrors Obsidian's editorCallback: a callback editor plus the view that owns the current editor. */
-  const createModal = (callbackEditor: any = editor, viewEditor: any = editor) =>
-    new InlineEditModal(app, plugin, plugin, callbackEditor, { editor: viewEditor } as any, context, notePath, owner);
+  const createModal = (callbackEditor: Editor = editor, viewEditor: Editor = editor) =>
+    new InlineEditModal(app, plugin, plugin, callbackEditor, partialMock<MarkdownView>({ editor: viewEditor }), context, notePath, owner);
   cleanups.push(async () => {
     owner.dispose();
     editorView.destroy();
@@ -138,7 +142,9 @@ export function createInlineEditHarness() {
     await lifecycle.dispose();
   });
   return {
-    app, backend, createModal, createSession, editor, editorView, notePath, owner, plugin, settled,
+    app, backend, component: plugin, createModal, createSession, editor, editorView, notePath, owner, plugin, settled,
+    // Reads the live in-memory settings the fixture persists through mutateSettings.
+    settingsStorage: { load: async () => plugin.settings as Record<string, unknown> },
     changeSelection() { end = 11; fireEvent.mouseUp(editorView.dom); },
   };
 }

@@ -17,8 +17,6 @@ import { renderEnvironmentSettingsSection } from '@/shared/settings/EnvironmentS
 
 
 
-vi.mock('obsidian', async () => (await vi.importActual<typeof import('@test/helpers/ObsidianSettingsDOM')>('@test/helpers/ObsidianSettingsDOM')));
-
 afterEach(() => {
   (Notice as unknown as Mock).mockClear();
   document.body.replaceChildren();

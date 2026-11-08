@@ -9,8 +9,9 @@ import {
   submitInstruction,
   typeInstruction,
 } from '@test/helpers/features/inline-edit/InlineEditDOMHarness';
+import { partialMock } from '@test/helpers/partialMock';
 import { fireEvent, screen, waitFor, within } from '@testing-library/dom';
-import { Component, MarkdownRenderer, Notice, TFolder } from 'obsidian';
+import { Component, type Editor, MarkdownRenderer, type MetadataCache, Notice, TFile, TFolder, type Workspace, WorkspaceLeaf } from 'obsidian';
 
 import { ProviderWorkspaceRegistry } from '@/core/providers/ProviderWorkspaceRegistry';
 import { InlineEditSession } from '@/features/inline-edit/ui/InlineEditModal';
@@ -25,16 +26,16 @@ afterEach(async () => {
 
 describe('editor resolution', () => {
   it('opens on the view editor when the callback editor has no CodeMirror view', async () => {
-    const h = createHarness();
-    const result = h.createModal({}, h.editor).openAndWait();
+    const h = await createHarness();
+    const result = h.createModal({} as Editor, h.editor).openAndWait();
     expect(await screen.findByRole('textbox', { name: 'Edit instructions' })).toBeDefined();
     fireEvent.keyDown(h.editorView.contentDOM, { key: 'Escape' });
     await expect(result).resolves.toEqual({ decision: 'reject' });
   });
 
   it('rejects with a notice when neither editor exposes a CodeMirror view', async () => {
-    const h = createHarness();
-    await expect(h.createModal({}, {}).openAndWait()).resolves.toEqual({ decision: 'reject' });
+    const h = await createHarness();
+    await expect(h.createModal({} as Editor, {} as Editor).openAndWait()).resolves.toEqual({ decision: 'reject' });
     expect(Notice).toHaveBeenCalledWith(
       'Inline edit unavailable: could not access the active editor. Try reopening the note.',
     );
@@ -47,28 +48,28 @@ describe('provider and model resolution', () => {
     {
       name: 'uses the enabled settings provider when nothing is selected',
       selection: null,
-      settings: { settingsProvider: 'claude', providerConfigs: { claude: { enabled: false } } },
+      settings: { settingsProvider: 'kiro', providerConfigs: { kiro: { enabled: false } } },
       expectedModel: 'sonnet',
       expectedChip: 'Model: Sonnet, effort High',
     },
     {
       name: 'falls back to the settings provider without the model of a disabled selection',
-      selection: { providerId: 'claude', model: 'sonnet' },
-      settings: { settingsProvider: 'codex', providerConfigs: { claude: { enabled: false } } },
+      selection: { providerId: 'kiro', model: 'sonnet' },
+      settings: { settingsProvider: 'codex', providerConfigs: { kiro: { enabled: false } } },
       expectedModel: 'sonnet',
       expectedChip: 'Model: Sonnet, effort High',
     },
     {
       name: 'uses the selected provider and model',
       selection: { providerId: 'codex', model: 'opus' },
-      settings: { settingsProvider: 'claude' },
+      settings: { settingsProvider: 'kiro' },
       expectedModel: 'opus',
       expectedChip: 'Model: Opus, effort High',
     },
   ])('$name', async ({ selection, settings, expectedModel, expectedChip }) => {
-    const h = createHarness();
+    const h = await createHarness();
     const codex = registerFakeInlineEditProvider('codex');
-    h.plugin.settings = settings;
+    Object.assign(h.plugin.settings, settings);
     h.plugin.getActiveModelSelection = () => selection;
     const result = h.createModal().openAndWait();
     await screen.findByRole('textbox', { name: 'Edit instructions' });
@@ -111,7 +112,7 @@ function holdProviderStart(heldProviderId: string) {
 }
 
 it('switches provider from the model picker until the first request, then keeps it', async () => {
-  const h = createHarness();
+  const h = await createHarness();
   // GPT's Max effort is known only once the provider has fetched the picked model's metadata.
   let gptMetadataReady = false;
   const codex = registerFakeInlineEditProvider('codex', [{ value: 'gpt', label: 'GPT' }], {
@@ -129,7 +130,7 @@ it('switches provider from the model picker until the first request, then keeps 
 
   fireEvent.click(screen.getByRole('button', { name: 'Model: Sonnet, effort High' }));
   const providers = within(screen.getByRole('dialog', { name: 'Model options' })).getAllByRole('tab');
-  expect(providers.map(tab => tab.getAttribute('aria-label'))).toEqual(['claude', 'codex']);
+  expect(providers.map(tab => tab.getAttribute('aria-label'))).toEqual(['kiro', 'codex']);
   fireEvent.click(within(screen.getByRole('tablist', { name: 'Provider' })).getByRole('tab', { name: 'codex' }));
   fireEvent.click(screen.getByRole('option', { name: 'GPT' }));
   // The chip shows the pick while its provider starts, and an effort chosen meanwhile is kept.
@@ -166,7 +167,7 @@ it('switches provider from the model picker until the first request, then keeps 
 describe('a submit waiting for a picked provider to start', () => {
   /** Opens an edit with codex registered, whose start is held until the returned controls settle it. */
   async function openWithHeldCodexStart() {
-    const h = createHarness();
+    const h = await createHarness();
     const codex = registerFakeInlineEditProvider('codex', [{ value: 'gpt', label: 'GPT' }]);
     const result = h.createModal().openAndWait();
     await screen.findByRole('textbox', { name: 'Edit instructions' });
@@ -199,7 +200,7 @@ describe('a submit waiting for a picked provider to start', () => {
 
   it('sends at once on the current provider when a later pick returns to it', async () => {
     const { h, codex, result } = await openWithHeldCodexStart();
-    fireEvent.click(within(screen.getByRole('tablist', { name: 'Provider' })).getByRole('tab', { name: 'claude' }));
+    fireEvent.click(within(screen.getByRole('tablist', { name: 'Provider' })).getByRole('tab', { name: 'kiro' }));
     fireEvent.click(screen.getByRole('option', { name: 'Opus' }));
     await screen.findByRole('button', { name: 'Model: Opus, effort High' });
     submitInstruction();
@@ -213,10 +214,10 @@ describe('a submit waiting for a picked provider to start', () => {
 });
 
 it('shows a model or effort pick on the chip without waiting for it to save as the default', async () => {
-  const h = createHarness();
+  const h = await createHarness();
   const saves: Array<() => void> = [];
   const mutateSettings = h.plugin.mutateSettings;
-  h.plugin.mutateSettings = (mutation: (settings: Record<string, unknown>) => void) => new Promise<void>((resolve) => {
+  h.plugin.mutateSettings = (mutation: Parameters<typeof mutateSettings>[0]) => new Promise<void>((resolve) => {
     saves.push(() => { void mutateSettings(mutation).then(resolve); });
   });
   h.createSession().show();
@@ -227,11 +228,11 @@ it('shows a model or effort pick on the chip without waiting for it to save as t
   await screen.findByRole('button', { name: 'Model: Opus, effort Low' });
   expect(h.plugin.settings.inlineEditModel).toBeUndefined();
   for (const save of saves) save();
-  await waitFor(() => expect(h.plugin.settings.inlineEditModel).toEqual({ providerId: 'claude', model: 'opus', reasoning: 'low' }));
+  await waitFor(() => expect(h.plugin.settings.inlineEditModel).toEqual({ providerId: 'kiro', model: 'opus', reasoning: 'low' }));
 });
 
 it('keeps the provider when a picked model is not uniquely owned by one enabled provider', async () => {
-  const h = createHarness();
+  const h = await createHarness();
   const codex = registerFakeInlineEditProvider('codex', [{ value: 'opus', label: 'Opus' }]);
   const result = h.createModal().openAndWait();
   await screen.findByRole('textbox', { name: 'Edit instructions' });
@@ -251,7 +252,7 @@ it('keeps the provider when a picked model is not uniquely owned by one enabled 
 });
 
 it('suggests Vault folders for @ mentions', async () => {
-  const h = createHarness();
+  const h = await createHarness();
   h.app.vault.getAllLoadedFiles = () => [Object.assign(new TFolder(), { name: 'src', path: 'src' })];
   h.createSession().show();
   typeInstruction('@s');
@@ -259,7 +260,7 @@ it('suggests Vault folders for @ mentions', async () => {
 });
 
 it('keeps open inline suggestions anchored after note scroll and viewport resize', async () => {
-  const h = createHarness();
+  const h = await createHarness();
   h.app.vault.getAllLoadedFiles = () => [Object.assign(new TFolder(), { name: 'src', path: 'src' })];
   const session = h.createSession();
   session.show();
@@ -303,7 +304,7 @@ it('keeps open inline suggestions anchored after note scroll and viewport resize
 });
 
 it('shows only the newest clarification when an older render finishes last', async () => {
-  const h = createHarness();
+  const h = await createHarness();
   const renders: Array<() => void> = [];
   vi.mocked(MarkdownRenderer.render).mockImplementation((_app, markdown, element) => {
     (element as HTMLElement).textContent = markdown;
@@ -334,7 +335,7 @@ it('shows only the newest clarification when an older render finishes last', asy
 });
 
 it('previews the selected source as deleted and the replacement as inserted Markdown', async () => {
-  const h = createHarness();
+  const h = await createHarness();
   vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, element) => {
     (element as HTMLElement).textContent = markdown;
   });
@@ -349,9 +350,8 @@ it('previews the selected source as deleted and the replacement as inserted Mark
   expect(h.editorView.contentDOM.textContent).toBe(`${preview.textContent} world`);
 });
 
-
 it('releases Markdown resources when clarification previews are replaced and the edit closes', async () => {
-  const h = createHarness();
+  const h = await createHarness();
   const released: string[] = [];
   vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, element, _path, component) => {
     component.register(() => released.push(markdown));
@@ -377,7 +377,7 @@ it('releases Markdown resources when clarification previews are replaced and the
 });
 
 it('releases late Markdown registrations after a preview is rejected', async () => {
-  const h = createHarness();
+  const h = await createHarness();
   const released = vi.fn();
   const childReleased = vi.fn();
   let finishRender!: () => void;
@@ -403,7 +403,7 @@ it('releases late Markdown registrations after a preview is rejected', async () 
 });
 
 it('releases both Markdown diff documents when review is rejected', async () => {
-  const h = createHarness();
+  const h = await createHarness();
   const released: string[] = [];
   vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, element, _path, component) => {
     component.register(() => released.push(markdown));
@@ -420,7 +420,7 @@ it('releases both Markdown diff documents when review is rejected', async () => 
 });
 
 it('keeps the floating model menu inside the viewport near the top and after scrolling', async () => {
-  const h = createHarness();
+  const h = await createHarness();
   h.createSession().show();
   const chip = screen.getByRole('button', { name: 'Model: Sonnet, effort High' });
   const menu = document.querySelector<HTMLElement>('.claudian-model-popover')!;
@@ -480,7 +480,7 @@ it.each([
   'Use `</replacement>` literally in XML.',
   'Document <replacement>old</replacement> and <insertion>new</insertion>.',
 ])('applies the complete raw replacement containing wrapper text: %s', async replacement => {
-  const h = createHarness();
+  const h = await createHarness();
   h.createSession().show();
   const accept = await showReplacementPreview(h, replacement);
   expect(h.backend.sessions[0].requests[0].configuration.systemInstructions).toMatchObject({
@@ -492,31 +492,35 @@ it.each([
   expect(h.settled).toHaveBeenCalledWith({ decision: 'accept', editedText: replacement });
 });
 
-
 it.each([false, true].flatMap(alreadyOpen => [
   { alreadyOpen, target: 'target#Overview', label: 'Target', path: 'target', samePage: false },
   { alreadyOpen, target: '#Overview', label: 'Overview', path: '', samePage: true },
   { alreadyOpen, target: '#^quote-of-the-day', label: 'Quote', path: '', samePage: true },
 ]))('opens inline-code $target from the edited note context (already open: $alreadyOpen)', async ({ alreadyOpen, target, label, path, samePage }) => {
-  const h = createHarness();
+  const h = await createHarness();
   const sourcePath = 'Section/note.md';
-  const file = { path: samePage ? sourcePath : 'Section/target.md', basename: samePage ? 'note' : 'target' };
+  const file = Object.assign(new TFile(), { path: samePage ? sourcePath : 'Section/target.md', basename: samePage ? 'note' : 'target' });
   h.app.vault.getAbstractFileByPath = vi.fn((path: string) => path === sourcePath ? file : null);
-  const leaf = { getViewState: () => ({ state: { file: file.path } }), setEphemeralState: vi.fn() };
-  const unrelated = { getViewState: () => ({ state: { file: 'Elsewhere/target.md' } }), setEphemeralState: vi.fn() };
-  h.app.metadataCache = { getFirstLinkpathDest: vi.fn((_path: string, source: string) => source === sourcePath ? file : { path: 'Elsewhere/target.md' }) };
-  h.app.workspace = {
+  const leaf = Object.assign(new WorkspaceLeaf(), { getViewState: () => ({ type: 'markdown', state: { file: file.path } }), setEphemeralState: vi.fn() });
+  const unrelated = Object.assign(new WorkspaceLeaf(), { getViewState: () => ({ type: 'markdown', state: { file: 'Elsewhere/target.md' } }), setEphemeralState: vi.fn() });
+  // The kiro inline-edit harness app exposes only `vault`; link resolution needs these.
+  h.app.metadataCache = partialMock<MetadataCache>({
+    getFirstLinkpathDest: vi.fn((_path: string, source: string) => source === sourcePath ? file : Object.assign(new TFile(), { path: 'Elsewhere/target.md' })),
+  });
+  h.app.workspace = partialMock<Workspace>({});
+  Object.assign(h.app.workspace, {
     iterateAllLeaves: (visit: (entry: typeof leaf) => void) => [unrelated, ...(alreadyOpen ? [leaf] : [])].forEach(visit),
     revealLeaf: vi.fn().mockResolvedValue(undefined),
     openLinkText: vi.fn().mockResolvedValue(undefined),
-  };
+  } satisfies Partial<typeof h.app.workspace>);
+  const rendered: string[] = [];
   vi.mocked(MarkdownRenderer.render).mockImplementation(async (_app, markdown, element) => {
-    expect(markdown).toBe(`Check \`[[${target}|${label}]]\`.`);
+    rendered.push(markdown);
     const code = element.createEl('code');
     code.textContent = `[[${target}|${label}]]`;
   });
-  const session = new InlineEditSession(h.app, h.plugin, h.plugin, h.editorView, h.editor,
-    { mode: 'selection', selectedText: 'hello' }, sourcePath, h.settled, { providerId: 'claude' });
+  const session = new InlineEditSession(h.app, h.plugin, h.component, h.editorView, h.editor,
+    { mode: 'selection', selectedText: 'hello' }, sourcePath, h.settled, { providerId: 'kiro' });
   try {
     session.show();
     submitInstruction();
@@ -524,15 +528,16 @@ it.each([false, true].flatMap(alreadyOpen => [
     h.backend.sessions[0].emitText(`Check \`[[${target}|${label}]]\`.`);
     h.backend.sessions[0].complete();
     const link = await screen.findByRole('link', { name: label });
+    expect(rendered).toEqual([`Check \`[[${target}|${label}]]\`.`]);
     // Keep jsdom navigation out of the host-boundary assertion.
     link.addEventListener('click', event => event.preventDefault());
     fireEvent.click(link);
     await waitFor(() => expect(alreadyOpen ? h.app.workspace.revealLeaf : h.app.workspace.openLinkText).toHaveBeenCalledTimes(1));
-    expect(h.app.workspace.revealLeaf.mock.calls).toEqual(alreadyOpen ? [[leaf]] : []);
+    expect(vi.mocked(h.app.workspace.revealLeaf).mock.calls).toEqual(alreadyOpen ? [[leaf]] : []);
     expect(leaf.setEphemeralState.mock.calls).toEqual(alreadyOpen ? [[{ focus: true, subpath: target.slice(path.length) }]] : []);
-    expect(h.app.workspace.openLinkText.mock.calls).toEqual(alreadyOpen ? [] : [[target, sourcePath, 'tab']]);
-    const destinationReads = samePage ? h.app.vault.getAbstractFileByPath.mock.calls
-      : h.app.metadataCache.getFirstLinkpathDest.mock.calls;
+    expect(vi.mocked(h.app.workspace.openLinkText).mock.calls).toEqual(alreadyOpen ? [] : [[target, sourcePath, 'tab']]);
+    const destinationReads = samePage ? vi.mocked(h.app.vault.getAbstractFileByPath).mock.calls
+      : vi.mocked(h.app.metadataCache.getFirstLinkpathDest).mock.calls;
     expect(destinationReads).toContainEqual(samePage ? [sourcePath] : [path, sourcePath]);
     expect(await axe(link)).toHaveNoViolations();
     session.close();

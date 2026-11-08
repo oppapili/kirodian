@@ -215,9 +215,10 @@ describe('ProviderSettingsCoordinator', () => {
       );
 
       // kiro is the settings provider, so the stub is reconciled against a
-      // cloned+projected settings object rather than the live one. Reconciliation
-      // no longer receives conversations; assert it ran against some settings.
-      expect(reconcileSpy).toHaveBeenCalledWith(expect.anything());
+      // cloned+projected settings object rather than the live one. The merged
+      // reconciler signature takes a settings object plus an optional context
+      // (undefined here); assert it ran against some settings.
+      expect(reconcileSpy).toHaveBeenCalledWith(expect.anything(), undefined);
 
       reconcileSpy.mockRestore();
     });

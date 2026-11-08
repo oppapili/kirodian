@@ -1,14 +1,16 @@
 import '@/providers';
 
+import { partialMock } from '@test/helpers/partialMock';
 import type { Mocked } from 'vitest';
 
-import { ConversationRepository } from '@/app/conversations/ConversationRepository';
+import { ConversationRepository, type ConversationRepositoryDeps } from '@/app/conversations/ConversationRepository';
 import type { ConversationPersistence } from '@/app/storage/ConversationPersistenceStore';
 import { ProviderRegistry } from '@/core/providers/ProviderRegistry';
 import { ProviderSettingsCoordinator } from '@/core/providers/ProviderSettingsCoordinator';
 import type { Conversation, ProjectRecord } from '@/core/types';
 
-
+type HistoryService = ReturnType<typeof ProviderRegistry.getConversationHistoryService>;
+type ModelPolicy = ReturnType<typeof ProviderRegistry.getModelPolicy>;
 
 function createConversation(id = 'conversation-1'): Conversation {
   return {
@@ -104,9 +106,9 @@ describe('ConversationRepository hydration', () => {
 
   it('returns cached metadata without hydrating provider history', () => {
     const hydrateConversationHistory = vi.fn();
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       hydrateConversationHistory,
-    } as any);
+    }));
     const conversation = createConversation();
     const { repository } = createRepository(conversation);
 
@@ -190,10 +192,10 @@ describe('ConversationRepository hydration', () => {
     const recoverConversationModelSelection = vi.fn(async (conversation: Conversation) => (
       conversation.id === missing.id ? 'opus' : null
     ));
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       hydrateConversationHistory: vi.fn(),
       recoverConversationModelSelection,
-    } as any);
+    }));
     const { repository, persistence } = createRepository(missing);
     repository.replaceAll([missing, existing]);
 
@@ -215,11 +217,11 @@ describe('ConversationRepository hydration', () => {
 
   it('persists the historically recovered model even when unavailable', async () => {
     const conversation = createConversation('retired-recovered-model');
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       hydrateConversationHistory: vi.fn().mockResolvedValue({}),
       recoverConversationModelSelection: vi.fn()
         .mockResolvedValue('claude-code/retired-native-model'),
-    } as any);
+    }));
     const { repository, persistence } = createRepository(conversation);
 
     await expect(repository.recoverMissingSelectedModels()).resolves.toMatchObject([{ id: conversation.id }]);
@@ -240,10 +242,10 @@ describe('ConversationRepository hydration', () => {
         if (providerId === unavailable.providerId) {
           throw new Error('Provider is no longer registered');
         }
-        return {
+        return partialMock<HistoryService>({
           recoverConversationModelSelection: vi.fn()
             .mockResolvedValue('opus'),
-        } as any;
+        });
       });
     const { repository } = createRepository(unavailable);
     repository.replaceAll([unavailable, recoverable]);
@@ -258,10 +260,10 @@ describe('ConversationRepository hydration', () => {
     const malformed = createConversation('malformed-model');
     (malformed as unknown as { selectedModel: unknown }).selectedModel = 42;
     const recoverable = createConversation('valid-missing-model');
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       hydrateConversationHistory: vi.fn().mockResolvedValue({}),
       recoverConversationModelSelection: vi.fn().mockResolvedValue('opus'),
-    } as any);
+    }));
     const { repository } = createRepository(malformed);
     repository.replaceAll([malformed, recoverable]);
 
@@ -284,16 +286,16 @@ describe('ConversationRepository hydration', () => {
     const recoverConversationModelSelection = vi.fn().mockResolvedValue(
       'kiro/claude-sonnet-5',
     );
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       hydrateConversationHistory: vi.fn().mockResolvedValue({}),
       hasConversationModelRecoverySource: (conversation: Conversation) => (
         conversation.sessionId === 'thread-before-invalidation'
       ),
       recoverConversationModelSelection,
-    } as any);
+    }));
     const { repository } = createRepository(invalidated);
 
-    (repository as any).registerHistoricalModelRecoverySources([recoverySource]);
+    repository['registerHistoricalModelRecoverySources']([recoverySource]);
 
     await expect(repository.recoverMissingSelectedModels()).resolves.toMatchObject([{ id: invalidated.id }]);
     expect(recoverConversationModelSelection).toHaveBeenCalledWith(
@@ -317,13 +319,13 @@ describe('ConversationRepository hydration', () => {
     const recoverConversationModelSelection = vi.fn()
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce('kiro/claude-sonnet-5');
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       hydrateConversationHistory: vi.fn().mockResolvedValue({}),
       hasConversationModelRecoverySource: (conversation: Conversation) => (
         conversation.sessionId === 'thread-before-invalidation'
       ),
       recoverConversationModelSelection,
-    } as any);
+    }));
     const firstRun = createRepository(invalidated);
 
     firstRun.repository.registerHistoricalModelRecoverySources([recoverySource]);
@@ -377,13 +379,13 @@ describe('ConversationRepository hydration', () => {
         ? 'kiro/claude-sonnet-5-1'
         : null
     ));
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       hydrateConversationHistory: vi.fn().mockResolvedValue({}),
       hasConversationModelRecoverySource: (conversation: Conversation) => (
         typeof conversation.sessionId === 'string'
       ),
       recoverConversationModelSelection,
-    } as any);
+    }));
     const firstRun = createRepository(invalidated);
 
     firstRun.repository.registerHistoricalModelRecoverySources([recoverySource]);
@@ -442,10 +444,10 @@ describe('ConversationRepository hydration', () => {
     const recoverConversationModelSelection = vi.fn(() => new Promise<string | null>(
       resolve => { finishRecovery = resolve; },
     ));
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       hydrateConversationHistory: vi.fn().mockResolvedValue({}),
       recoverConversationModelSelection,
-    } as any);
+    }));
     const { repository } = createRepository(conversation);
 
     const backgroundRecovery = repository.recoverMissingSelectedModels();
@@ -467,10 +469,10 @@ describe('ConversationRepository hydration', () => {
       model: 'opus',
       percentage: 1,
     };
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       hydrateConversationHistory: vi.fn().mockResolvedValue({}),
       recoverConversationModelSelection: vi.fn().mockResolvedValue(null),
-    } as any);
+    }));
     const { repository, persistence } = createRepository(conversation);
 
     await repository.ensureHydrated(conversation.id);
@@ -489,11 +491,11 @@ describe('ConversationRepository hydration', () => {
       percentage: 1,
     };
     const recoverConversationModelSelection = vi.fn().mockResolvedValue(null);
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       hydrateConversationHistory: vi.fn().mockResolvedValue({}),
       hasConversationModelRecoverySource: vi.fn().mockReturnValue(false),
       recoverConversationModelSelection,
-    } as any);
+    }));
     const { repository, persistence } = createRepository(conversation);
 
     await repository.ensureHydrated(conversation.id);
@@ -514,11 +516,11 @@ describe('ConversationRepository hydration', () => {
       model: 'claude-code/retired-native-model',
       percentage: 1,
     };
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       hydrateConversationHistory: vi.fn().mockResolvedValue({}),
       hasConversationModelRecoverySource: vi.fn().mockReturnValue(false),
       recoverConversationModelSelection: vi.fn().mockResolvedValue(null),
-    } as any);
+    }));
     const { repository, persistence } = createRepository(conversation);
 
     await repository.ensureHydrated(conversation.id);
@@ -532,11 +534,11 @@ describe('ConversationRepository hydration', () => {
   it('preserves an unavailable stored selection while provider options are empty', async () => {
     const conversation = createConversation('temporarily-empty-catalog');
     conversation.selectedModel = 'claude-code/historical-model';
-    vi.spyOn(ProviderRegistry, 'getModelPolicy').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getModelPolicy').mockReturnValue(partialMock<ModelPolicy>({
       getModelOptions: () => [],
       getDefaultModel: () => null,
       normalizeModelVariant: (model: string) => model,
-    } as any);
+    }));
     const { repository, persistence } = createRepository(conversation);
 
     await repository.ensureHydrated(conversation.id);
@@ -815,9 +817,9 @@ describe('ConversationRepository hydration', () => {
         release = resolve;
       });
     });
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       hydrateConversationHistory,
-    } as any);
+    }));
     const conversation = createConversation();
     const { repository } = createRepository(conversation);
 
@@ -847,11 +849,11 @@ describe('ConversationRepository hydration', () => {
     const hydrateConversationHistory = vi.fn().mockResolvedValue({
       messages: [{ id: 'message-1', role: 'user', content: 'Recovered', timestamp: 1 }],
     });
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       recoverConversationSessionReference,
       getConversationSessionAvailability,
       hydrateConversationHistory,
-    } as any);
+    }));
     const { repository, persistence } = createRepository(conversation);
 
     await expect(repository.ensureHydrated(conversation.id)).resolves.toMatchObject({ id: conversation.id });
@@ -870,9 +872,9 @@ describe('ConversationRepository hydration', () => {
     const hydrateConversationHistory = vi.fn()
       .mockRejectedValueOnce(new Error('temporary failure'))
       .mockResolvedValueOnce(undefined);
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       hydrateConversationHistory,
-    } as any);
+    }));
     const conversation = createConversation();
     const { repository } = createRepository(conversation);
 
@@ -889,9 +891,9 @@ describe('ConversationRepository hydration', () => {
         releaseHydration = resolve;
       });
     });
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       hydrateConversationHistory,
-    } as any);
+    }));
     const conversation = createConversation();
     const { repository, persistence } = createRepository(conversation);
 
@@ -948,7 +950,7 @@ describe('ConversationRepository hydration', () => {
     const conversation = createConversation();
     conversation.messages = [{ id: 'message-1', role: 'user', content: 'kept', timestamp: 1 }];
     const { repository, persistence } = createRepository(conversation);
-    vi.spyOn((repository as any).modelRecovery, 'ensureSelectedModel').mockImplementation(async () => {
+    vi.spyOn(repository['modelRecovery'], 'ensureSelectedModel').mockImplementation(async () => {
       markReconciliationStarted();
       await reconciliationRelease;
     });
@@ -980,9 +982,9 @@ describe('ConversationRepository hydration', () => {
         return { messages: [{ id: 'old-message', role: 'assistant', content: 'Old session', timestamp: 1 }] };
       })
       .mockResolvedValueOnce(undefined);
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       hydrateConversationHistory,
-    } as any);
+    }));
     const conversation = createConversation();
     const { repository } = createRepository(conversation);
 
@@ -1051,12 +1053,12 @@ describe('ConversationRepository hydration', () => {
     const hydrationRelease = new Promise<void>((resolve) => {
       releaseHydration = resolve;
     });
-    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue({
+    vi.spyOn(ProviderRegistry, 'getConversationHistoryService').mockReturnValue(partialMock<HistoryService>({
       hydrateConversationHistory: async () => {
         markHydrationStarted();
         await hydrationRelease;
       },
-    } as any);
+    }));
     const shell = createConversation('unresolved');
     const { repository, persistence } = createRepository(shell);
     repository.registerExecutionBinding(shell.id, 'binding-1', 1);
@@ -1159,13 +1161,15 @@ it('does not require a metadata write to keep an unavailable selection', async (
 });
 
 it('adopts already-published shells without repeated linear record lookup', async () => {
-  const repository = new ConversationRepository({ providers: ProviderRegistry, providerSettings: ProviderSettingsCoordinator, getSettings: () => ({}), getVaultPath: () => '/audit',
+  const repository = new ConversationRepository(partialMock<ConversationRepositoryDeps>({ providers: ProviderRegistry, providerSettings: ProviderSettingsCoordinator, getSettings: () => ({}), getVaultPath: () => '/audit',
     persistence: { saveMetadata: async () => {}, metadataReader: {} },
-  } as any);
+  }));
   const records = Array.from({ length: 512 }, (_, index) => ({ ...createConversation(`indexed-${index}`), providerId: 'audit-unregistered' }));
-  repository.replaceAll(records as any);
-  const find = vi.spyOn((repository as any).conversations, 'find');
-  await repository.adoptMetadataConversations(records.map(conversation => ({ conversation, needsMigration: false, source: 'device' })) as any);
+  repository.replaceAll(partialMock<Conversation[]>(records));
+  const find = vi.spyOn(repository['conversations'], 'find');
+  await repository.adoptMetadataConversations(partialMock<Parameters<ConversationRepository['adoptMetadataConversations']>[0]>(
+    records.map(conversation => ({ conversation, needsMigration: false, source: 'device' })),
+  ));
   expect(find).not.toHaveBeenCalled();
   expect(repository.getSync('indexed-511')?.id).toBe('indexed-511');
   expect(repository.list()).toHaveLength(512);
