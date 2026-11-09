@@ -142,6 +142,10 @@ Issues and focused pull requests are welcome. Issues are the preferred starting 
 
 Before opening a pull request, please read the [contribution guide](CONTRIBUTING.md). Pull requests must explain the problem, the proposed solution, why the approach is appropriate, and how the change was validated. Pull requests that add a new provider are not accepted; the guide explains this maintenance and product-quality boundary in detail.
 
+### Upstream sync skills
+
+The procedure for syncing with upstream Claudian is kept as project skills in `.kiro/skills/` (four `SKILL.md` files, written in Japanese). Start from `.kiro/skills/sync-upstream/SKILL.md`; see `.kiro/skills/README.md` for the list and how KiroCrew loads them.
+
 ### AI code review (@kiro)
 
 This repository has an on-demand AI code review workflow (`.github/workflows/kiro-review.yml`). Comment `@kiro` on a pull request and Kiro CLI reviews it. There is no automatic trigger; it runs only when you ask.
