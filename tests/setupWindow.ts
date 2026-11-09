@@ -2,6 +2,7 @@ import { TextDecoder, TextEncoder } from 'node:util';
 import { deserialize, serialize } from 'node:v8';
 
 import type * as AxeAdapter from '@test/helpers/accessibility';
+import { installNodeInsertionEvents } from '@test/helpers/dom/nodeInsertion';
 import { ControlledResizeObserver, resetResizeObservers } from '@test/helpers/dom/ResizeObserver';
 import { resetObsidianKeymaps } from '@test/helpers/ObsidianKeymap';
 import { resetWorkspaceTimers } from '@test/helpers/ObsidianWorkspace';
@@ -271,6 +272,7 @@ if (globalThis.SVGElement && !Reflect.has(globalThis.SVGElement.prototype, 'crea
 // Install host DOM methods without importing settings controls or a second DOM model.
 if (typeof document !== 'undefined' && globalThis.HTMLElement) {
   const prototype = globalThis.HTMLElement.prototype;
+  installNodeInsertionEvents(prototype);
   prototype.empty = function () { this.replaceChildren(); };
   prototype.addClass = function (...classes) { this.classList.add(...classes); };
   prototype.removeClass = function (...classes) { this.classList.remove(...classes); };
@@ -279,4 +281,16 @@ if (typeof document !== 'undefined' && globalThis.HTMLElement) {
     for (const name of [classes].flat()) this.classList.toggle(name, value);
   };
   prototype.appendText = function (value) { this.append(value); };
+}
+
+// jsdom leaves `display` empty for phrasing elements, so accessible-name computation treats them as
+// blocks and splits a label such as `/s<span>id</span>e`. Browsers default these to inline.
+const INLINE_TAGS = new Set(['A', 'ABBR', 'B', 'CODE', 'EM', 'I', 'KBD', 'MARK', 'S', 'SMALL', 'SPAN', 'STRONG', 'SUB', 'SUP', 'U']);
+if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+  const getComputedStyle = window.getComputedStyle.bind(window);
+  window.getComputedStyle = (element, pseudo) => {
+    const style = getComputedStyle(element, pseudo);
+    if (!pseudo && style.display === '' && INLINE_TAGS.has(element.tagName)) style.display = 'inline';
+    return style;
+  };
 }

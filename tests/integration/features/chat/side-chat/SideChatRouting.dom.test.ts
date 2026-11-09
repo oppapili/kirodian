@@ -61,6 +61,7 @@ function createRouting(
     getSettings: () => ({ model: 'kiro-model', reasoning: 'high', permissionMode: 'normal', serviceTier: 'default' }),
     conversationController: { save: async () => undefined, commitBranchDraft: async () => true, cancelBranchDraft: () => undefined },
     ensureExecutionInitialized: async () => failAt !== 'initialization',
+    historyRefresh: () => null,
     getExecutionCoordinator: () => failAt === 'missing-coordinator' ? null : ({
       cancel: () => { mainExecutions.push('<cancelled>'); },
       execute: async (submission: { canonicalText: string }) => {

@@ -11,6 +11,7 @@ import type {
   ToolCallInfo,
   ToolResultDetails,
 } from '../../../core/types';
+import { readFileRevision } from '../../../utils/fileRevision';
 import { extractACPDiffResultDetails } from '../../acp/ACPToolResultNormalization';
 import {
   type KiroRawToolNameResolution,
@@ -388,6 +389,18 @@ export async function loadKiroPromptIndexAfterAssistant(
     return resolveKiroV2PromptIndexAfterAssistant(file.content, sessionId, resumeAt);
   }
   return resolveKiroPromptIndexAfterAssistant(file.content, sessionId, resumeAt);
+}
+
+/**
+ * Cheap change token for the file hydration reads (v2 `<sessionId>.jsonl`, else v1 `updates.jsonl`);
+ * null when it cannot be observed.
+ */
+export async function readKiroHistoryRevision(
+  sessionDirectory: string,
+  sessionId: string,
+): Promise<string | null> {
+  return await readFileRevision(path.join(sessionDirectory, `${sessionId}.jsonl`))
+    ?? await readFileRevision(path.join(sessionDirectory, 'updates.jsonl'));
 }
 
 function createPendingTurn(

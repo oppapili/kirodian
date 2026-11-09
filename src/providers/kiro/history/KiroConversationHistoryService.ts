@@ -12,7 +12,7 @@ import {
   parseKiroProviderState,
 } from '../types';
 import { resolveKiroSessionDirectory } from './KiroHistoryPathResolver';
-import { loadKiroHistory } from './KiroHistoryStore';
+import { loadKiroHistory, readKiroHistoryRevision } from './KiroHistoryStore';
 
 const KIRO_PROVIDER_STATE_KEYS = [
   'forkSource',
@@ -131,6 +131,28 @@ export class KiroConversationHistoryService implements ProviderConversationHisto
     }
     this.hydratedKeys.set(sessionId, hydrationKey);
     return conversation;
+  }
+
+  async readNativeHistoryRevision(
+    conversation: ProviderHistoryInput,
+    vaultPath: string | null,
+    pathContext?: ProviderHistoryPathContext,
+  ): Promise<string | null> {
+    // Only the live session is observed; retired locators and pending forks have frozen history.
+    if (!conversation.sessionId || !pathContext) return null;
+    try {
+      const sessionDirectory = resolveKiroSessionDirectory(
+        parseKiroProviderState(conversation.providerState).sessionDirectory,
+        conversation.sessionId,
+        vaultPath,
+        pathContext,
+      );
+      return sessionDirectory
+        ? await readKiroHistoryRevision(sessionDirectory, conversation.sessionId)
+        : null;
+    } catch {
+      return null;
+    }
   }
 
   resolveSessionIdForConversation(conversation: ProviderHistoryInput | null): string | null {

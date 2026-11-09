@@ -1,5 +1,3 @@
-import '@/providers';
-
 import { createHarness as createExecutionHarness, createSubmission, type FakeRun, FakeSession, type UnscopedExecutionEvent } from '@test/helpers/ChatExecutionHarness';
 import { createConversationPorts, createTestSession } from '@test/helpers/ConversationPorts';
 import { createChatFeatureHost } from '@test/helpers/features/chat/ChatFeatureHostFixture';
@@ -182,6 +180,7 @@ export async function createFixture(overrides: ChatInputFixtureOptions = {}) {
     }),
     canStartTurn: () => true,
     isClosing: () => false,
+    historyRefresh: () => null,
     ...dependencyOverrides,
     ...(typeof onReviewableSettlement === 'function'
       ? {
