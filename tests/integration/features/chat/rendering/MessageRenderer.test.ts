@@ -10,10 +10,10 @@ import {
 } from '@/core/tools/toolNames';
 
 // Kiro lifecycle subagent tool names (the only provider registered after the
-// claude managed-agent protocol was removed). Spawn tool is `task`; its
+// claude managed-agent protocol was removed). Spawn tool is `subagent`; its
 // output/wait sibling is `task_output`. See
 // src/providers/kiro/normalization/kiroLifecycleToolNames.ts.
-const KIRO_SPAWN_TOOL = 'task';
+const KIRO_SPAWN_TOOL = 'subagent';
 const KIRO_OUTPUT_TOOL = 'task_output';
 import type { ChatMessage, ImageAttachment } from '@/core/types';
 import type { ChatFeatureHost } from '@/features/chat/ChatFeatureHost';

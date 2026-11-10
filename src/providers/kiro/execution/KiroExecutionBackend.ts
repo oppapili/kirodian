@@ -77,6 +77,8 @@ export interface KiroExecutionNativeConnection {
 }
 
 export interface KiroExecutionNativeCreateOptions {
+  /** Arguments of the `kiro-cli` launch, starting with the `acp` subcommand. */
+  readonly args: readonly string[];
   readonly command: string;
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;

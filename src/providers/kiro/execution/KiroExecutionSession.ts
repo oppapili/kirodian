@@ -59,6 +59,7 @@ import {
   normalizeKiroToolUseResult,
   resolveKiroRawToolName,
 } from '../normalization/kiroToolNormalization';
+import { resolveKiroACPArgs } from '../runtime/KiroACPLaunchArgs';
 import { waitForKiroCancelDelivery } from '../runtime/KiroCancelDelivery';
 import type { KiroModelCatalogCoordinator } from '../runtime/KiroModelCatalogCoordinator';
 import { buildKiroRuntimeEnv, computeKiroRuntimeInputHash } from '../runtime/KiroRuntimeEnvironment';
@@ -482,14 +483,17 @@ RewindableExecutionSession {
     const previousOwner = this.nativeOwner;
     if (previousOwner) await this.shutdownNativeOwner(previousOwner);
     const command = await this.host.resolveCliPath() ?? 'kiro-cli';
+    const env = buildKiroRuntimeEnv(this.host.environmentText, command);
+    const args = await resolveKiroACPArgs({ command, cwd: this.config.workingDirectory, env });
     if (quarantineGeneration !== this.quarantineGeneration || this.disposed) {
       throw new Error('Kiro native startup was cancelled.');
     }
     const generation = ++this.nativeGeneration;
     const native = this.options.nativeFactory.create({
+      args,
       command,
       cwd: this.config.workingDirectory,
-      env: buildKiroRuntimeEnv(this.host.environmentText, command),
+      env,
       requestPermission: (request, signal) => {
         const policy = this.active?.request.toolPolicy.kind;
         if (policy === 'passive' || policy === 'read-only') {
@@ -1304,7 +1308,7 @@ class KiroExecutionCancellationError extends Error {
   }
 }
 
-function createKiroToolStreamAdapter(): ACPToolStreamAdapter {
+export function createKiroToolStreamAdapter(): ACPToolStreamAdapter {
   return new ACPToolStreamAdapter({
     normalizeToolInput(rawName, input) {
       return normalizeKiroToolCall({ rawInput: input, title: rawName }).input;

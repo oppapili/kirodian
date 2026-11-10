@@ -1,6 +1,8 @@
+// kiro-cli 3.1.0 measurements (#103): the V2 engine names the spawn tool `subagent`
+// (`_meta.kiro.toolName`); the V3 engine reports `invoke_sub_agent`.
 export const KIRO_SUBAGENT_SPAWN_TOOL_NAMES = [
-  'spawn_subagent',
-  'task',
+  'subagent',
+  'invoke_sub_agent',
 ] as const;
 
 export const KIRO_SUBAGENT_WAIT_TOOL_NAMES = [
