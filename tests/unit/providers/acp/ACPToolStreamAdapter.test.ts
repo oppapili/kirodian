@@ -211,3 +211,21 @@ it('retains an initial null payload and accepts a later concrete replacement', (
     { type: 'tool_result', id: 'read', content: 'complete' },
   ]).at(-1)).toMatchObject({ providerPayload: { rawInput: { target_file: 'next.md' }, rawOutput: 'next' } });
 });
+
+it('hands the _meta of tool calls and updates to the raw-name resolver', () => {
+  const seen: unknown[] = [];
+  const adapter = new ACPToolStreamAdapter({
+    normalizeToolInput: (_rawName, input) => input,
+    normalizeToolName: rawName => rawName ?? 'Tool',
+    normalizeToolResultDetails: () => undefined,
+    resolveRawToolName: (current, update) => {
+      seen.push(update.meta);
+      return current ?? { provenance: 'meta', rawName: 'named-by-meta' };
+    },
+  });
+
+  adapter.normalizeToolCall({ _meta: { vendor: 'start' }, title: 'A', toolCallId: 'meta-1' }, []);
+  adapter.normalizeToolCallUpdate({ _meta: { vendor: 'update' }, toolCallId: 'meta-1' }, []);
+
+  expect(seen).toEqual([{ vendor: 'start' }, { vendor: 'update' }]);
+});

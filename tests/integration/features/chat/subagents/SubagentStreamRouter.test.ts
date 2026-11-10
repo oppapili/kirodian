@@ -1,5 +1,9 @@
 /** @vitest-environment jsdom */
+// @test-ci {"inputs":["tests/fixtures/providers/kiro/acp/*.jsonl"]}
 import '@/providers';
+
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 import { partialMock } from '@test/helpers/partialMock';
 import { testDate } from '@test/helpers/testClock';
@@ -16,6 +20,8 @@ import { SubagentManager } from '@/features/chat/subagents/SubagentManager';
 import { renderStoredSubagent } from '@/features/chat/subagents/SubagentRenderer';
 import { SubagentStreamRouter } from '@/features/chat/subagents/SubagentStreamRouter';
 import { ToolCallStream } from '@/features/chat/turns/ToolCallStream';
+import { ACPSessionUpdateNormalizer } from '@/providers/acp';
+import { createKiroToolStreamAdapter } from '@/providers/kiro/execution/KiroExecutionSession';
 
 
 
@@ -261,7 +267,7 @@ type ToolResultChunk = Extract<StreamChunk, { type: 'tool_result' }>;
 const toolUse = (id: string, name: string, input: Record<string, unknown> = {}): ToolUseChunk => (
   { type: 'tool_use', id, name, input }
 );
-const spawnUse = (input: Record<string, unknown> = {}): ToolUseChunk => toolUse(SPAWN, 'task', input);
+const spawnUse = (input: Record<string, unknown> = {}): ToolUseChunk => toolUse(SPAWN, 'subagent', input);
 const waitUse = (agentId = AGENT): ToolUseChunk => toolUse(WAIT, 'task_output', { task_id: agentId });
 const toolResult = (id: string, content: string): ToolResultChunk => ({ type: 'tool_result', id, content });
 const spawnResult = (): ToolResultChunk => toolResult(SPAWN, JSON.stringify({ task_id: AGENT }));
@@ -633,5 +639,125 @@ describe('SubagentStreamRouter kiro lifecycle', () => {
     it('should not consume a result for an unknown tool call', async () => {
       await expect(h.result(toolResult('missing', 'x'))).resolves.toBe(false);
     });
+  });
+});
+
+// Frames captured from kiro-cli 3.1.0 (`kiro-cli acp --agent-engine v2|v3`), one `session/update`
+// payload per line, sanitized: ids, paths and prompts replaced with neutral values.
+type KiroEngine = 'v2' | 'v3';
+
+function readFrames(engine: KiroEngine): unknown[] {
+  const file = path.join(process.cwd(), 'tests/fixtures/providers/kiro/acp', `subagent-${engine}.jsonl`);
+  return fs.readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line) as unknown);
+}
+
+/** Runs frames through the Kiro ACP normalization the session uses, ending in router-ready chunks. */
+function framesToChunks(frames: unknown[], rename: (id: string) => string = id => id): StreamChunk[] {
+  const normalizer = new ACPSessionUpdateNormalizer();
+  const toolStream = createKiroToolStreamAdapter();
+  return frames.flatMap((frame) => {
+    const renamed = { ...(frame as { toolCallId: string }), toolCallId: rename((frame as { toolCallId: string }).toolCallId) };
+    const normalized = normalizer.normalizeUnknown(renamed);
+    if (normalized.type === 'tool_call') {
+      return toolStream.normalizeToolCall(normalized.toolCall, normalized.streamChunks);
+    }
+    if (normalized.type === 'tool_call_update') {
+      return toolStream.normalizeToolCallUpdate(normalized.toolCallUpdate, normalized.streamChunks);
+    }
+    return [];
+  });
+}
+
+async function dispatch(h: ReturnType<typeof createLifecycleHarness>, chunks: StreamChunk[]): Promise<void> {
+  for (const chunk of chunks) {
+    if (chunk.type === 'tool_use') h.use(chunk);
+    else if (chunk.type === 'tool_result') await h.result(chunk);
+  }
+}
+
+describe.each<{ engine: KiroEngine; spawnId: string; description: string; prompt: string; result: string }>([
+  {
+    engine: 'v2',
+    spawnId: 'toolu_bdrk_spawn_agent',
+    description: 'Kiro subagent',
+    prompt: 'Reply with the single word PONG and nothing else.',
+    result: 'Pipeline completed: 1 stages finished.\n\n## pong\n\nPONG',
+  },
+  {
+    engine: 'v3',
+    spawnId: 'invoke_subagent_toolu_bdrk_spawn_agent',
+    description: 'general-task-execution',
+    prompt: 'Reply with only the single word PONG. Do not use any tools. Do not add any other text.',
+    result: 'PONG',
+  },
+])('SubagentStreamRouter kiro $engine wire frames', ({ engine, spawnId, description, prompt, result }) => {
+  const writeId = 'toolu_bdrk_write_file';
+  let h: ReturnType<typeof createLifecycleHarness>;
+
+  beforeEach(() => {
+    h = createLifecycleHarness();
+  });
+
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it('should render the spawn frame as a subagent card', async () => {
+    await dispatch(h, framesToChunks(readFrames(engine).slice(0, 1)));
+
+    expect(h.cards()).toEqual([`subagent:${spawnId}`]);
+  });
+
+  it('should describe the subagent from the spawn input', async () => {
+    await dispatch(h, framesToChunks(readFrames(engine).slice(0, 1)));
+
+    expect(h.toolCall(spawnId)?.subagent).toMatchObject({ description, prompt, mode: 'sync', status: 'running' });
+  });
+
+  it('should keep the subagent running through progress frames', async () => {
+    await dispatch(h, framesToChunks(readFrames(engine).slice(0, 2)));
+
+    expect(h.toolCall(spawnId)?.subagent?.status).toBe('running');
+  });
+
+  it('should complete the subagent with the reported output', async () => {
+    await dispatch(h, framesToChunks(readFrames(engine)));
+
+    expect(h.toolCall(spawnId)?.subagent).toMatchObject({ status: 'completed', result });
+  });
+
+  it('should keep a single subagent card across spawn, progress and completion', async () => {
+    await dispatch(h, framesToChunks(readFrames(engine)));
+
+    expect(h.cards()).toEqual([`subagent:${spawnId}`, `tool:${writeId}`]);
+  });
+
+  it('should not treat an ordinary file write as a subagent', async () => {
+    await dispatch(h, framesToChunks(readFrames(engine)));
+
+    expect(h.toolCall(writeId)?.subagent).toBeUndefined();
+  });
+
+  it('should track concurrent subagents independently', async () => {
+    const frames = readFrames(engine);
+    const second = framesToChunks(frames.slice(0, 1), id => `${id}-second`);
+    const first = framesToChunks(frames.slice(0, 3));
+    const secondDone = framesToChunks(frames.slice(0, 3), id => `${id}-second`).slice(second.length);
+
+    await dispatch(h, [...first.slice(0, 1), ...second, ...first.slice(1), ...secondDone]);
+
+    expect([h.toolCall(spawnId)?.subagent?.status, h.toolCall(`${spawnId}-second`)?.subagent?.status])
+      .toEqual(['completed', 'completed']);
+  });
+
+  it('should leave a concurrent subagent running while another completes', async () => {
+    const frames = readFrames(engine);
+
+    await dispatch(h, [
+      ...framesToChunks(frames.slice(0, 1), id => `${id}-second`),
+      ...framesToChunks(frames.slice(0, 3)),
+    ]);
+
+    expect(h.toolCall(`${spawnId}-second`)?.subagent?.status).toBe('running');
   });
 });

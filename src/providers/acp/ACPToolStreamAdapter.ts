@@ -1,7 +1,7 @@
 import { normalizeToolProviderPayload } from '../../core/tools/toolProviderPayload';
 import { mergeToolResultDetails } from '../../core/tools/toolResultDetails';
 import type { StreamChunk, ToolProviderPayload, ToolResultDetails } from '../../core/types';
-import type { ACPToolCall, ACPToolCallUpdate } from './types';
+import type { ACPMetadata, ACPToolCall, ACPToolCallUpdate } from './types';
 
 interface ACPToolStreamState {
   input: Record<string, unknown>;
@@ -11,7 +11,7 @@ interface ACPToolStreamState {
   rawOutput?: unknown;
 }
 
-export type ACPToolRawNameProvenance = 'fallback' | 'kind' | 'title';
+export type ACPToolRawNameProvenance = 'fallback' | 'kind' | 'meta' | 'title';
 
 export interface ACPResolvedToolRawName {
   provenance: ACPToolRawNameProvenance;
@@ -46,6 +46,8 @@ export interface ACPToolStreamPresentationAdapter {
     currentRawName: ACPResolvedToolRawName | undefined,
     update: {
       kind?: string | null;
+      /** Provider extension metadata (`_meta`) of the tool call or update. */
+      meta?: ACPMetadata | null;
       title?: string | null;
     },
   ): ACPResolvedToolRawName;
@@ -63,6 +65,7 @@ export class ACPToolStreamAdapter {
   normalizeToolCall(toolCall: ACPToolCall, chunks: StreamChunk[]): StreamChunk[] {
     const state = this.#updateToolState(undefined, {
       kind: toolCall.kind,
+      meta: toolCall._meta,
       rawInput: toolCall.rawInput,
       rawOutput: toolCall.rawOutput,
       title: toolCall.title,
@@ -75,6 +78,7 @@ export class ACPToolStreamAdapter {
     const current = this.toolStates.get(toolCallUpdate.toolCallId);
     const state = this.#updateToolState(current, {
       kind: toolCallUpdate.kind,
+      meta: toolCallUpdate._meta,
       rawInput: toolCallUpdate.rawInput,
       rawOutput: toolCallUpdate.rawOutput,
       title: toolCallUpdate.title,
@@ -111,6 +115,7 @@ export class ACPToolStreamAdapter {
     current: ACPToolStreamState | undefined,
     update: {
       kind?: string | null;
+      meta?: ACPMetadata | null;
       rawInput?: unknown;
       rawOutput?: unknown;
       title?: string | null;

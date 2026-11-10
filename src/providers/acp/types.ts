@@ -292,6 +292,7 @@ export interface ACPToolCallLocation {
 }
 
 export interface ACPToolCall {
+  _meta?: ACPMetadata | null;
   content?: ACPToolCallContent[];
   kind?: ACPToolKind | null;
   locations?: ACPToolCallLocation[];
@@ -303,6 +304,7 @@ export interface ACPToolCall {
 }
 
 export interface ACPToolCallUpdate {
+  _meta?: ACPMetadata | null;
   content?: ACPToolCallContent[] | null;
   kind?: ACPToolKind | null;
   locations?: ACPToolCallLocation[] | null;

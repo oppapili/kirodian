@@ -82,13 +82,31 @@ export function normalizeKiroToolName(rawName: string): string {
   return KIRO_TOOL_NAME_MAP[lookup] ?? (normalized || 'tool');
 }
 
+/**
+ * Identifies a subagent spawn from `_meta.kiro`, which stays stable while the human-readable
+ * `title` varies ("Spawning agent crew", "Sub-agent: <name>"). V2 reports the tool in
+ * `toolName`; V3 marks the call with `kind: 'agent-subtask'`.
+ */
+function resolveKiroSubagentToolName(meta: Record<string, unknown> | null | undefined): string | null {
+  const kiro = meta?.kiro;
+  if (!isRecord(kiro)) return null;
+  const toolName = typeof kiro.toolName === 'string' ? kiro.toolName.trim().toLowerCase() : '';
+  if (KIRO_SUBAGENT_LIFECYCLE_TOOL_NAMES.has(toolName)) return toolName;
+  return kiro.kind === 'agent-subtask' ? 'invoke_sub_agent' : null;
+}
+
 export function resolveKiroRawToolName(
   currentRawName: KiroRawToolNameResolution | undefined,
-  update: { kind?: string | null; title?: string | null },
+  update: { kind?: string | null; meta?: Record<string, unknown> | null; title?: string | null },
 ): KiroRawToolNameResolution {
   const title = update.title?.trim();
   const normalizedTitle = title?.toLowerCase();
-  if (currentRawName?.provenance === 'title') {
+  // `_meta` outranks `title`: a later title-only update must not rename a recognized subagent.
+  const subagentName = resolveKiroSubagentToolName(update.meta);
+  if (subagentName) {
+    return { provenance: 'meta', rawName: subagentName };
+  }
+  if (currentRawName?.provenance === 'title' || currentRawName?.provenance === 'meta') {
     return currentRawName;
   }
   if (
@@ -214,8 +232,8 @@ function normalizeToolInput(rawName: string, value: unknown): Record<string, unk
       return addInputAlias(input, 'path', ['target_directory']);
     case 'skill':
       return addInputAlias(input, 'skill', ['name']);
-    case 'spawn_subagent':
-    case 'task':
+    case 'subagent':
+    case 'invoke_sub_agent':
       return addInputAlias(input, 'run_in_background', ['background']);
     case 'todo_write':
       return normalizeTodoInput(input);

@@ -8,6 +8,7 @@ import type {
   KiroExecutionNativeFactory,
 } from '../execution/KiroExecutionBackend';
 import { KiroExecutionNativeConnectionImpl } from '../execution/KiroExecutionNativeConnection';
+import { resolveKiroACPArgs } from '../runtime/KiroACPLaunchArgs';
 import { buildKiroRuntimeEnv } from '../runtime/KiroRuntimeEnvironment';
 
 const DEFAULT_NATIVE_FACTORY: KiroExecutionNativeFactory = {
@@ -51,12 +52,16 @@ export class KiroCommandMetadataProbe {
         const command = await this.host.resolveCliPath() ?? 'kiro-cli';
         ownedSignal.throwIfAborted();
         const cwd = this.host.workingDirectory ?? process.cwd();
+        const env = buildKiroRuntimeEnv(this.host.environmentText, command);
+        const args = await resolveKiroACPArgs({ command, cwd, env }, ownedSignal);
+        ownedSignal.throwIfAborted();
         return {
           cwd,
           native: this.nativeFactory.create({
+            args,
             command,
             cwd,
-            env: buildKiroRuntimeEnv(this.host.environmentText, command),
+            env,
             requestExtension: async () => null,
             requestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
             version: this.host.clientVersion ?? '0.0.0',

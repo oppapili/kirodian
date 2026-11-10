@@ -47,7 +47,7 @@ implements KiroExecutionNativeConnection {
   ) {
     this.commandsAvailableTimeoutMs = commandsAvailableTimeoutMs;
     this.process = new ACPSubprocess({
-      args: ['acp'],
+      args: [...options.args],
       command: options.command,
       cwd: options.cwd,
       env: options.env,

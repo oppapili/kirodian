@@ -34,6 +34,12 @@ transport in `src/providers/acp/` and keeps Kiro-specific policy here.
 
 ## Protocol and Session Rules
 
+- Launch `kiro-cli acp --agent-engine v2` so a user-level `acp.agentEngine=v3`
+  cannot move Kirodian to the V3 engine, which this adapter does not support
+  yet (#103). The flag exists from kiro-cli 2.36; `resolveKiroACPArgs` omits it
+  for older CLIs and adds it when the version cannot be read.
+- Recognize subagent spawns by `_meta.kiro` (V2 `toolName: "subagent"`, V3
+  `kind: "agent-subtask"`), never by `title`, which varies per call.
 - Kiro streams session updates over standard ACP `session/update` (no `x.ai/*`
   envelope). The only Kiro-specific notification consumed is the command/skill
   catalog pushed as `_kiro.dev/commands/available` AFTER a session is created.

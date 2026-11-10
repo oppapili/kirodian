@@ -78,10 +78,11 @@ function extractText(value: unknown): string | undefined {
   }
   if (!isRecord(value)) return undefined;
 
-  const direct = firstString(value, ['output', 'text', 'error', 'message', 'result']);
+  // V2 wraps tool output as `{ items: [{ Text }] }`.
+  const direct = firstString(value, ['output', 'text', 'Text', 'error', 'message', 'result']);
   if (direct) return direct;
   if (value.Result !== undefined) return extractText(value.Result);
-  return undefined;
+  return extractText(value.items);
 }
 
 function classifyTaskState(value: unknown): KiroTaskResult['state'] {
@@ -195,11 +196,18 @@ function getDescription(spawnToolCall: ToolCallInfo): string {
   if (typeof spawnToolCall.input.subagent_type === 'string' && spawnToolCall.input.subagent_type.trim()) {
     return `${spawnToolCall.input.subagent_type.trim()} subagent`;
   }
+  // V3 `invoke_sub_agent` names the subagent in `name`; V2 `subagent` carries no label.
+  if (typeof spawnToolCall.input.name === 'string' && spawnToolCall.input.name.trim()) {
+    return spawnToolCall.input.name.trim();
+  }
   return 'Kiro subagent';
 }
 
 function getPrompt(spawnToolCall: ToolCallInfo): string {
-  return typeof spawnToolCall.input.prompt === 'string' ? spawnToolCall.input.prompt : '';
+  // V3 `invoke_sub_agent` sends `prompt`; V2 `subagent` sends `task`.
+  const { prompt, task } = spawnToolCall.input;
+  if (typeof prompt === 'string') return prompt;
+  return typeof task === 'string' ? task : '';
 }
 
 function matchesSpawn(lifecycleToolCall: ToolCallInfo, taskId: string | undefined): boolean {

@@ -57,6 +57,7 @@ describe('KiroExecutionNativeConnection listCommands', () => {
 
   function connect(commandsAvailableTimeoutMs?: number): KiroExecutionNativeConnectionImpl {
     return new KiroExecutionNativeConnectionImpl({
+      args: ['acp'],
       command: '/opt/kiro-cli',
       cwd: '/vault',
       env: {},
@@ -155,5 +156,29 @@ describe('KiroExecutionNativeConnection listCommands', () => {
     await tick();
     // A pre-aborted caller must not even open a session.
     expect(newSessionCalled).toBe(false);
+  });
+});
+
+describe('KiroExecutionNativeConnection launch', () => {
+  let connection: KiroExecutionNativeConnectionImpl;
+
+  afterEach(async () => {
+    await connection.shutdown();
+  });
+
+  it('should launch kiro-cli with the arguments it was given', () => {
+    createNativeProcess();
+
+    connection = new KiroExecutionNativeConnectionImpl({
+      args: ['acp', '--agent-engine', 'v2'],
+      command: '/opt/kiro-cli',
+      cwd: '/vault',
+      env: {},
+      requestExtension: async () => null,
+      requestPermission: async () => ({ outcome: { outcome: 'cancelled' } }),
+      version: 'test',
+    });
+
+    expect(vi.mocked(spawn).mock.calls.at(-1)?.[1]).toEqual(['acp', '--agent-engine', 'v2']);
   });
 });
