@@ -79,7 +79,7 @@
   "overrides": {
     "@codemirror/state": "$@codemirror/state",
     "@codemirror/view": "$@codemirror/view",
-    "@hono/node-server": "2.1.5",
+    "@hono/node-server": "2.1.11",
     "@humanfs/node": "0.16.8",
     "body-parser": "2.4.0",
     "fast-uri": "3.1.9",
